@@ -117,6 +117,11 @@ class SourceService:
             )
         return result
 
+    def requeue_failed_platform_sources(self, kind: SourceKind | str) -> int:
+        """Request a fresh worker check after a shared platform login succeeds."""
+
+        return self.repository.requeue_failed_sources_for_kind(SourceKind(kind).value)
+
     def seed_existing_feeds(self) -> int:
         """Import YAML-declared sources without overwriting UI-managed records.
 

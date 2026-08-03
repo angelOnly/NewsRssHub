@@ -128,8 +128,8 @@
 
           {% if x_credential.configured %}
             <form class="inline-test-form" method="post" action="/settings/x-session/test">
-              <span>不确定 Cookie 是否失效？</span>
-              <button type="submit">立即验证当前 Cookie</button>
+              <span>验证当前 Cookie，并让此前失败的 X 来源在下一轮重新检查。</span>
+              <button type="submit">验证并刷新 X 来源</button>
             </form>
           {% endif %}
         {% endif %}

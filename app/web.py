@@ -211,8 +211,11 @@ def x_session_settings_redirect(request: Request, notice: str = "", error: str =
 @app.post("/settings/x-session")
 def save_x_session(request: Request, cookie_value: str = Form(...)) -> RedirectResponse:
     try:
-        status = get_services(request).x_sessions.save_from_web(cookie_value)
-        return x_session_redirect(notice=f"X 登录 Cookie 已验证并更新（指纹 {status.fingerprint}）。")
+        services = get_services(request)
+        status = services.x_sessions.save_from_web(cookie_value)
+        retried = services.sources.requeue_failed_platform_sources(SourceKind.X_RSSHUB)
+        suffix = f"已安排 {retried} 个此前失败的 X 来源重新抓取。" if retried else ""
+        return x_session_redirect(notice=f"X 登录 Cookie 已验证并更新（指纹 {status.fingerprint}）。{suffix}")
     except XSessionError as exc:
         return x_session_redirect(error=str(exc))
     except Exception:
@@ -222,8 +225,11 @@ def save_x_session(request: Request, cookie_value: str = Form(...)) -> RedirectR
 @app.post("/settings/x-session/test")
 def test_x_session(request: Request) -> RedirectResponse:
     try:
-        status = get_services(request).x_sessions.test_saved()
-        return x_session_redirect(notice=f"X 登录 Cookie 当前可用（指纹 {status.fingerprint}）。")
+        services = get_services(request)
+        status = services.x_sessions.test_saved()
+        retried = services.sources.requeue_failed_platform_sources(SourceKind.X_RSSHUB)
+        suffix = f"已安排 {retried} 个此前失败的 X 来源重新抓取。" if retried else ""
+        return x_session_redirect(notice=f"X 登录 Cookie 当前可用（指纹 {status.fingerprint}）。{suffix}")
     except XSessionError as exc:
         return x_session_redirect(error=str(exc))
     except Exception:

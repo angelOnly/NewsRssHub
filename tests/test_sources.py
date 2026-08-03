@@ -33,6 +33,33 @@ class SourceServiceTests(unittest.TestCase):
             repository.archive_source(source_id)
             self.assertFalse(repository.has_enabled_source_kind(SourceKind.X_RSSHUB))
 
+    def test_requeue_failed_platform_sources_marks_them_for_a_fresh_fetch(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = Database(root / "data" / "test.db")
+            repository = Repository(database)
+            database.initialize()
+
+            source_id = repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
+                "https://x.com/OpenAI",
+            )
+            repository.update_source(
+                source_id,
+                {
+                    "health_status": "error",
+                    "last_fetch_at": "2026-08-03T00:00:00+00:00",
+                    "last_error": "X 登录 Cookie 未配置",
+                },
+            )
+
+            self.assertEqual(repository.requeue_failed_sources_for_kind(SourceKind.X_RSSHUB), 1)
+            source = repository.get_source(source_id)
+            assert source is not None
+            self.assertEqual(source["health_status"], "unknown")
+            self.assertEqual(source["last_error"], "")
+            self.assertIsNone(source["last_fetch_at"])
+
     def test_auto_detection_and_configurable_source(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

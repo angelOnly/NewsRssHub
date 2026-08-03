@@ -68,6 +68,25 @@ class Repository:
             ).fetchone()
         return bool(row[0])
 
+    def requeue_failed_sources_for_kind(self, kind: str) -> int:
+        """Clear obsolete platform failures so the worker checks them immediately.
+
+        A successful shared-login check proves only the platform session.  Each
+        source still needs its own fetch before it can be marked healthy, so it
+        moves to ``unknown`` rather than incorrectly becoming healthy here.
+        """
+
+        with self.database.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE sources
+                SET health_status = 'unknown', last_fetch_at = NULL, last_error = ?, updated_at = ?
+                WHERE kind = ? AND enabled = 1 AND archived = 0 AND health_status = 'error'
+                """,
+                ("", iso_now(), kind),
+            )
+        return int(cursor.rowcount)
+
     def get_source(self, source_id: int) -> dict[str, Any] | None:
         with self.database.read() as conn:
             row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()

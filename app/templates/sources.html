@@ -44,7 +44,7 @@
           {% elif source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
             <span class="status attention">需登录</span>
           {% else %}
-            <span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'抓取异常','unknown':'待验证','archived':'已归档'}.get(source.health_status, source.health_status) }}</span>
+            <span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'抓取异常','unknown':'等待抓取','archived':'已归档'}.get(source.health_status, source.health_status) }}</span>
           {% endif %}
         </td>
         <td>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
