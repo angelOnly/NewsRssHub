@@ -88,6 +88,9 @@ class WebTests(unittest.TestCase):
 
                     dashboard = client.get("/?tier=must_read&period=all")
                     self.assertEqual(dashboard.status_code, 200)
+                    self.assertIn('href="/static/app.css?v=', dashboard.text)
+                    self.assertIn('href="/static/x-session.css?v=', dashboard.text)
+                    self.assertNotIn('href="http://testserver/static/', dashboard.text)
                     self.assertIn("必看", dashboard.text)
                     self.assertIn("重要更新", dashboard.text)
                     self.assertIn("资讯速览", dashboard.text)
