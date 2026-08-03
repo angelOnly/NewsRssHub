@@ -9,6 +9,7 @@ import yaml
 from app.config import Settings
 from app.domain.models import SourceDraft, SourceKind, ValidationResult
 from app.plugins.base import PluginRegistry
+from app.services.connections import ConnectionCatalog
 from app.storage.repository import Repository
 
 
@@ -19,12 +20,23 @@ THEME_PRIORITY = {
 
 
 class SourceService:
-    def __init__(self, repository: Repository, registry: PluginRegistry, settings: Settings) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        registry: PluginRegistry,
+        settings: Settings,
+        connections: ConnectionCatalog | None = None,
+    ) -> None:
         self.repository = repository
         self.registry = registry
         self.settings = settings
+        self.connections = connections or ConnectionCatalog()
 
     def add_source(self, draft: SourceDraft, validate: bool = True) -> tuple[dict[str, Any], ValidationResult | None]:
+        # Enforce the same platform-first rule used by the web setup flow.  It
+        # runs before inserting a source, so an unconfigured X account never
+        # becomes a broken row in the database.
+        self.connections.ensure_source_ready(draft.kind)
         plugin = self.registry.get(draft.kind)
         locator = plugin.normalize_locator(draft.locator)
         feed_url = plugin.resolve_feed_url(locator, self.settings)

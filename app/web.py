@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import load_user_profile
 from app.domain.models import SourceDraft, SourceKind
 from app.runtime import ApplicationServices, build_services
+from app.services.connections import ConnectionRequiredError
 from app.services.llm_connection import LLMConnectionError
 from app.services.x_session import XSessionError
 
@@ -86,6 +87,7 @@ def render(request: Request, name: str, context: dict[str, Any] | None = None, s
         "active_path": request.url.path,
         "x_credential": get_services(request).x_sessions.status(),
         "llm_credential": get_services(request).llm_connections.status(),
+        "platform_connections": get_services(request).connections.source_connections(),
     }
     if context:
         base.update(context)
@@ -181,6 +183,19 @@ def sources(request: Request, notice: str = "", error: str = "") -> HTMLResponse
     )
 
 
+@app.get("/connections", response_class=HTMLResponse)
+def connections(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
+    return render(
+        request,
+        "connections.html",
+        {
+            "connections": get_services(request).connections.source_connections(),
+            "notice": notice,
+            "error": error,
+        },
+    )
+
+
 @app.get("/settings/x-session", response_class=HTMLResponse)
 def x_session_settings(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
     return render(
@@ -264,12 +279,23 @@ def test_llm_settings(request: Request) -> RedirectResponse:
 
 
 @app.get("/sources/new", response_class=HTMLResponse)
-def new_source_form(request: Request, error: str = "") -> HTMLResponse:
+def new_source_form(request: Request, error: str = "", connection: str = "") -> HTMLResponse:
     services = get_services(request)
+    required_connection = next(
+        (item for item in services.connections.source_connections() if item.key == connection),
+        None,
+    )
     return render(
         request,
         "source_form.html",
-        {"source": None, "choices": services.sources.form_choices(), "error": error, "mode": "new"},
+        {
+            "source": None,
+            "choices": services.sources.form_choices(),
+            "connections": services.connections.source_connections(),
+            "required_connection": required_connection,
+            "error": error,
+            "mode": "new",
+        },
     )
 
 
@@ -330,6 +356,11 @@ def create_source(
         message = validation.message if validation else "来源已添加。"
         prefix = "已添加：" if validation and validation.ok else "已保存，但需要检查："
         return sources_redirect(notice=f"{prefix}{message}")
+    except ConnectionRequiredError as exc:
+        return RedirectResponse(
+            f"/sources/new?{urlencode({'error': str(exc), 'connection': exc.connection.key})}",
+            status_code=303,
+        )
     except Exception as exc:
         return RedirectResponse(f"/sources/new?{urlencode({'error': str(exc)})}", status_code=303)
 

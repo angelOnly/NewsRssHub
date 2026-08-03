@@ -30,7 +30,7 @@
   </section>
 
   {% if credential.state == 'needs_key' %}
-  <div class="notice error">请先在部署环境的 <code>.env</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是一次性主密钥，不是 X Cookie；Cookie 更新后无需重启服务。</div>
+  <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是一次性主密钥，不是 X Cookie；Cookie 更新后无需重启服务。</div>
   {% else %}
   <form class="source-form credential-form" method="post" action="/settings/x-session" autocomplete="off">
     <label>

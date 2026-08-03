@@ -6,6 +6,32 @@
   <header class="page-head compact">
     <div><p class="eyebrow">SOURCE SETUP</p><h1>{{ '编辑来源' if source else '添加来源' }}</h1><p class="subhead">保存时会自动进行一次连接验证。</p></div>
   </header>
+  {% if not source %}
+  <section class="source-connection-guide">
+    <div class="source-connection-guide-head">
+      <div><p class="eyebrow">STEP 1 · PLATFORM ACCESS</p><h2>先确认平台连接</h2></div>
+      <a href="/connections">查看全部平台连接</a>
+    </div>
+    {% if required_connection %}
+    <div class="connection-required-notice">
+      <strong>{{ required_connection.platform }} 尚未就绪</strong>
+      <span>{{ required_connection.message }}</span>
+      {% if required_connection.setup_url %}<a href="{{ required_connection.setup_url }}">{{ required_connection.setup_label }}</a>{% endif %}
+    </div>
+    {% endif %}
+    <div class="source-connection-list">
+      {% for connection in connections %}
+      <div class="source-connection-item {{ connection.state }}">
+        <span class="status {{ 'healthy' if connection.usable else 'error' }}">{{ '已就绪' if connection.usable else '需先配置' }}</span>
+        <div><strong>{{ connection.platform }}</strong><small>{{ connection.message }}</small></div>
+        {% if connection.requires_credentials and not connection.usable %}
+          <a href="{{ connection.setup_url }}">{{ connection.setup_label }}</a>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
   {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
   <form class="source-form" method="post" action="{{ '/sources/' ~ source.id ~ '/edit' if source else '/sources/new' }}">
     <label>来源名称<input name="name" required maxlength="120" value="{{ source.name if source else '' }}" placeholder="例如 OpenAI Developers"></label>

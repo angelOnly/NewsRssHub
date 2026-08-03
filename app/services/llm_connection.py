@@ -152,27 +152,27 @@ class LLMConnectionService:
             )
 
         try:
-            environment_config = self._environment_config()
+            file_config = self._file_config()
         except LLMConnectionError as exc:
             return LLMConnectionStatus(
                 state="error",
                 message=str(exc),
                 configured=False,
                 enabled=False,
-                source="environment",
+                source="config",
                 base_url="",
                 model_name="",
             )
-        if environment_config:
+        if file_config:
             return LLMConnectionStatus(
-                state="environment",
-                message="正在使用部署环境中的模型配置；可在此页验证并迁移为可在线维护的配置。",
+                state="config",
+                message="正在使用 config.yml 中的模型配置；可在此页验证或迁移为可在线维护的配置。",
                 configured=True,
-                enabled=environment_config.enabled,
-                source="environment",
-                base_url=environment_config.base_url,
-                model_name=environment_config.model_name,
-                fingerprint=_fingerprint(environment_config.api_key),
+                enabled=file_config.enabled,
+                source="config",
+                base_url=file_config.base_url,
+                model_name=file_config.model_name,
+                fingerprint=_fingerprint(file_config.api_key),
             )
         if not self.settings.credential_encryption_key:
             return LLMConnectionStatus(
@@ -202,7 +202,7 @@ class LLMConnectionService:
             except LLMConnectionError:
                 return None
         try:
-            return self._environment_config()
+            return self._file_config()
         except LLMConnectionError:
             return None
 
@@ -258,7 +258,7 @@ class LLMConnectionService:
         except (TypeError, ValueError) as exc:
             raise LLMConfigurationError("CREDENTIAL_ENCRYPTION_KEY 格式无效。") from exc
 
-    def _environment_config(self) -> LLMRuntimeConfig | None:
+    def _file_config(self) -> LLMRuntimeConfig | None:
         if not self.settings.openai_api_key:
             return None
         return LLMRuntimeConfig(
@@ -266,7 +266,7 @@ class LLMConnectionService:
             base_url=_normalize_base_url(self.settings.openai_base_url),
             model_name=_normalize_model_name(self.settings.openai_model_name),
             enabled=self.settings.llm_enabled,
-            source="environment",
+            source="config",
             request_timeout=self.settings.request_timeout,
         )
 

@@ -11,14 +11,14 @@
 
 ## Docker 启动
 
-1. 复制 `.env.example` 为 `.env`，填入模型密钥和模型地址。不要把密钥写进 `config.yml`。
-2. 为 X Cookie 设置一次加密主密钥（这不是 X Cookie）：
+1. 在 `config.yml` 中填写 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 与 `OPENAI_MODEL_NAME`。GitHub/Docker 部署会直接使用这份配置。
+2. 如果要在网页中维护 X Cookie 或模型连接，为它设置一次加密主密钥（这不是 X Cookie）：
 
    ```bash
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
    ```
 
-   将输出填入 `.env` 的 `CREDENTIAL_ENCRYPTION_KEY`。
+   将输出填入 `config.yml` 的 `CREDENTIAL_ENCRYPTION_KEY`。
 3. 确认 `config.yml` 中的 RSSHub 地址正确。
 4. 执行：
 
@@ -42,4 +42,4 @@ uvicorn app.web:app --reload
 
 ## 安全提示
 
-旧版 `config.yml` 中的模型配置仅为兼容保留。建议撤销其中已暴露的旧密钥，改用 `.env` 的 `OPENAI_API_KEY`。
+`config.yml` 是唯一的部署配置来源；项目不再读取或需要 `.env`。请将包含 API Key 的仓库设为私有仓库。

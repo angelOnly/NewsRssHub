@@ -42,10 +42,11 @@ class SourceServiceTests(unittest.TestCase):
             self.assertEqual(service.detect_kind("r/comfyui"), SourceKind.REDDIT)
             self.assertEqual(service.detect_kind("https://example.test/feed.xml"), SourceKind.RSS)
 
+            self.assertEqual(service.registry.get(SourceKind.X_RSSHUB).normalize_locator("@OpenAI"), "OpenAI")
             source, validation = service.add_source(
-                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="@OpenAI"),
+                SourceDraft(name="ComfyUI", kind=SourceKind.REDDIT, locator="r/comfyui"),
                 validate=False,
             )
             self.assertIsNone(validation)
-            self.assertEqual(source["locator"], "OpenAI")
-            self.assertEqual(source["feed_url"], "https://x.com/OpenAI")
+            self.assertEqual(source["locator"], "r/comfyui")
+            self.assertEqual(source["feed_url"], "https://www.reddit.com/r/comfyui/.rss")

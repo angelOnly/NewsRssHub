@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+from cryptography.fernet import Fernet
+
+from app.config import Settings
+from app.domain.models import SourceDraft, SourceKind
+from app.plugins.registry import build_source_registry
+from app.services.connections import ConnectionCatalog, ConnectionRequiredError
+from app.services.sources import SourceService
+from app.services.x_session import XSessionService
+from app.storage.database import Database
+from app.storage.repository import Repository
+
+
+class FakeXClient:
+    def __init__(self, cookies: dict[str, str]) -> None:
+        self.cookies = cookies
+
+    def validate(self) -> dict[str, str]:
+        return self.cookies
+
+    def close(self) -> None:
+        return None
+
+
+def build_settings(root: Path) -> Settings:
+    source_dir = root / "sources"
+    source_dir.mkdir()
+    return Settings(
+        root_dir=root,
+        source_dir=source_dir,
+        data_dir=root / "data",
+        database_path=root / "data" / "test.db",
+        request_timeout=5,
+        log_level="INFO",
+        rsshub_base_url="https://rsshub.example.test",
+        rsshub_exclude_paths=(),
+        llm_enabled=False,
+        openai_api_key=None,
+        openai_base_url="https://api.example.test/v1",
+        openai_model_name="test-model",
+        credential_encryption_key=Fernet.generate_key().decode("ascii"),
+        timezone="Asia/Shanghai",
+    )
+
+
+class ConnectionCatalogTests(unittest.TestCase):
+    def test_x_source_is_blocked_until_a_verified_connection_exists(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            x_sessions = XSessionService(repository, settings, client_factory=FakeXClient)
+            catalog = ConnectionCatalog(x_sessions)
+            sources = SourceService(
+                repository,
+                build_source_registry(x_sessions),
+                settings,
+                catalog,
+            )
+            draft = SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI")
+
+            with self.assertRaises(ConnectionRequiredError):
+                sources.add_source(draft, validate=False)
+            self.assertEqual(repository.count_sources(), 0)
+
+            x_sessions.save_from_web("auth_token=known-good-cookie")
+            connection = catalog.ensure_source_ready(SourceKind.X_RSSHUB)
+            self.assertTrue(connection.usable)
+            source, _ = sources.add_source(draft, validate=False)
+            self.assertEqual(source["locator"], "OpenAI")
+
+    def test_public_platforms_do_not_request_unneeded_credentials(self) -> None:
+        catalog = ConnectionCatalog()
+        for kind in (SourceKind.REDDIT, SourceKind.RSS):
+            connection = catalog.ensure_source_ready(kind)
+            self.assertFalse(connection.requires_credentials)
+            self.assertTrue(connection.usable)
+            self.assertEqual(connection.state, "public")

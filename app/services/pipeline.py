@@ -7,6 +7,7 @@ from app.plugins.base import PluginRegistry
 from app.services.analyzer import AnalysisService
 from app.services.briefs import BriefService
 from app.services.collector import Collector
+from app.services.connections import ConnectionCatalog
 from app.services.events import EventService
 from app.services.llm_connection import LLMConnectionService
 from app.services.sources import SourceService
@@ -22,12 +23,14 @@ class IntelligencePipeline:
         registry: PluginRegistry,
         settings: Settings,
         llm_connections: LLMConnectionService | None = None,
+        source_connections: ConnectionCatalog | None = None,
     ) -> None:
         self.repository = repository
         self.registry = registry
         self.settings = settings
         self.llm_connections = llm_connections or LLMConnectionService(repository, settings)
-        self.sources = SourceService(repository, registry, settings)
+        self.source_connections = source_connections or ConnectionCatalog()
+        self.sources = SourceService(repository, registry, settings, self.source_connections)
         self.collector = Collector(repository, registry, EventService(repository), settings)
         self.analyzer = AnalysisService(repository, settings, self.llm_connections)
         self.briefs = BriefService(repository, settings)

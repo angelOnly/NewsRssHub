@@ -1,29 +1,21 @@
 """Configuration loading for the NewsRSSHub application.
 
-The legacy ``config.yml`` is kept compatible so existing installations do not
-break. Environment variables always take precedence and are the intended way
-to pass credentials in Docker.
+``config.yml`` is the sole runtime configuration file for this personal
+deployment, including the model connection and encryption key.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
-from dotenv import load_dotenv
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = ROOT_DIR / "data"
-
-# Docker Compose supplies env_file itself; loading here also makes local
-# ``uvicorn app.web:app`` honour a private .env file without touching config.yml.
-load_dotenv(ROOT_DIR / ".env", override=False)
-
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -89,36 +81,37 @@ def build_settings() -> Settings:
     rsshub_config = config.get("rsshub", {})
     llm_config = config.get("llm", {})
 
-    source_dir = ROOT_DIR / os.getenv("APP_SOURCE_DIR", app_config.get("source_dir", "sources"))
-    data_dir = Path(os.getenv("APP_DATA_DIR", str(DEFAULT_DATA_DIR)))
+    source_dir = ROOT_DIR / str(app_config.get("source_dir", "sources"))
+    data_dir = Path(str(app_config.get("data_dir", DEFAULT_DATA_DIR)))
     if not data_dir.is_absolute():
         data_dir = ROOT_DIR / data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    database_raw = os.getenv("APP_DATABASE_PATH", database_config.get("path", "rss_news.db"))
+    database_raw = str(database_config.get("path", "rss_news.db"))
     database_path = _resolve_database_path(database_raw, data_dir)
 
-    legacy_api_key = config.get("OPENAI_API_KEY")
-    api_key = os.getenv("OPENAI_API_KEY") or legacy_api_key
-    base_url = os.getenv("OPENAI_BASE_URL") or config.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-    model_name = os.getenv("OPENAI_MODEL_NAME") or config.get("OPENAI_MODEL_NAME") or "gpt-4.1-mini"
-    enabled_default = llm_config.get("enabled", bool(api_key))
+    api_key = config.get("OPENAI_API_KEY") or None
+    base_url = config.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+    model_name = config.get("OPENAI_MODEL_NAME") or "gpt-4.1-mini"
+    enabled_default = llm_config.get("enabled")
+    if enabled_default is None:
+        enabled_default = config.get("LLM_ENABLED")
 
     return Settings(
         root_dir=ROOT_DIR,
         source_dir=source_dir,
         data_dir=data_dir,
         database_path=database_path,
-        request_timeout=int(os.getenv("APP_REQUEST_TIMEOUT", app_config.get("request_timeout", 30))),
-        log_level=os.getenv("APP_LOG_LEVEL", app_config.get("log_level", "INFO")),
-        rsshub_base_url=(os.getenv("RSSHUB_BASE_URL") or rsshub_config.get("base_url") or "https://rsshub.app").rstrip("/"),
+        request_timeout=int(app_config.get("request_timeout", 30)),
+        log_level=str(app_config.get("log_level", "INFO")),
+        rsshub_base_url=str(rsshub_config.get("base_url") or "https://rsshub.app").rstrip("/"),
         rsshub_exclude_paths=tuple(rsshub_config.get("exclude_paths", [])),
-        llm_enabled=_as_bool(os.getenv("LLM_ENABLED"), _as_bool(enabled_default, bool(api_key))),
+        llm_enabled=_as_bool(enabled_default, bool(api_key)),
         openai_api_key=api_key,
         openai_base_url=base_url.rstrip("/"),
         openai_model_name=model_name,
-        credential_encryption_key=os.getenv("CREDENTIAL_ENCRYPTION_KEY") or None,
-        timezone=os.getenv("APP_TIMEZONE", "Asia/Shanghai"),
+        credential_encryption_key=config.get("CREDENTIAL_ENCRYPTION_KEY") or None,
+        timezone=str(app_config.get("timezone", "Asia/Shanghai")),
     )
 
 

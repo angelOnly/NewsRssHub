@@ -18,10 +18,10 @@
   <section class="credential-card {{ credential.state }}">
     <div class="credential-status-row">
       <div>
-        <span class="status {{ 'healthy' if credential.state in ('valid', 'environment') else 'error' }}">
+        <span class="status {{ 'healthy' if credential.state in ('valid', 'config') else 'error' }}">
           {{ {
             'valid': '可用',
-            'environment': '环境配置',
+            'config': '配置文件',
             'missing': '未配置',
             'invalid': '已失效',
             'error': '需重试',
@@ -42,7 +42,7 @@
   </section>
 
   {% if credential.state == 'needs_key' %}
-  <div class="notice error">请先在部署环境的 <code>.env</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是用于加密保存 API Key 的主密钥，不是模型 API Key 本身。</div>
+  <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是用于加密保存 API Key 的主密钥，不是模型 API Key 本身。</div>
   {% else %}
   <form class="source-form credential-form" method="post" action="/settings/llm" autocomplete="off">
     <label>
