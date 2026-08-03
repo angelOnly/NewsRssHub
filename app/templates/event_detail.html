@@ -12,6 +12,9 @@
     <h1>{{ analysis.headline or event.title }}</h1>
     <p class="detail-lede">{{ analysis.summary or event.summary }}</p>
     <div class="tag-row">{% for tag in event.tags %}<span class="tag">{{ tag }}</span>{% endfor %}</div>
+    <form class="event-feedback event-feedback-detail" method="post" action="/events/{{ event.id }}/not-interested">
+      <button type="submit">不感兴趣</button>
+    </form>
   </header>
 
   <section class="detail-grid">

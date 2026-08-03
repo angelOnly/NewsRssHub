@@ -101,6 +101,18 @@ def sources_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return RedirectResponse(f"/sources?{query}" if query else "/sources", status_code=303)
 
 
+def dashboard_redirect(*, period: str = "24h", topic: str = "", page: int = 1, notice: str = "") -> RedirectResponse:
+    query = urlencode(
+        {
+            "period": period,
+            "topic": topic,
+            "page": max(1, page),
+            **({"notice": notice} if notice else {}),
+        }
+    )
+    return RedirectResponse(f"/?{query}", status_code=303)
+
+
 def settings_redirect(*, anchor: str = "", notice: str = "", error: str = "") -> RedirectResponse:
     query = urlencode({key: value for key, value in {"notice": notice, "error": error}.items() if value})
     target = f"/settings?{query}" if query else "/settings"
@@ -163,6 +175,21 @@ def event_detail(request: Request, event_id: int) -> HTMLResponse:
     if not event:
         raise HTTPException(status_code=404, detail="未找到该事件")
     return render(request, "event_detail.html", {"event": event, "analysis": (event.get("analysis") or {}).get("payload", {})})
+
+
+@app.post("/events/{event_id}/not-interested")
+def mark_event_not_interested(
+    request: Request,
+    event_id: int,
+    period: str = Form("24h"),
+    topic: str = Form(""),
+    page: int = Form(1),
+) -> RedirectResponse:
+    repository = get_services(request).repository
+    if not repository.get_event(event_id):
+        raise HTTPException(status_code=404, detail="未找到该事件")
+    repository.mark_event_not_interested(event_id)
+    return dashboard_redirect(period=period, topic=topic, page=page, notice="已隐藏这条内容。")
 
 
 @app.get("/briefs", response_class=HTMLResponse)
@@ -422,7 +449,9 @@ def toggle_source(request: Request, source_id: int) -> RedirectResponse:
     if not source:
         raise HTTPException(status_code=404, detail="未找到来源")
     repository.update_source(source_id, {"enabled": int(not source["enabled"])})
-    return sources_redirect(notice="来源状态已更新。")
+    if source["enabled"]:
+        return sources_redirect(notice="来源已暂停；刷新首页或简报后，会立即隐藏它已有的内容。")
+    return sources_redirect(notice="来源已启用，将按设定频率恢复抓取。")
 
 
 @app.post("/sources/{source_id}/archive")

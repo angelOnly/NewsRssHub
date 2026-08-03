@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -33,6 +34,39 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     for key in ("is_official", "enabled", "archived", "blacklisted"):
         if key in data:
             data[key] = bool(data[key])
+    return data
+
+
+def _visible_event_clause(event_alias: str = "e") -> str:
+    """Only show events that still have a live, non-blacklisted source item."""
+
+    return f"""
+        EXISTS (
+            SELECT 1
+            FROM event_items visible_ei
+            JOIN items visible_i ON visible_i.id = visible_ei.item_id
+            JOIN sources visible_s ON visible_s.id = visible_i.source_id
+            WHERE visible_ei.event_id = {event_alias}.id
+              AND visible_s.enabled = 1
+              AND visible_s.archived = 0
+              AND visible_i.blacklisted = 0
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM feedback visible_feedback
+            WHERE visible_feedback.event_id = {event_alias}.id
+              AND visible_feedback.action = 'not_interested'
+        )
+    """
+
+
+def _event_row_to_dict(row: Any) -> dict[str, Any]:
+    """Expose the analyzed Chinese headline without replacing the raw source title."""
+
+    data = _row_to_dict(row)
+    payload = _decode_json(data.pop("display_payload_json", None), {})
+    headline = str(payload.get("headline") or "").strip() if isinstance(payload, dict) else ""
+    data["display_title"] = headline or str(data.get("title") or "")
     return data
 
 
@@ -286,6 +320,20 @@ class Repository:
             row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
+    def mark_event_not_interested(self, event_id: int) -> None:
+        """Hide one event from reader-facing lists without deleting its history."""
+
+        now = iso_now()
+        with self.database.transaction() as conn:
+            conn.execute(
+                "DELETE FROM feedback WHERE event_id = ? AND action = 'not_interested'",
+                (event_id,),
+            )
+            conn.execute(
+                "INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'not_interested', ?)",
+                (event_id, now),
+            )
+
     # Events ------------------------------------------------------------------
     def find_event_by_fingerprint(self, fingerprint: str) -> dict[str, Any] | None:
         with self.database.read() as conn:
@@ -406,40 +454,70 @@ class Repository:
         cutoff_map = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         clauses: list[str] = []
         values: list[Any] = []
+        clauses.append(_visible_event_clause("e"))
         if period in cutoff_map:
             clauses.append("e.last_seen_at >= ?")
             values.append((utc_now() - cutoff_map[period]).isoformat())
         if topic:
             clauses.append("e.tags_json LIKE ?")
             values.append(f"%{topic}%")
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f"WHERE {' AND '.join(clauses)}"
         query = f"""
             SELECT e.*, s.name AS primary_source_name, s.kind AS primary_source_kind,
-                   i.published_at AS primary_published_at, i.canonical_url AS primary_url
+                   i.published_at AS primary_published_at, i.canonical_url AS primary_url,
+                   a.payload_json AS display_payload_json,
+                   (
+                       SELECT COUNT(DISTINCT visible_i.source_id)
+                       FROM event_items visible_ei
+                       JOIN items visible_i ON visible_i.id = visible_ei.item_id
+                       JOIN sources visible_s ON visible_s.id = visible_i.source_id
+                       WHERE visible_ei.event_id = e.id
+                         AND visible_s.enabled = 1
+                         AND visible_s.archived = 0
+                         AND visible_i.blacklisted = 0
+                   ) AS visible_source_count
             FROM events e
-            LEFT JOIN items i ON i.id = e.primary_item_id
+            LEFT JOIN items i ON i.id = (
+                SELECT visible_i.id
+                FROM event_items visible_ei
+                JOIN items visible_i ON visible_i.id = visible_ei.item_id
+                JOIN sources visible_s ON visible_s.id = visible_i.source_id
+                WHERE visible_ei.event_id = e.id
+                  AND visible_s.enabled = 1
+                  AND visible_s.archived = 0
+                  AND visible_i.blacklisted = 0
+                ORDER BY visible_i.relevance_score DESC, COALESCE(visible_i.published_at, visible_i.fetched_at) DESC
+                LIMIT 1
+            )
             LEFT JOIN sources s ON s.id = i.source_id
+            LEFT JOIN analyses a ON a.id = (
+                SELECT latest_a.id
+                FROM analyses latest_a
+                WHERE latest_a.event_id = e.id
+                ORDER BY latest_a.version DESC, latest_a.id DESC
+                LIMIT 1
+            )
             {where}
             ORDER BY e.importance_score DESC, e.last_seen_at DESC
             LIMIT ? OFFSET ?
         """
         with self.database.read() as conn:
             rows = conn.execute(query, (*values, limit, offset)).fetchall()
-        return [_row_to_dict(row) for row in rows]
+        return [_event_row_to_dict(row) for row in rows]
 
     def count_events(self, period: str = "24h", topic: str = "") -> int:
         cutoff_map = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
-        clauses: list[str] = []
+        clauses: list[str] = [_visible_event_clause("e")]
         values: list[Any] = []
         if period in cutoff_map:
-            clauses.append("last_seen_at >= ?")
+            clauses.append("e.last_seen_at >= ?")
             values.append((utc_now() - cutoff_map[period]).isoformat())
         if topic:
-            clauses.append("tags_json LIKE ?")
+            clauses.append("e.tags_json LIKE ?")
             values.append(f"%{topic}%")
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f"WHERE {' AND '.join(clauses)}"
         with self.database.read() as conn:
-            row = conn.execute(f"SELECT COUNT(*) FROM events {where}", values).fetchone()
+            row = conn.execute(f"SELECT COUNT(*) FROM events e {where}", values).fetchone()
         return int(row[0])
 
     def get_event(self, event_id: int) -> dict[str, Any] | None:
@@ -470,15 +548,61 @@ class Repository:
     def list_pending_events(self, limit: int = 20) -> list[dict[str, Any]]:
         with self.database.read() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM events
                 WHERE analysis_status IN ('pending', 'retry')
+                  AND {_visible_event_clause('events')}
                 ORDER BY importance_score DESC, last_seen_at DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
+
+    def requeue_unlocalized_headlines(self, limit: int = 20) -> int:
+        """Give existing English-only headlines one upgraded model pass.
+
+        Version two is a one-time localization retry.  It avoids turning a
+        temporary model failure into a repeated request on every worker cycle.
+        """
+
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT e.id, a.payload_json
+                FROM events e
+                JOIN analyses a ON a.id = (
+                    SELECT latest_a.id
+                    FROM analyses latest_a
+                    WHERE latest_a.event_id = e.id
+                    ORDER BY latest_a.version DESC, latest_a.id DESC
+                    LIMIT 1
+                )
+                WHERE e.analysis_version < 2
+                  AND e.analysis_status IN ('complete', 'fallback')
+                  AND {_visible_event_clause('e')}
+                ORDER BY e.importance_score DESC, e.last_seen_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 50)),),
+            ).fetchall()
+
+        event_ids: list[int] = []
+        for row in rows:
+            payload = _decode_json(row["payload_json"], {})
+            headline = str(payload.get("headline") or "") if isinstance(payload, dict) else ""
+            if not re.search(r"[\u4e00-\u9fff]", headline):
+                event_ids.append(int(row["id"]))
+        if not event_ids:
+            return 0
+
+        placeholders = ", ".join("?" for _ in event_ids)
+        with self.database.transaction() as conn:
+            conn.execute(
+                f"UPDATE events SET analysis_status = 'retry', updated_at = ? WHERE id IN ({placeholders})",
+                (iso_now(), *event_ids),
+            )
+        return len(event_ids)
 
     def save_analysis(
         self,
@@ -552,9 +676,22 @@ class Repository:
         placeholders = ", ".join("?" for _ in ids)
         with self.database.read() as conn:
             rows = conn.execute(
-                f"SELECT * FROM events WHERE id IN ({placeholders})", ids
+                f"""
+                SELECT e.*, a.payload_json AS display_payload_json
+                FROM events e
+                LEFT JOIN analyses a ON a.id = (
+                    SELECT latest_a.id
+                    FROM analyses latest_a
+                    WHERE latest_a.event_id = e.id
+                    ORDER BY latest_a.version DESC, latest_a.id DESC
+                    LIMIT 1
+                )
+                WHERE e.id IN ({placeholders})
+                  AND {_visible_event_clause('e')}
+                """,
+                ids,
             ).fetchall()
-        by_id = {int(row["id"]): _row_to_dict(row) for row in rows}
+        by_id = {int(row["id"]): _event_row_to_dict(row) for row in rows}
         return [by_id[event_id] for event_id in ids if event_id in by_id]
 
     def dashboard_stats(self) -> dict[str, int]:
@@ -564,9 +701,13 @@ class Repository:
                 "SELECT COUNT(*) FROM sources WHERE enabled = 1 AND archived = 0"
             ).fetchone()[0]
             healthy_count = conn.execute(
-                "SELECT COUNT(*) FROM sources WHERE health_status = 'healthy' AND archived = 0"
+                "SELECT COUNT(*) FROM sources WHERE health_status = 'healthy' AND enabled = 1 AND archived = 0"
             ).fetchone()[0]
             event_count = conn.execute(
-                "SELECT COUNT(*) FROM events WHERE last_seen_at >= ?", ((now - timedelta(hours=24)).isoformat(),)
+                f"""
+                SELECT COUNT(*) FROM events e
+                WHERE e.last_seen_at >= ? AND {_visible_event_clause('e')}
+                """,
+                ((now - timedelta(hours=24)).isoformat(),),
             ).fetchone()[0]
         return {"source_count": int(source_count), "healthy_count": int(healthy_count), "event_count": int(event_count)}

@@ -81,7 +81,7 @@ class OpenAICompatibleAnalyzer:
             "event_title": event["title"],
             "interest_tags": event.get("tags", []),
             "required_schema": {
-                "headline": "不超过35字",
+                "headline": "不超过35字的简体中文标题；原题为英文时必须准确翻译，不要保留英文原题",
                 "summary": "2到3句，不超过300字",
                 "why_it_matters": "不超过120字",
                 "facts": [{"statement": "可验证事实", "source": "对应URL"}],

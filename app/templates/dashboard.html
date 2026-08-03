@@ -10,6 +10,8 @@
   <a class="button button-primary" href="/sources/new">＋ 添加来源</a>
 </header>
 
+{% if request.query_params.get('notice') %}<div class="notice success">{{ request.query_params.get('notice') }}</div>{% endif %}
+
 {% if has_x_sources and x_credential.state != 'valid' %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
   <div>
@@ -50,24 +52,30 @@
   {% if events %}
     <div class="event-list">
       {% for event in events %}
-      <a class="event-card" href="/events/{{ event.id }}" aria-label="查看 {{ event.title }} 的详情">
+      <article class="event-card">
         <div class="event-rank">
           <span class="rank-score">{{ '%.0f'|format(event.importance_score) }}</span>
           <span>{{ event.importance_score|importance_label }}</span>
         </div>
-        <div class="event-main">
+        <a class="event-main" href="/events/{{ event.id }}" aria-label="查看 {{ event.display_title }} 的详情">
           <div class="event-meta">
             <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
             <span>{{ event.last_seen_at|relative_time }}</span>
-            {% if event.source_count > 1 %}<span>{{ event.source_count }} 个来源印证</span>{% endif %}
+            {% if event.visible_source_count > 1 %}<span>{{ event.visible_source_count }} 个来源印证</span>{% endif %}
           </div>
-          <h3>{{ event.title }}</h3>
+          <h3>{{ event.display_title }}</h3>
           <p>{{ event.summary or '正在生成摘要…' }}</p>
           {% if event.why_matters %}<small class="why">为何值得看：{{ event.why_matters }}</small>{% endif %}
           {% if event.tags %}<div class="tag-row">{% for tag in event.tags[:3] %}<span class="tag">{{ tag }}</span>{% endfor %}</div>{% endif %}
-        </div>
-        <span class="card-arrow" aria-hidden="true">→</span>
-      </a>
+        </a>
+        <form class="event-feedback" method="post" action="/events/{{ event.id }}/not-interested">
+          <input type="hidden" name="period" value="{{ period }}">
+          <input type="hidden" name="topic" value="{{ topic }}">
+          <input type="hidden" name="page" value="{{ page }}">
+          <button type="submit" title="隐藏这条内容">不感兴趣</button>
+        </form>
+        <a class="card-arrow" href="/events/{{ event.id }}" aria-label="查看详情">→</a>
+      </article>
       {% endfor %}
     </div>
     {% if has_more %}

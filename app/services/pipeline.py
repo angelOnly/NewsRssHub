@@ -40,6 +40,9 @@ class IntelligencePipeline:
 
     def run_once(self, force: bool = False) -> dict[str, object]:
         collected = self.collector.collect_due_sources(force=force)
+        runtime = self.llm_connections.runtime_config()
+        if runtime and runtime.enabled:
+            self.repository.requeue_unlocalized_headlines()
         analyzed = self.analyzer.analyze_pending(limit=15)
         brief = self.briefs.generate_today()
         return {
