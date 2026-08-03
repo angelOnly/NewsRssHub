@@ -17,8 +17,6 @@ class SourceDraft:
     name: str
     kind: SourceKind
     locator: str
-    category: str = "未分类"
-    priority: int = 5
     is_official: bool = False
     poll_interval_minutes: int = 60
     fallback_url: str = ""
@@ -43,10 +41,3 @@ class ValidationResult:
     message: str
     feed_title: str = ""
     item_count: int = 0
-
-
-@dataclass(slots=True)
-class ScoreResult:
-    score: float
-    tags: list[str]
-    is_blacklisted: bool = False

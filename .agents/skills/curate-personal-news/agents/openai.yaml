@@ -1,0 +1,4 @@
+interface:
+  display_name: "个人资讯筛选"
+  short_description: "依据用户画像完成同一资讯合并、重复去除和四层优先级判断"
+  default_prompt: "使用 $curate-personal-news 合并重复资讯，并判断每条内容属于四个层级中的哪一层。"

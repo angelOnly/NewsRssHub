@@ -13,12 +13,6 @@ from app.services.connections import ConnectionCatalog
 from app.storage.repository import Repository
 
 
-THEME_PRIORITY = {
-    "AI_Tech": 9,
-    "GeneralNews": 7,
-}
-
-
 class SourceService:
     def __init__(
         self,
@@ -79,8 +73,6 @@ class SourceService:
             source_id,
             {
                 "name": draft.name,
-                "category": draft.category,
-                "priority": draft.priority,
                 "is_official": int(draft.is_official),
                 "enabled": int(draft.enabled),
                 "poll_interval_minutes": draft.poll_interval_minutes,
@@ -149,7 +141,6 @@ class SourceService:
             if not locator:
                 continue
             try:
-                priority = max(1, min(int(entry.get("priority", THEME_PRIORITY.get(str(entry.get("theme")), 6))), 10))
                 poll_interval = max(5, min(int(entry.get("poll_interval_minutes", 120)), 1440))
             except (TypeError, ValueError):
                 continue
@@ -157,8 +148,6 @@ class SourceService:
                 name=str(entry.get("name") or locator),
                 kind=kind,
                 locator=locator,
-                category=str(entry.get("category") or entry.get("theme") or "未分类"),
-                priority=priority,
                 is_official=bool(entry.get("official", False)),
                 poll_interval_minutes=poll_interval,
                 fallback_url=str(entry.get("fallback_url") or ""),

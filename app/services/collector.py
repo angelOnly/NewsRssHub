@@ -4,10 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from app.config import Settings, load_taxonomy, load_user_profile
-from app.domain.scoring import score_item
+from app.config import Settings
 from app.plugins.base import PluginRegistry, SourceFetchResult
-from app.services.events import EventService
 from app.storage.repository import Repository, iso_now
 
 
@@ -19,7 +17,6 @@ class CollectionSummary:
     sources_checked: int = 0
     sources_failed: int = 0
     new_items: int = 0
-    events_touched: int = 0
 
 
 class Collector:
@@ -27,17 +24,13 @@ class Collector:
         self,
         repository: Repository,
         registry: PluginRegistry,
-        event_service: EventService,
         settings: Settings,
     ) -> None:
         self.repository = repository
         self.registry = registry
-        self.event_service = event_service
         self.settings = settings
 
     def collect_due_sources(self, force: bool = False) -> CollectionSummary:
-        profile = load_user_profile(self.settings)
-        taxonomy = load_taxonomy(self.settings)
         candidates = self.repository.list_sources() if force else self.repository.due_sources()
         sources = [source for source in candidates if source["enabled"]]
         result = CollectionSummary()
@@ -69,9 +62,8 @@ class Collector:
                     result.sources_failed += 1
                     continue
 
-                new_count, event_count = self._record_items(source, run_id, outcome.items, profile, taxonomy)
+                new_count = self._record_items(source, run_id, outcome.items)
                 result.new_items += new_count
-                result.events_touched += event_count
 
         return result
 
@@ -80,37 +72,21 @@ class Collector:
         source: dict[str, Any],
         run_id: int,
         items: list[Any],
-        profile: dict[str, Any],
-        taxonomy: dict[str, Any],
-    ) -> tuple[int, int]:
+    ) -> int:
         new_count = 0
-        event_count = 0
         source_id = int(source["id"])
         for feed_item in items:
-            scored = score_item(
-                title=feed_item.title,
-                content=feed_item.content,
-                published_at=feed_item.published_at,
-                source_priority=int(source["priority"]),
-                is_official=bool(source["is_official"]),
-                profile=profile,
-                taxonomy=taxonomy,
-            )
-            item_id, inserted = self.repository.insert_item(
-                source_id, feed_item, scored.score, scored.tags, scored.is_blacklisted
-            )
+            _, inserted = self.repository.insert_item(source_id, feed_item)
             if not inserted:
                 continue
             new_count += 1
-            if not scored.is_blacklisted and self.event_service.assign_item(item_id):
-                event_count += 1
 
         self.repository.update_source(
             source_id,
             {"health_status": "healthy", "last_fetch_at": iso_now(), "last_success_at": iso_now(), "last_error": ""},
         )
         self.repository.finish_fetch_run(run_id, "success", new_count)
-        return new_count, event_count
+        return new_count
 
     def _record_failure(self, source: dict[str, Any], run_id: int, exc: Exception) -> None:
         message = str(exc)[:1000]

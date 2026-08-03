@@ -6,7 +6,7 @@
     <div>
       <p class="eyebrow">SETTINGS &amp; CONNECTIONS</p>
       <h1>设置与连接</h1>
-      <p class="subhead">模型负责生成解读；平台连接负责抓取内容。凭据只保存一次，所有对应来源共享使用。</p>
+      <p class="subhead">模型负责单帖摘要和语义筛选；平台连接负责抓取内容。凭据只保存一次，所有对应来源共享使用。</p>
     </div>
   </header>
 
@@ -18,7 +18,7 @@
       <div>
         <p class="eyebrow">ANALYSIS MODEL</p>
         <h2>大模型</h2>
-        <p>用于把已抓取的内容整理成摘要、重要性判断和后续观察点。</p>
+        <p>用于生成单帖摘要，并依据项目 Skill 合并重复消息、划分四个内容层级。</p>
       </div>
     </header>
 
@@ -66,12 +66,12 @@
           <label>
             模型名称
             <input name="model_name" required value="{{ llm_credential.model_name }}" autocomplete="off" spellcheck="false" placeholder="gpt-4.1-mini">
-            <small>会用该模型做连接测试和后续新闻解说。</small>
+            <small>会用该模型做连接测试、单帖摘要和资讯语义筛选。</small>
           </label>
         </div>
         <label class="setting-check">
           <input name="enabled" type="checkbox" value="true" {% if llm_credential.enabled %}checked{% endif %}>
-          <span>启用大模型解说；关闭时系统继续使用本地规则摘要。</span>
+          <span>启用大模型摘要与语义筛选；关闭时长内容会保持待处理，不会使用旧关键词规则。</span>
         </label>
         <div class="form-actions">
           <button class="button button-primary" type="submit">测试并保存模型</button>

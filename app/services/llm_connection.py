@@ -186,7 +186,7 @@ class LLMConnectionService:
             )
         return LLMConnectionStatus(
             state="missing",
-            message="尚未配置模型 API Key，系统会使用本地规则摘要。",
+            message="尚未配置模型 API Key；长内容会保持待摘要，资讯不会进入语义筛选。",
             configured=False,
             enabled=self.settings.llm_enabled,
             source="none",

@@ -4,6 +4,6 @@
 <a class="back-link" href="/briefs">← 返回每日简报</a>
 <section class="brief-detail"><p class="eyebrow">{{ brief.brief_date }}</p><h1>{{ brief.title }}</h1><p class="detail-lede">{{ brief.intro }}</p></section>
 <section class="event-section"><div class="section-caption"><h2>重点事件</h2><span>{{ events|length }} 条</span></div>
-{% for event in events %}<a class="event-card" href="/events/{{ event.id }}"><div class="event-rank"><span class="rank-score">{{ '%.0f'|format(event.importance_score) }}</span><span>{{ event.importance_score|importance_label }}</span></div><div class="event-main"><h3>{{ event.display_title }}</h3><p>{{ event.summary }}</p></div><span class="card-arrow">→</span></a>{% endfor %}
+{% for event in events %}<a class="event-card" href="/events/{{ event.id }}"><div class="event-main"><div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span></div><h3>{{ event.title }}</h3><p>{{ event.summary }}</p></div><span class="card-arrow">→</span></a>{% endfor %}
 </section>
 {% endblock %}

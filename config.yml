@@ -4,24 +4,8 @@ app:
   log_level: "INFO"
   request_timeout: 30
 
-rsshub:
-  base_url: "https://rsshub.xiaolicloud.cn:18443"
-  exclude_paths:
-    - "/reddit"
-
 # ===============================================================
-# 爬虫守护进程配置 (crawler_daemon.py)
-# ===============================================================
-crawler:
-  rss_interval_minutes: 120           # RSS 源轮询间隔（分钟）
-
-  video_check_interval_minutes: 5     # 视频队列检查间隔（分钟）
-  video_batch_size: 5                 # 每轮最多处理几个视频
-  retry_failed_after_minutes: 60      # 失败的视频多久后重试
-  video_ai_summary: false              # 是否启用视频 AI 摘要（关闭可节省 Token）
-
-# ===============================================================
-# 🆕 本地数据库（替代 MongoDB）
+# SQLite 持久化
 # ===============================================================
 database:
   type: "sqlite"

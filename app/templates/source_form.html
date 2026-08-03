@@ -35,16 +35,13 @@
   {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
   <form class="source-form" method="post" action="{{ '/sources/' ~ source.id ~ '/edit' if source else '/sources/new' }}">
     <label>来源名称<input name="name" required maxlength="120" value="{{ source.name if source else '' }}" placeholder="例如 OpenAI Developers"></label>
-    <div class="two-col">
-      <label>来源类型
-        {% if source %}
-          <input value="{{ source.kind|kind_label }}" disabled><input type="hidden" name="kind" value="{{ source.kind }}">
-        {% else %}
-          <select name="kind">{% for value, label in choices %}<option value="{{ value }}" {% if value == 'auto' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
-        {% endif %}
-      </label>
-      <label>主题<input name="category" maxlength="80" value="{{ source.category if source else 'AI产品与行业前沿' }}" placeholder="例如 ComfyUI与AI视频制作"></label>
-    </div>
+    <label>来源类型
+      {% if source %}
+        <input value="{{ source.kind|kind_label }}" disabled><input type="hidden" name="kind" value="{{ source.kind }}">
+      {% else %}
+        <select name="kind">{% for value, label in choices %}<option value="{{ value }}" {% if value == 'auto' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      {% endif %}
+    </label>
     <label>账号、社区或 URL
       {% if source %}
         <input value="{{ source.locator }}" disabled><input type="hidden" name="locator" value="{{ source.locator }}">
@@ -53,10 +50,7 @@
       {% endif %}
       <small>RSS 填完整 URL；X 填 @账号；Reddit 填 r/社区名 或 u/用户名。</small>
     </label>
-    <div class="two-col">
-      <label>优先级（1–10）<input name="priority" type="number" min="1" max="10" value="{{ source.priority if source else 8 }}"></label>
-      <label>抓取间隔（分钟）<input name="poll_interval_minutes" type="number" min="5" max="1440" value="{{ source.poll_interval_minutes if source else 60 }}"></label>
-    </div>
+    <label>抓取间隔（分钟）<input name="poll_interval_minutes" type="number" min="5" max="1440" value="{{ source.poll_interval_minutes if source else 60 }}"></label>
     <label>备用原始链接（可选）<input name="fallback_url" type="url" value="{{ source.fallback_url if source else '' }}" placeholder="官方博客或 GitHub Releases"></label>
     <div class="check-row">
       <label><input name="is_official" type="checkbox" value="true" {% if source and source.is_official %}checked{% endif %}> 官方或机构控制的来源</label>

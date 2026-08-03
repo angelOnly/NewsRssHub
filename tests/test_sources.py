@@ -72,8 +72,6 @@ class SourceServiceTests(unittest.TestCase):
                 database_path=root / "data" / "test.db",
                 request_timeout=5,
                 log_level="INFO",
-                rsshub_base_url="https://rsshub.example.test",
-                rsshub_exclude_paths=(),
                 llm_enabled=False,
                 openai_api_key=None,
                 openai_base_url="https://example.test/v1",

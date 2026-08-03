@@ -4,13 +4,14 @@ from dataclasses import asdict
 
 from app.config import Settings
 from app.plugins.base import PluginRegistry
-from app.services.analyzer import AnalysisService
 from app.services.briefs import BriefService
 from app.services.collector import Collector
 from app.services.connections import ConnectionCatalog
-from app.services.events import EventService
+from app.services.curator import CurationService
 from app.services.llm_connection import LLMConnectionService
+from app.services.skill_loader import SkillLoader
 from app.services.sources import SourceService
+from app.services.summarizer import SummaryService
 from app.storage.repository import Repository
 
 
@@ -31,8 +32,12 @@ class IntelligencePipeline:
         self.llm_connections = llm_connections or LLMConnectionService(repository, settings)
         self.source_connections = source_connections or ConnectionCatalog()
         self.sources = SourceService(repository, registry, settings, self.source_connections)
-        self.collector = Collector(repository, registry, EventService(repository), settings)
-        self.analyzer = AnalysisService(repository, settings, self.llm_connections)
+        self.collector = Collector(repository, registry, settings)
+        self.summarizer = SummaryService(repository, settings, self.llm_connections)
+        self.skill_loader = SkillLoader(settings)
+        self.curator = CurationService(
+            repository, settings, self.llm_connections, self.skill_loader
+        )
         self.briefs = BriefService(repository, settings)
 
     def bootstrap(self) -> int:
@@ -40,13 +45,12 @@ class IntelligencePipeline:
 
     def run_once(self, force: bool = False) -> dict[str, object]:
         collected = self.collector.collect_due_sources(force=force)
-        runtime = self.llm_connections.runtime_config()
-        if runtime and runtime.enabled:
-            self.repository.requeue_unlocalized_headlines()
-        analyzed = self.analyzer.analyze_pending(limit=15)
+        summarized = self.summarizer.summarize_pending(limit=50)
+        curated = self.curator.curate_available(limit=120)
         brief = self.briefs.generate_today()
         return {
             "collection": asdict(collected),
-            "analysis": analyzed,
+            "summary": asdict(summarized),
+            "curation": asdict(curated),
             "brief": brief,
         }

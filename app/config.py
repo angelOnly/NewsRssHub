@@ -52,8 +52,6 @@ class Settings:
     database_path: Path
     request_timeout: int
     log_level: str
-    rsshub_base_url: str
-    rsshub_exclude_paths: tuple[str, ...]
     llm_enabled: bool
     openai_api_key: str | None
     openai_base_url: str
@@ -69,16 +67,10 @@ class Settings:
     def feeds_path(self) -> Path:
         return self.source_dir / "feeds.yml"
 
-    @property
-    def taxonomy_path(self) -> Path:
-        return self.source_dir / "taxonomy.yml"
-
-
 def build_settings() -> Settings:
     config = _load_yaml(ROOT_DIR / "config.yml")
     app_config = config.get("app", {})
     database_config = config.get("database", {})
-    rsshub_config = config.get("rsshub", {})
     llm_config = config.get("llm", {})
 
     source_dir = ROOT_DIR / str(app_config.get("source_dir", "sources"))
@@ -104,8 +96,6 @@ def build_settings() -> Settings:
         database_path=database_path,
         request_timeout=int(app_config.get("request_timeout", 30)),
         log_level=str(app_config.get("log_level", "INFO")),
-        rsshub_base_url=str(rsshub_config.get("base_url") or "https://rsshub.app").rstrip("/"),
-        rsshub_exclude_paths=tuple(rsshub_config.get("exclude_paths", [])),
         llm_enabled=_as_bool(enabled_default, bool(api_key)),
         openai_api_key=api_key,
         openai_base_url=base_url.rstrip("/"),
@@ -122,7 +112,3 @@ def get_settings() -> Settings:
 
 def load_user_profile(settings: Settings | None = None) -> dict[str, Any]:
     return _load_yaml((settings or get_settings()).profile_path)
-
-
-def load_taxonomy(settings: Settings | None = None) -> dict[str, Any]:
-    return _load_yaml((settings or get_settings()).taxonomy_path)

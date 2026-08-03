@@ -9,6 +9,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY .agents ./.agents
 COPY sources ./sources
 COPY config.yml ./config.yml
 

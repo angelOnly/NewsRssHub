@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -11,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.config import load_user_profile
+from app.domain.curation import EditorialTier
 from app.domain.models import SourceDraft, SourceKind
 from app.runtime import ApplicationServices, build_services
 from app.services.connections import ConnectionRequiredError
@@ -19,8 +18,12 @@ from app.services.llm_connection import LLMConnectionError
 from app.services.x_session import XSessionError
 
 
-def _clean_label(value: str) -> str:
-    return re.sub(r"^[^\w\u4e00-\u9fff]+\s*", "", value).strip()
+TIER_TABS: tuple[tuple[str, str], ...] = (
+    (EditorialTier.MUST_READ.value, "必看"),
+    (EditorialTier.IMPORTANT.value, "重要更新"),
+    (EditorialTier.BRIEF.value, "资讯速览"),
+    (EditorialTier.HIDDEN.value, "已隐藏"),
+)
 
 
 def _fmt_time(value: str | None) -> str:
@@ -43,16 +46,6 @@ def _fmt_time(value: str | None) -> str:
         return value[:16]
 
 
-def _importance_label(score: float) -> str:
-    if score >= 75:
-        return "关键"
-    if score >= 55:
-        return "重要"
-    if score >= 35:
-        return "值得关注"
-    return "更新"
-
-
 def _kind_label(kind: str) -> str:
     return {
         "rss": "RSS",
@@ -61,11 +54,24 @@ def _kind_label(kind: str) -> str:
     }.get(kind, kind)
 
 
+def _tier_label(tier: str) -> str:
+    return dict(TIER_TABS).get(tier, "待筛选")
+
+
+def _safe_tier(value: str) -> EditorialTier:
+    try:
+        tier = EditorialTier(value)
+    except ValueError:
+        return EditorialTier.MUST_READ
+    return tier if tier != EditorialTier.PENDING else EditorialTier.MUST_READ
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    services = build_services()
-    services.pipeline.bootstrap()
-    app.state.services = services
+    if not hasattr(app.state, "services"):
+        services = build_services()
+        services.pipeline.bootstrap()
+        app.state.services = services
     yield
 
 
@@ -73,15 +79,20 @@ app = FastAPI(title="NewsRSSHub", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["relative_time"] = _fmt_time
-templates.env.filters["importance_label"] = _importance_label
 templates.env.filters["kind_label"] = _kind_label
+templates.env.filters["tier_label"] = _tier_label
 
 
 def get_services(request: Request) -> ApplicationServices:
     return request.app.state.services
 
 
-def render(request: Request, name: str, context: dict[str, Any] | None = None, status_code: int = 200) -> HTMLResponse:
+def render(
+    request: Request,
+    name: str,
+    context: dict[str, Any] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
     services = get_services(request)
     base = {
         "request": request,
@@ -90,6 +101,7 @@ def render(request: Request, name: str, context: dict[str, Any] | None = None, s
         "llm_credential": services.llm_connections.status(),
         "platform_connections": services.connections.source_connections(),
         "has_x_sources": services.repository.has_enabled_source_kind("x_rsshub"),
+        "skill_status": services.pipeline.skill_loader.status(),
     }
     if context:
         base.update(context)
@@ -101,11 +113,17 @@ def sources_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return RedirectResponse(f"/sources?{query}" if query else "/sources", status_code=303)
 
 
-def dashboard_redirect(*, period: str = "24h", topic: str = "", page: int = 1, notice: str = "") -> RedirectResponse:
+def dashboard_redirect(
+    *,
+    tier: str = EditorialTier.MUST_READ.value,
+    period: str = "24h",
+    page: int = 1,
+    notice: str = "",
+) -> RedirectResponse:
     query = urlencode(
         {
-            "period": period,
-            "topic": topic,
+            "tier": _safe_tier(tier).value,
+            "period": period if period in {"24h", "7d", "30d", "all"} else "24h",
             "page": max(1, page),
             **({"notice": notice} if notice else {}),
         }
@@ -132,11 +150,16 @@ def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectRespo
 @app.get("/health")
 def health(request: Request) -> JSONResponse:
     services = get_services(request)
+    stats = services.repository.dashboard_stats()
     return JSONResponse(
         {
             "status": "ok",
+            "database": "ok",
             "x_session": services.x_sessions.status().state,
             "llm_connection": services.llm_connections.status().state,
+            "curation_skill": "available" if services.pipeline.skill_loader.status().available else "unavailable",
+            "pending_summary": stats["pending_summary"],
+            "pending_curation": stats["pending_curation"],
         }
     )
 
@@ -144,25 +167,28 @@ def health(request: Request) -> JSONResponse:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
+    tier: str = EditorialTier.MUST_READ.value,
     period: str = "24h",
-    topic: str = "",
     page: int = 1,
 ) -> HTMLResponse:
     services = get_services(request)
+    selected_tier = _safe_tier(tier)
+    period = period if period in {"24h", "7d", "30d", "all"} else "24h"
     page = max(1, page)
-    events = services.repository.list_events(period=period, topic=topic, limit=50, offset=(page - 1) * 50)
-    total_events = services.repository.count_events(period=period, topic=topic)
-    profile = load_user_profile(services.settings)
-    topics = [_clean_label(str(interest.get("name", ""))) for interest in profile.get("interests", []) if isinstance(interest, dict)]
+    events = services.repository.list_events(
+        tier=selected_tier, period=period, limit=50, offset=(page - 1) * 50
+    )
+    total_events = services.repository.count_events(tier=selected_tier, period=period)
     return render(
         request,
         "dashboard.html",
         {
             "events": events,
             "stats": services.repository.dashboard_stats(),
+            "tier_counts": services.repository.tier_counts(period),
+            "tier_tabs": TIER_TABS,
+            "tier": selected_tier.value,
             "period": period,
-            "topic": topic,
-            "topics": [item for item in topics if item],
             "page": page,
             "has_more": page * 50 < total_events,
         },
@@ -170,26 +196,61 @@ def dashboard(
 
 
 @app.get("/events/{event_id}", response_class=HTMLResponse)
-def event_detail(request: Request, event_id: int) -> HTMLResponse:
+def event_detail(
+    request: Request,
+    event_id: int,
+    tier: str = EditorialTier.MUST_READ.value,
+    period: str = "24h",
+    page: int = 1,
+) -> HTMLResponse:
     event = get_services(request).repository.get_event(event_id)
     if not event:
         raise HTTPException(status_code=404, detail="未找到该事件")
-    return render(request, "event_detail.html", {"event": event, "analysis": (event.get("analysis") or {}).get("payload", {})})
+    return_query = urlencode(
+        {"tier": _safe_tier(tier).value, "period": period, "page": max(1, page)}
+    )
+    return render(
+        request,
+        "event_detail.html",
+        {
+            "event": event,
+            "return_query": return_query,
+            "return_tier": _safe_tier(tier).value,
+            "return_period": period if period in {"24h", "7d", "30d", "all"} else "24h",
+            "return_page": max(1, page),
+        },
+    )
 
 
 @app.post("/events/{event_id}/not-interested")
 def mark_event_not_interested(
     request: Request,
     event_id: int,
+    tier: str = Form(EditorialTier.MUST_READ.value),
     period: str = Form("24h"),
-    topic: str = Form(""),
     page: int = Form(1),
 ) -> RedirectResponse:
     repository = get_services(request).repository
     if not repository.get_event(event_id):
         raise HTTPException(status_code=404, detail="未找到该事件")
     repository.mark_event_not_interested(event_id)
-    return dashboard_redirect(period=period, topic=topic, page=page, notice="已隐藏这条内容。")
+    return dashboard_redirect(tier=tier, period=period, page=page, notice="已隐藏这条内容。")
+
+
+@app.post("/events/{event_id}/restore")
+def restore_event(
+    request: Request,
+    event_id: int,
+    period: str = Form("24h"),
+    page: int = Form(1),
+) -> RedirectResponse:
+    repository = get_services(request).repository
+    if not repository.get_event(event_id):
+        raise HTTPException(status_code=404, detail="未找到该事件")
+    repository.restore_event(event_id)
+    return dashboard_redirect(
+        tier=EditorialTier.HIDDEN.value, period=period, page=page, notice="已恢复你的隐藏设置。"
+    )
 
 
 @app.get("/briefs", response_class=HTMLResponse)
@@ -203,7 +264,11 @@ def brief_detail(request: Request, brief_date: str) -> HTMLResponse:
     brief = repository.get_brief(brief_date)
     if not brief:
         raise HTTPException(status_code=404, detail="未找到该日报")
-    return render(request, "brief_detail.html", {"brief": brief, "events": repository.get_events_by_ids(brief.get("event_ids", []))})
+    return render(
+        request,
+        "brief_detail.html",
+        {"brief": brief, "events": repository.get_events_by_ids(brief.get("event_ids", []))},
+    )
 
 
 @app.get("/sources", response_class=HTMLResponse)
@@ -223,15 +288,11 @@ def settings(request: Request, notice: str = "", error: str = "") -> HTMLRespons
 
 @app.get("/connections")
 def connections_redirect(request: Request, notice: str = "", error: str = "") -> RedirectResponse:
-    """Keep the previous platform-connection URL usable after the UI merge."""
-
     return settings_redirect(anchor="platforms", notice=notice, error=error)
 
 
 @app.get("/settings/x-session")
 def x_session_settings_redirect(request: Request, notice: str = "", error: str = "") -> RedirectResponse:
-    """Keep old X-cookie links and bookmarks working."""
-
     return settings_redirect(anchor="x", notice=notice, error=error)
 
 
@@ -265,8 +326,6 @@ def test_x_session(request: Request) -> RedirectResponse:
 
 @app.get("/settings/llm")
 def llm_settings_redirect_legacy(request: Request, notice: str = "", error: str = "") -> RedirectResponse:
-    """Keep the previous model-settings URL usable after the UI merge."""
-
     return settings_redirect(anchor="model", notice=notice, error=error)
 
 
@@ -308,8 +367,7 @@ def test_llm_settings(request: Request) -> RedirectResponse:
 def new_source_form(request: Request, error: str = "", connection: str = "") -> HTMLResponse:
     services = get_services(request)
     required_connection = next(
-        (item for item in services.connections.source_connections() if item.key == connection),
-        None,
+        (item for item in services.connections.source_connections() if item.key == connection), None
     )
     return render(
         request,
@@ -330,8 +388,6 @@ def _make_draft(
     name: str,
     kind: str,
     locator: str,
-    category: str,
-    priority: int,
     is_official: bool,
     poll_interval_minutes: int,
     fallback_url: str,
@@ -347,8 +403,6 @@ def _make_draft(
         name=name.strip()[:120],
         kind=source_kind,
         locator=locator.strip(),
-        category=category.strip()[:80] or "未分类",
-        priority=max(1, min(int(priority), 10)),
         is_official=is_official,
         poll_interval_minutes=max(5, min(int(poll_interval_minutes), 1440)),
         fallback_url=fallback_url.strip()[:500],
@@ -362,8 +416,6 @@ def create_source(
     name: str = Form(...),
     kind: str = Form(...),
     locator: str = Form(...),
-    category: str = Form("未分类"),
-    priority: int = Form(5),
     is_official: bool = Form(False),
     poll_interval_minutes: int = Form(60),
     fallback_url: str = Form(""),
@@ -374,11 +426,15 @@ def create_source(
         if kind == "auto":
             kind = services.sources.detect_kind(locator).value
         draft = _make_draft(
-            name=name, kind=kind, locator=locator, category=category, priority=priority,
-            is_official=is_official, poll_interval_minutes=poll_interval_minutes,
-            fallback_url=fallback_url, enabled=enabled,
+            name=name,
+            kind=kind,
+            locator=locator,
+            is_official=is_official,
+            poll_interval_minutes=poll_interval_minutes,
+            fallback_url=fallback_url,
+            enabled=enabled,
         )
-        source, validation = services.sources.add_source(draft, validate=True)
+        _, validation = services.sources.add_source(draft, validate=True)
         message = validation.message if validation else "来源已添加。"
         prefix = "已添加：" if validation and validation.ok else "已保存，但需要检查："
         return sources_redirect(notice=f"{prefix}{message}")
@@ -409,8 +465,6 @@ def edit_source(
     request: Request,
     source_id: int,
     name: str = Form(...),
-    category: str = Form("未分类"),
-    priority: int = Form(5),
     is_official: bool = Form(False),
     poll_interval_minutes: int = Form(60),
     fallback_url: str = Form(""),
@@ -422,14 +476,23 @@ def edit_source(
         raise HTTPException(status_code=404, detail="未找到来源")
     try:
         draft = _make_draft(
-            name=name, kind=source["kind"], locator=source["locator"], category=category,
-            priority=priority, is_official=is_official, poll_interval_minutes=poll_interval_minutes,
-            fallback_url=fallback_url, enabled=enabled,
+            name=name,
+            kind=source["kind"],
+            locator=source["locator"],
+            is_official=is_official,
+            poll_interval_minutes=poll_interval_minutes,
+            fallback_url=fallback_url,
+            enabled=enabled,
         )
         services.sources.update_source(source_id, draft)
-        return sources_redirect(notice="来源配置已保存。")
+        validation = services.sources.validate_source(source_id)
+        if validation.ok:
+            return sources_redirect(notice=f"来源配置已保存并验证：{validation.message}")
+        return sources_redirect(error=f"来源配置已保存，但连接测试失败：{validation.message}")
     except Exception as exc:
-        return RedirectResponse(f"/sources/{source_id}/edit?{urlencode({'error': str(exc)})}", status_code=303)
+        return RedirectResponse(
+            f"/sources/{source_id}/edit?{urlencode({'error': str(exc)})}", status_code=303
+        )
 
 
 @app.post("/sources/{source_id}/test")

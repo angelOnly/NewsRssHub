@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.config import Settings
+from app.domain.curation import EditorialTier
 from app.storage.repository import Repository
 
 
@@ -14,16 +15,20 @@ class BriefService:
 
     def generate_today(self) -> dict[str, object]:
         now = datetime.now(ZoneInfo(self.settings.timezone))
-        events = self.repository.list_events(period="24h", limit=20)
+        must_read = self.repository.list_events(
+            tier=EditorialTier.MUST_READ, period="24h", limit=12
+        )
+        important = self.repository.list_events(
+            tier=EditorialTier.IMPORTANT, period="24h", limit=8
+        )
+        events = [*must_read, *important]
         if events:
-            tags: list[str] = []
-            for event in events:
-                for tag in event.get("tags", []):
-                    if tag not in tags:
-                        tags.append(tag)
-            intro = f"过去 24 小时共筛出 {len(events)} 个高相关事件，重点覆盖{'、'.join(tags[:4]) or '你的关注方向'}。"
+            intro = (
+                f"过去 24 小时收录 {len(must_read)} 条必看和 "
+                f"{len(important)} 条重要更新；同一事件的重复消息已合并。"
+            )
         else:
-            intro = "过去 24 小时尚未出现达到当前筛选阈值的高相关事件。"
+            intro = "过去 24 小时尚未出现必看或重要更新。"
         title = f"{now:%Y年%m月%d日} 每日情报"
         event_ids = [int(event["id"]) for event in events]
         self.repository.upsert_brief(now.date(), title, intro, event_ids)

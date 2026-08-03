@@ -7,7 +7,6 @@ import unittest
 from cryptography.fernet import Fernet
 
 from app.config import Settings
-from app.services.analyzer import AnalysisService, OpenAICompatibleAnalyzer
 from app.services.llm_connection import (
     LLMAuthenticationError,
     LLMConnectionService,
@@ -35,8 +34,6 @@ def build_settings(root: Path, key: str) -> Settings:
         database_path=root / "data" / "test.db",
         request_timeout=5,
         log_level="INFO",
-        rsshub_base_url="https://rsshub.example.test",
-        rsshub_exclude_paths=(),
         llm_enabled=True,
         openai_api_key=None,
         openai_base_url="https://api.example.test/v1",
@@ -75,9 +72,10 @@ class LLMConnectionTests(unittest.TestCase):
             self.assertTrue(service.runtime_config().enabled)
             self.assertEqual(len(requests_seen), 1)
             self.assertEqual(requests_seen[0]["url"], "https://gateway.example.test/v1/chat/completions")
-            analyzer = AnalysisService(repository, settings, service)._analyzer()
-            self.assertIsInstance(analyzer, OpenAICompatibleAnalyzer)
-            self.assertEqual(analyzer.model, "news-model")
+            runtime = service.runtime_config()
+            assert runtime is not None
+            self.assertEqual(runtime.model_name, "news-model")
+            self.assertTrue(runtime.enabled)
 
     def test_failed_replacement_keeps_the_last_valid_model_connection(self) -> None:
         with TemporaryDirectory() as directory:

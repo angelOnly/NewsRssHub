@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">PERSONAL INTELLIGENCE</p>
     <h1>今天，什么真的值得看？</h1>
-    <p class="subhead">默认只展示摘要；点开后才查看原始内容、证据与完整解读。</p>
+    <p class="subhead">同一事件只保留一次；点开后可查看原始内容与全部来源。</p>
   </div>
   <a class="button button-primary" href="/sources/new">＋ 添加来源</a>
 </header>
@@ -14,78 +14,89 @@
 
 {% if has_x_sources and x_credential.state != 'valid' %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
-  <div>
-    <strong>X 抓取已暂停</strong>
-    <p>你已添加 X 来源，但登录 Cookie 尚未通过验证。其他公开 RSS / Reddit 来源不受影响。</p>
-  </div>
+  <div><strong>X 抓取已暂停</strong><p>你已添加 X 来源，但登录 Cookie 尚未通过验证。其他公开 RSS / Reddit 来源不受影响。</p></div>
   <a class="button button-secondary" href="/settings#x">前往设置</a>
+</section>
+{% endif %}
+
+{% if not skill_status.available %}
+<section class="credential-alert error" aria-label="筛选策略状态">
+  <div><strong>资讯筛选暂未启用</strong><p>{{ skill_status.message }}</p></div>
 </section>
 {% endif %}
 
 <section class="stat-grid" aria-label="情报台状态">
   <div class="stat-card"><span>活跃来源</span><strong>{{ stats.source_count }}</strong><small>{{ stats.healthy_count }} 个连接正常</small></div>
-  <div class="stat-card"><span>过去 24 小时热点</span><strong>{{ stats.event_count }}</strong><small>已合并重复报道</small></div>
-  <div class="stat-card stat-card-wide"><span>阅读方式</span><strong>摘要优先</strong><small>每页最多 50 条，按重要性排序</small></div>
+  <div class="stat-card"><span>过去 24 小时已筛选事件</span><strong>{{ stats.event_count }}</strong><small>重复消息已合并</small></div>
+  <div class="stat-card stat-card-wide"><span>处理队列</span><strong>{{ stats.pending_summary + stats.pending_curation }}</strong><small>等待摘要或语义筛选的条目</small></div>
 </section>
 
-<form class="filter-bar" method="get" action="/">
+<nav class="tier-tabs" aria-label="内容层级">
+  {% for value, label in tier_tabs %}
+    <a class="tier-tab {% if tier == value %}selected{% endif %}" href="/?tier={{ value }}&period={{ period }}">
+      <span>{{ label }}</span><b>{{ tier_counts[value] }}</b>
+    </a>
+  {% endfor %}
+</nav>
+
+<div class="filter-bar">
   <div class="filter-group" aria-label="时间范围">
     {% for value, label in [('24h', '24 小时'), ('7d', '7 天'), ('30d', '30 天'), ('all', '全部')] %}
-      <a class="filter-pill {% if period == value %}selected{% endif %}" href="/?period={{ value }}&topic={{ topic }}">{{ label }}</a>
+      <a class="filter-pill {% if period == value %}selected{% endif %}" href="/?tier={{ tier }}&period={{ value }}">{{ label }}</a>
     {% endfor %}
   </div>
-  <label class="select-wrap">
-    <span class="sr-only">主题筛选</span>
-    <select name="topic" onchange="this.form.submit()">
-      <option value="">全部主题</option>
-      {% for option in topics %}<option value="{{ option }}" {% if topic == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
-    </select>
-  </label>
-  <input type="hidden" name="period" value="{{ period }}">
-</form>
+</div>
 
 <section class="event-section">
   <div class="section-caption">
-    <h2>重要事件</h2>
+    <h2>{{ tier|tier_label }}</h2>
     <span>第 {{ page }} 页 · 最多 50 条</span>
   </div>
   {% if events %}
-    <div class="event-list">
+    <div class="event-list tier-{{ tier }}">
       {% for event in events %}
       <article class="event-card">
-        <div class="event-rank">
-          <span class="rank-score">{{ '%.0f'|format(event.importance_score) }}</span>
-          <span>{{ event.importance_score|importance_label }}</span>
-        </div>
-        <a class="event-main" href="/events/{{ event.id }}" aria-label="查看 {{ event.display_title }} 的详情">
+        <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
           <div class="event-meta">
             <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
             <span>{{ event.last_seen_at|relative_time }}</span>
-            {% if event.visible_source_count > 1 %}<span>{{ event.visible_source_count }} 个来源印证</span>{% endif %}
+            {% if event.visible_source_count > 1 %}<span>{{ event.visible_source_count }} 个来源</span>{% endif %}
           </div>
-          <h3>{{ event.display_title }}</h3>
-          <p>{{ event.summary or '正在生成摘要…' }}</p>
-          {% if event.why_matters %}<small class="why">为何值得看：{{ event.why_matters }}</small>{% endif %}
-          {% if event.tags %}<div class="tag-row">{% for tag in event.tags[:3] %}<span class="tag">{{ tag }}</span>{% endfor %}</div>{% endif %}
+          <h3>{{ event.title }}</h3>
+          {% if tier == 'must_read' %}
+            <p>{{ event.summary }}</p>
+            {% if event.tier_reason %}<small class="tier-reason">{{ event.tier_reason }}</small>{% endif %}
+          {% elif tier == 'important' %}
+            <p class="event-summary-compact">{{ event.summary }}</p>
+          {% elif tier == 'hidden' %}
+            <p class="event-summary-compact">{{ event.summary }}</p>
+            {% if event.user_hidden %}<small class="tier-reason">你已隐藏</small>{% elif event.tier_reason %}<small class="tier-reason">{{ event.tier_reason }}</small>{% endif %}
+          {% endif %}
         </a>
-        <form class="event-feedback" method="post" action="/events/{{ event.id }}/not-interested">
-          <input type="hidden" name="period" value="{{ period }}">
-          <input type="hidden" name="topic" value="{{ topic }}">
-          <input type="hidden" name="page" value="{{ page }}">
-          <button type="submit" title="隐藏这条内容">不感兴趣</button>
-        </form>
-        <a class="card-arrow" href="/events/{{ event.id }}" aria-label="查看详情">→</a>
+        <div class="event-actions">
+          {% if tier == 'hidden' and event.user_hidden %}
+          <form class="event-feedback" method="post" action="/events/{{ event.id }}/restore">
+            <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
+            <button type="submit">恢复</button>
+          </form>
+          {% elif tier != 'hidden' %}
+          <form class="event-feedback" method="post" action="/events/{{ event.id }}/not-interested">
+            <input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
+            <button type="submit" title="隐藏这条内容">不感兴趣</button>
+          </form>
+          {% endif %}
+          <a class="card-arrow" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看详情">→</a>
+        </div>
       </article>
       {% endfor %}
     </div>
     {% if has_more %}
-      <div class="load-more"><a class="button button-secondary" href="/?period={{ period }}&topic={{ topic }}&page={{ page + 1 }}">加载下一页</a></div>
+      <div class="load-more"><a class="button button-secondary" href="/?tier={{ tier }}&period={{ period }}&page={{ page + 1 }}">加载下一页</a></div>
     {% endif %}
   {% else %}
     <div class="empty-state">
-      <span>⌁</span>
-      <h2>这里很快会有真正重要的更新</h2>
-      <p>先在“来源管理”添加或启用来源，后台采集后会自动生成摘要和热点排序。</p>
+      <span>⌁</span><h2>{{ tier|tier_label }}暂无内容</h2>
+      {% if tier == 'must_read' %}<p>这不是漏抓提示：这里只放真正影响工具、项目或近期决策的变化。</p>{% else %}<p>切换时间范围，或等待后台完成下一轮抓取、摘要和筛选。</p>{% endif %}
       <a class="button button-primary" href="/sources">管理来源</a>
     </div>
   {% endif %}

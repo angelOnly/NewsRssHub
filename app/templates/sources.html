@@ -23,13 +23,13 @@
 {% if sources %}
 <section class="sources-table-wrap">
   <table class="sources-table">
-    <thead><tr><th>来源</th><th>类型</th><th>优先级</th><th>运行状态</th><th>上次成功</th><th>操作</th></tr></thead>
+    <thead><tr><th>来源</th><th>类型</th><th>运行状态</th><th>上次成功</th><th>操作</th></tr></thead>
     <tbody>
     {% for source in sources %}
       <tr>
         <td>
           <strong>{{ source.name }}</strong>
-          <small>{{ source.category }} · {{ source.locator }}</small>
+          <small>{{ source.locator }}</small>
           {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
             <small class="source-state-note">等待 X 登录验证</small>
           {% elif source.health_status == 'error' and source.last_error %}
@@ -37,7 +37,6 @@
           {% endif %}
         </td>
         <td>{{ source.kind|kind_label }}</td>
-        <td><span class="priority-value">{{ source.priority }}</span> / 10</td>
         <td>
           {% if not source.enabled %}
             <span class="status paused">已暂停</span>

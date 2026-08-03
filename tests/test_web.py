@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.domain.curation import CurationGroup, EditorialTier
+from app.domain.models import FeedItem, SourceDraft, SourceKind
+from app.runtime import build_services
+from app.web import app
+
+
+def build_settings(root: Path) -> Settings:
+    source_dir = root / "sources"
+    source_dir.mkdir()
+    (source_dir / "user_profile.yml").write_text(
+        "identity:\n  description: AI 工程师，关注重要模型和开发工具更新。\n", encoding="utf-8"
+    )
+    skill = root / ".agents" / "skills" / "curate-personal-news"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# policy\n", encoding="utf-8")
+    return Settings(
+        root_dir=root,
+        source_dir=source_dir,
+        data_dir=root / "data",
+        database_path=root / "data" / "test.db",
+        request_timeout=5,
+        log_level="INFO",
+        llm_enabled=False,
+        openai_api_key=None,
+        openai_base_url="https://llm.example.test/v1",
+        openai_model_name="test-model",
+        credential_encryption_key=None,
+        timezone="Asia/Shanghai",
+    )
+
+
+class WebTests(unittest.TestCase):
+    def test_four_tier_dashboard_and_source_form_drop_legacy_controls(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            source_id = services.repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            item_id, _ = services.repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="one",
+                    title="OpenAI 发布新模型",
+                    link="https://example.test/one",
+                    content="原始内容",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            )
+            services.repository.save_item_summary(item_id, summary="新模型已开放使用。")
+            event_id = services.repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[item_id],
+                        primary_item_id=item_id,
+                        tier=EditorialTier.MUST_READ,
+                        reason="直接影响当前模型选择",
+                        order=1,
+                    )
+                ]
+            )[0]
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    health = client.get("/health")
+                    self.assertEqual(health.status_code, 200)
+                    self.assertEqual(health.json()["database"], "ok")
+                    self.assertEqual(health.json()["curation_skill"], "available")
+
+                    dashboard = client.get("/?tier=must_read&period=all")
+                    self.assertEqual(dashboard.status_code, 200)
+                    self.assertIn("必看", dashboard.text)
+                    self.assertIn("重要更新", dashboard.text)
+                    self.assertIn("资讯速览", dashboard.text)
+                    self.assertIn("OpenAI 发布新模型", dashboard.text)
+                    self.assertNotIn("全部主题", dashboard.text)
+                    self.assertNotIn("重要性排序", dashboard.text)
+
+                    detail = client.get(f"/events/{event_id}?tier=must_read&period=all")
+                    self.assertEqual(detail.status_code, 200)
+                    self.assertIn("原始内容与来源", detail.text)
+                    self.assertIn("查看原始内容", detail.text)
+                    self.assertNotIn("模型解读", detail.text)
+
+                    form = client.get("/sources/new")
+                    self.assertEqual(form.status_code, 200)
+                    self.assertNotIn("优先级（1–10）", form.text)
+                    self.assertNotIn("主题", form.text)
+            finally:
+                delattr(app.state, "services")
