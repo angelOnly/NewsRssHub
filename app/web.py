@@ -82,12 +82,14 @@ def get_services(request: Request) -> ApplicationServices:
 
 
 def render(request: Request, name: str, context: dict[str, Any] | None = None, status_code: int = 200) -> HTMLResponse:
+    services = get_services(request)
     base = {
         "request": request,
         "active_path": request.url.path,
-        "x_credential": get_services(request).x_sessions.status(),
-        "llm_credential": get_services(request).llm_connections.status(),
-        "platform_connections": get_services(request).connections.source_connections(),
+        "x_credential": services.x_sessions.status(),
+        "llm_credential": services.llm_connections.status(),
+        "platform_connections": services.connections.source_connections(),
+        "has_x_sources": services.repository.has_enabled_source_kind("x_rsshub"),
     }
     if context:
         base.update(context)
@@ -99,16 +101,20 @@ def sources_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return RedirectResponse(f"/sources?{query}" if query else "/sources", status_code=303)
 
 
-def x_session_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+def settings_redirect(*, anchor: str = "", notice: str = "", error: str = "") -> RedirectResponse:
     query = urlencode({key: value for key, value in {"notice": notice, "error": error}.items() if value})
-    target = f"/settings/x-session?{query}" if query else "/settings/x-session"
+    target = f"/settings?{query}" if query else "/settings"
+    if anchor:
+        target = f"{target}#{anchor}"
     return RedirectResponse(target, status_code=303)
+
+
+def x_session_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="x", notice=notice, error=error)
 
 
 def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
-    query = urlencode({key: value for key, value in {"notice": notice, "error": error}.items() if value})
-    target = f"/settings/llm?{query}" if query else "/settings/llm"
-    return RedirectResponse(target, status_code=303)
+    return settings_redirect(anchor="model", notice=notice, error=error)
 
 
 @app.get("/health")
@@ -183,30 +189,23 @@ def sources(request: Request, notice: str = "", error: str = "") -> HTMLResponse
     )
 
 
-@app.get("/connections", response_class=HTMLResponse)
-def connections(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
-    return render(
-        request,
-        "connections.html",
-        {
-            "connections": get_services(request).connections.source_connections(),
-            "notice": notice,
-            "error": error,
-        },
-    )
+@app.get("/settings", response_class=HTMLResponse)
+def settings(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
+    return render(request, "settings.html", {"notice": notice, "error": error})
 
 
-@app.get("/settings/x-session", response_class=HTMLResponse)
-def x_session_settings(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
-    return render(
-        request,
-        "x_session.html",
-        {
-            "credential": get_services(request).x_sessions.status(),
-            "notice": notice,
-            "error": error,
-        },
-    )
+@app.get("/connections")
+def connections_redirect(request: Request, notice: str = "", error: str = "") -> RedirectResponse:
+    """Keep the previous platform-connection URL usable after the UI merge."""
+
+    return settings_redirect(anchor="platforms", notice=notice, error=error)
+
+
+@app.get("/settings/x-session")
+def x_session_settings_redirect(request: Request, notice: str = "", error: str = "") -> RedirectResponse:
+    """Keep old X-cookie links and bookmarks working."""
+
+    return settings_redirect(anchor="x", notice=notice, error=error)
 
 
 @app.post("/settings/x-session")
@@ -231,17 +230,11 @@ def test_x_session(request: Request) -> RedirectResponse:
         return x_session_redirect(error="暂时无法验证 X 登录 Cookie，请稍后重试。")
 
 
-@app.get("/settings/llm", response_class=HTMLResponse)
-def llm_settings(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
-    return render(
-        request,
-        "llm_settings.html",
-        {
-            "credential": get_services(request).llm_connections.status(),
-            "notice": notice,
-            "error": error,
-        },
-    )
+@app.get("/settings/llm")
+def llm_settings_redirect_legacy(request: Request, notice: str = "", error: str = "") -> RedirectResponse:
+    """Keep the previous model-settings URL usable after the UI merge."""
+
+    return settings_redirect(anchor="model", notice=notice, error=error)
 
 
 @app.post("/settings/llm")

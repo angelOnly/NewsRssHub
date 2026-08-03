@@ -94,7 +94,7 @@ class ConnectionCatalog:
                 state="missing",
                 usable=False,
                 message="X 会话服务尚未初始化。",
-                setup_url="/settings/x-session",
+                setup_url="/settings#x",
                 setup_label="配置 X Cookie",
             )
         status = self.x_sessions.status()
@@ -110,6 +110,6 @@ class ConnectionCatalog:
                 if status.state == "valid"
                 else status.message
             ),
-            setup_url="/settings/x-session",
+            setup_url="/settings#x",
             setup_label="配置并测试 X Cookie",
         )

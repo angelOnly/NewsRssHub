@@ -53,6 +53,21 @@ class Repository:
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 
+    def has_enabled_source_kind(self, kind: str) -> bool:
+        """Return whether a live source currently depends on a platform kind."""
+
+        with self.database.read() as conn:
+            row = conn.execute(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM sources
+                    WHERE kind = ? AND enabled = 1 AND archived = 0
+                )
+                """,
+                (kind,),
+            ).fetchone()
+        return bool(row[0])
+
     def get_source(self, source_id: int) -> dict[str, Any] | None:
         with self.database.read() as conn:
             row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()

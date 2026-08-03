@@ -13,6 +13,26 @@ from app.storage.repository import Repository
 
 
 class SourceServiceTests(unittest.TestCase):
+    def test_enabled_platform_check_ignores_paused_and_archived_sources(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = Database(root / "data" / "test.db")
+            repository = Repository(database)
+            database.initialize()
+
+            source_id = repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
+                "https://x.com/OpenAI",
+            )
+            self.assertTrue(repository.has_enabled_source_kind(SourceKind.X_RSSHUB))
+
+            repository.update_source(source_id, {"enabled": 0})
+            self.assertFalse(repository.has_enabled_source_kind(SourceKind.X_RSSHUB))
+
+            repository.update_source(source_id, {"enabled": 1})
+            repository.archive_source(source_id)
+            self.assertFalse(repository.has_enabled_source_kind(SourceKind.X_RSSHUB))
+
     def test_auto_detection_and_configurable_source(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

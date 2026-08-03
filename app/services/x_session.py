@@ -408,7 +408,7 @@ class XSessionService:
     def _load_cookies(self) -> dict[str, str]:
         record = self.repository.get_connector_credential(X_CONNECTOR)
         if not record:
-            raise XCredentialMissingError("X 登录 Cookie 未配置，请在“X 登录状态”页面保存后重试。")
+            raise XCredentialMissingError("X 登录 Cookie 未配置，请在“设置与连接”页面保存后重试。")
         try:
             decrypted = self._cipher().decrypt(str(record["ciphertext"]).encode("ascii"))
             payload = json.loads(decrypted.decode("utf-8"))

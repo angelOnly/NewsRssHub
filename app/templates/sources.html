@@ -10,10 +10,10 @@
   <a class="button button-primary" href="/sources/new">＋ 添加来源</a>
 </header>
 
-{% if x_credential.state != 'valid' %}
+{% if has_x_sources and x_credential.state != 'valid' %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
-  <div><strong>X 账号当前不会正常抓取</strong><p>{{ x_credential.message }}</p></div>
-  <a class="button button-secondary" href="/settings/x-session">维护 X Cookie</a>
+  <div><strong>X 抓取已暂停</strong><p>你已添加 X 来源，但登录 Cookie 尚未通过验证。完成设置后会在下一轮自动恢复抓取。</p></div>
+  <a class="button button-secondary" href="/settings#x">前往设置</a>
 </section>
 {% endif %}
 
@@ -23,18 +23,31 @@
 {% if sources %}
 <section class="sources-table-wrap">
   <table class="sources-table">
-    <thead><tr><th>来源</th><th>类型</th><th>优先级</th><th>状态</th><th>上次成功</th><th>操作</th></tr></thead>
+    <thead><tr><th>来源</th><th>类型</th><th>优先级</th><th>运行状态</th><th>上次成功</th><th>操作</th></tr></thead>
     <tbody>
     {% for source in sources %}
       <tr>
         <td>
           <strong>{{ source.name }}</strong>
           <small>{{ source.category }} · {{ source.locator }}</small>
+          {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
+            <small class="source-state-note">等待 X 登录验证</small>
+          {% elif source.health_status == 'error' and source.last_error %}
+            <small class="source-state-note">{{ source.last_error }}</small>
+          {% endif %}
         </td>
         <td>{{ source.kind|kind_label }}</td>
         <td><span class="priority-value">{{ source.priority }}</span> / 10</td>
-        <td><span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'需处理','unknown':'待验证','archived':'已归档'}.get(source.health_status, source.health_status) }}</span></td>
-        <td>{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}</td>
+        <td>
+          {% if not source.enabled %}
+            <span class="status paused">已暂停</span>
+          {% elif source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
+            <span class="status attention">需登录</span>
+          {% else %}
+            <span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'抓取异常','unknown':'待验证','archived':'已归档'}.get(source.health_status, source.health_status) }}</span>
+          {% endif %}
+        </td>
+        <td>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
         <td class="table-actions">
           <a href="/sources/{{ source.id }}/edit">编辑</a>
           <form method="post" action="/sources/{{ source.id }}/test"><button type="submit">测试</button></form>

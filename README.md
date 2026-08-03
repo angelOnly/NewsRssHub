@@ -26,7 +26,7 @@
    docker compose up -d --build
    ```
 
-5. 打开 `http://localhost:8188`，进入“X 登录状态”，粘贴 `auth_token` 值或完整 Cookie 片段。系统先验证，成功后才加密保存。
+5. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统先验证，成功后才加密保存。
 
 Web 服务只负责页面和配置；Worker 独立抓取并生成摘要。SQLite 数据保存在 `data/`，重启容器不会丢失。
 
