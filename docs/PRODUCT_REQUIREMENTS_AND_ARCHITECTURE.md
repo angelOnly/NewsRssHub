@@ -1,6 +1,6 @@
 # NewsRSSHub 产品需求与目标架构设计
 
-> 文档版本：v1.0  
+> 文档版本：v1.1
 > 文档状态：已进入实现与验证  
 > 更新时间：2026-08-03  
 > 适用范围：单用户、私有部署的 NewsRSSHub
@@ -52,11 +52,12 @@ NewsRSSHub 是一个面向个人使用的每日情报台。它从 RSS、X、Redd
 
 ```mermaid
 flowchart LR
-    A["平台插件抓取原始帖子"] --> B["单帖摘要生成并持久化"]
+    A["平台插件抓取原始帖子"] --> B["中文标题、摘要与重点生成并持久化"]
     B --> C["CurationService 分批组织摘要"]
     C --> D["项目级资讯筛选 Skill"]
     D --> E["合并、去重、四层判断"]
-    E --> F["SQLite 保存事件结果"]
+    E --> T["必看/重要主条目正文中文译文"]
+    T --> F["SQLite 保存事件结果"]
     F --> G["Web Tab 与每日简报"]
 ```
 
@@ -264,7 +265,7 @@ flowchart LR
 
 ### FR-04 单帖摘要（P0）
 
-每个新条目必须在语义筛选前获得摘要。
+每个新条目必须在语义筛选前获得中文读者可读的展示卡片：中文标题、事实摘要和 2 至 4 条重点。
 
 摘要要求：
 
@@ -274,6 +275,8 @@ flowchart LR
 - 不计算重要性。
 - 不生成“值得关注”“潜力巨大”等结论。
 - 如果来源身份对事实有影响，在摘要中写明“官方宣布”“社区实测”或“作者观点”。
+- `title_zh` 必须是准确、简洁的中文标题；产品名、模型名和版本号保留原名。
+- `highlights` 只写可扫描的事实重点，不写“值得关注”等泛化解读，也不负责判断层级。
 
 摘要处理策略：
 
@@ -286,11 +289,20 @@ flowchart LR
 
 | 字段 | 说明 |
 | --- | --- |
-| `items.summary` | 单帖摘要 |
+| `items.display_title` | 中文展示标题；`items.title` 保留原始标题追溯与筛选使用 |
+| `items.summary` | 中文事实摘要 |
+| `items.highlights_json` | 2 至 4 条重点事实 |
 | `items.summary_status` | `pending / complete / retry / failed` |
 | `items.summary_version` | 摘要提示版本 |
 | `items.summarized_at` | 最近摘要时间 |
 | `items.content_hash` | 判断内容是否变化 |
+
+正文中文译文属于展示缓存，不属于摘要或筛选输入：
+
+- Worker 只主动翻译“必看”和“重要更新”的主条目，避免为数百条普通资讯消耗模型调用。
+- 详情页可按需翻译同一事件下的其他来源条目；已生成译文按版本缓存，原文变化后自动失效。
+- 原文已经是中文时，直接缓存为“中文正文”，不调用模型。
+- 原始正文始终保留在可展开区域，译文不能覆盖原文。
 
 ### FR-05 语义合并与去重（P0）
 
@@ -545,6 +557,8 @@ Web 支持配置和测试：
 - 层级及简短判断理由。
 - 发布时间和最近更新时间。
 - 被合并的所有原始帖子。
+- 每个来源条目的中文展示标题、中文摘要与重点。
+- 已缓存的中文正文/译文，以及可展开的原始正文。
 - 原始来源链接。
 - 用户反馈操作。
 
@@ -568,6 +582,7 @@ flowchart TB
         COL["Collector"]
         SUM["SummaryService"]
         CUR["CurationService"]
+        TRANS["TranslationService"]
         BRIEF["BriefService"]
         CONN["Connection Services"]
     end
@@ -593,6 +608,7 @@ flowchart TB
     PIPE --> COL
     PIPE --> SUM
     PIPE --> CUR
+    PIPE --> TRANS
     PIPE --> BRIEF
     COL --> SOURCE
     CUR --> DECISION
@@ -602,6 +618,7 @@ flowchart TB
     COL --> REPO
     SUM --> REPO
     CUR --> REPO
+    TRANS --> REPO
     BRIEF --> REPO
     WEB --> REPO
     REPO --> DB
@@ -615,8 +632,9 @@ flowchart TB
 | --- | --- | --- |
 | SourcePlugin | 平台输入规范化、验证、抓取 | 摘要、筛选、页面 |
 | Collector | 调度到期来源、保存原始条目、硬去重 | 语义重要性 |
-| SummaryService | 单帖摘要生成、缓存和重试 | 合并和层级 |
+| SummaryService | 中文标题、单帖摘要与重点生成、缓存和重试 | 合并和层级 |
 | CurationService | 分批、加载画像和 Skill、调用模型、校验结果 | 页面展示 |
+| TranslationService | 正文中文译文缓存、必看/重要预翻译、详情按需翻译 | 筛选、合并和层级 |
 | 项目 Skill | 合并、去重、四层判断的方法 | 输入组装、JSON、数据库 |
 | EventWriter | 将校验后的分组安全写入事件表 | 自行推测模型意图 |
 | Repository | 查询和事务 | 业务判断 |
@@ -635,6 +653,7 @@ app/
 │   ├── collector.py
 │   ├── summarizer.py
 │   ├── curator.py
+│   ├── translator.py
 │   ├── skill_loader.py
 │   ├── event_writer.py
 │   └── pipeline.py
@@ -667,7 +686,7 @@ flowchart TD
     VALIDATE --> FETCH["插件抓取"]
     FETCH --> HARD["按 source_id + guid 硬去重"]
     HARD --> SAVE["保存原始条目"]
-    SAVE --> SUMMARY["生成或复用单帖摘要"]
+    SAVE --> SUMMARY["生成或复用中文标题、摘要与重点"]
     SUMMARY --> READY{"摘要是否完成？"}
     READY -- "否" --> RETRY["保留 pending/retry"]
     READY -- "是" --> BATCH["CurationService 分批"]
@@ -675,7 +694,8 @@ flowchart TD
     SKILL --> CHECK["Pydantic 校验结果"]
     CHECK -- "失败" --> CUR_RETRY["本批重试或保持待筛选"]
     CHECK -- "成功" --> APPLY["事务应用合并与层级"]
-    APPLY --> BRIEF["更新每日简报"]
+    APPLY --> TRANSLATE["预翻译必看/重要主条目正文"]
+    TRANSLATE --> BRIEF["更新每日简报"]
     BRIEF --> DONE["本轮完成"]
 ```
 
@@ -694,13 +714,14 @@ sequenceDiagram
     P-->>W: FeedItem 列表
     W->>R: 插入新条目并硬去重
     W->>S: 请求尚未摘要的条目
-    S->>R: 保存单帖摘要和状态
+    S->>R: 保存中文标题、摘要、重点和状态
     W->>C: 请求筛选已完成摘要的条目
     C->>R: 读取 id、标题、摘要、发布时间
     C->>L: 用户画像 + 摘要批次 + Skill
     L-->>C: 合并分组、层级、理由、顺序
     C->>C: 校验 item_id、枚举和完整性
     C->>R: 事务写入事件与关联
+    W->>R: 为必看/重要主条目保存正文中文译文
 ```
 
 ### 9.3 两层去重
@@ -827,9 +848,13 @@ erDiagram
         integer source_id
         text guid
         text title
+        text display_title
         text content
         text summary
+        text highlights_json
         text summary_status
+        text translated_content
+        text translation_status
         text published_at
         text fetched_at
     }
@@ -1076,7 +1101,7 @@ Web 端口：
 ### 15.2 服务
 
 - `web`：FastAPI 页面、配置和健康检查。
-- `worker`：循环抓取、摘要、筛选和简报。
+- `worker`：循环抓取、中文标题/摘要/重点、筛选、正文翻译和简报。
 - 两个容器共享 `/app/data`。
 - SQLite 使用 WAL 和 busy timeout，适配一个 Web 加一个 Worker 的单用户负载。
 
@@ -1157,6 +1182,12 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 筛选通过运行 ID 和输入集合哈希复用。
 - 事件与条目关联使用唯一约束。
 
+### 17.5 正文翻译失败
+
+- 翻译失败只标记该条目为 `retry`，不会影响已完成的事件层级、合并结果或原文展示。
+- 没有可用模型时，非中文正文保持待翻译；中文原文可直接作为中文正文缓存。
+- 原文更新后清空译文缓存，确保不会展示旧译文。
+
 ---
 
 ## 18. 性能与 Token 控制
@@ -1164,6 +1195,8 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 筛选只发送标题、摘要和发布时间，不发送原文。
 - 已有摘要直接复用。
 - 长内容摘要和短内容规范化走不同路径。
+- 正文翻译独立于筛选，只预处理必看与重要更新的主条目；其他来源由用户打开详情后按需触发。
+- 超长正文按自然边界分块翻译并缓存，避免一次请求占满上下文。
 - 筛选批次控制在 30 至 50 条左右，由模型上下文动态调整。
 - 只处理新条目和发生变化的条目。
 - 全局合并只接收批内事件结果，不重新接收全部原文。
@@ -1267,6 +1300,9 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 14. 新增平台只需增加插件和可选连接服务，不修改筛选 Skill 和现有插件。
 15. 来源新增/编辑表单和来源列表不再出现主题或优先级。
 16. 来源领域模型、导入配置和 SQLite 表不再包含 `category/theme/priority`。
+17. 模型可用时，事件及来源条目标题以中文展示；原始标题仍可追溯。
+18. 必看和重要更新卡片显示摘要与可扫描重点；详情页显示全部重点。
+19. 详情页默认展示已缓存的中文正文/译文，并保留可展开的原始正文；普通来源译文可按需生成。
 
 ---
 

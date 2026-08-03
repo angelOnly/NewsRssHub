@@ -8,6 +8,7 @@ from app.services.pipeline import IntelligencePipeline
 from app.services.connections import ConnectionCatalog
 from app.services.llm_connection import LLMConnectionService
 from app.services.sources import SourceService
+from app.services.translator import TranslationService
 from app.services.x_session import XSessionService
 from app.storage.database import Database
 from app.storage.repository import Repository
@@ -22,6 +23,7 @@ class ApplicationServices:
     x_sessions: XSessionService
     llm_connections: LLMConnectionService
     connections: ConnectionCatalog
+    translator: TranslationService
 
 
 def build_services(settings: Settings | None = None) -> ApplicationServices:
@@ -43,4 +45,5 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         x_sessions=x_sessions,
         llm_connections=llm_connections,
         connections=connections,
+        translator=pipeline.translator,
     )

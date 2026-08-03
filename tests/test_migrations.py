@@ -94,6 +94,16 @@ class MigrationTests(unittest.TestCase):
             check.close()
 
             self.assertFalse({"relevance_score", "tags_json", "blacklisted"} & item_columns)
+            self.assertTrue(
+                {
+                    "display_title",
+                    "highlights_json",
+                    "translated_content",
+                    "translation_status",
+                    "translation_version",
+                }
+                <= item_columns
+            )
             self.assertFalse(
                 {
                     "why_matters",

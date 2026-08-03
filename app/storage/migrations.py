@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 SOURCES_TABLE = """
@@ -68,16 +68,23 @@ CREATE TABLE IF NOT EXISTS items (
     guid TEXT NOT NULL,
     canonical_url TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL,
+    display_title TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
     author TEXT NOT NULL DEFAULT '',
     published_at TEXT,
     fetched_at TEXT NOT NULL,
     content_hash TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
+    highlights_json TEXT NOT NULL DEFAULT '[]',
     summary_status TEXT NOT NULL DEFAULT 'pending',
     summary_error TEXT NOT NULL DEFAULT '',
     summary_version INTEGER NOT NULL DEFAULT 0,
     summarized_at TEXT,
+    translated_content TEXT NOT NULL DEFAULT '',
+    translation_status TEXT NOT NULL DEFAULT 'pending',
+    translation_error TEXT NOT NULL DEFAULT '',
+    translation_version INTEGER NOT NULL DEFAULT 0,
+    translated_at TEXT,
     raw_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(source_id, guid)
 );
@@ -148,6 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_sources_due ON sources(enabled, archived, last_fe
 CREATE INDEX IF NOT EXISTS idx_items_source_guid ON items(source_id, guid);
 CREATE INDEX IF NOT EXISTS idx_items_event ON items(event_id);
 CREATE INDEX IF NOT EXISTS idx_items_summary ON items(summary_status, summarized_at);
+CREATE INDEX IF NOT EXISTS idx_items_translation ON items(translation_status, translated_at);
 CREATE INDEX IF NOT EXISTS idx_events_tier ON events(editorial_tier, curation_order, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_curation ON events(curation_status, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fetch_runs_source ON fetch_runs(source_id, started_at DESC);
@@ -350,16 +358,23 @@ def _rebuild_content_tables_without_legacy_scoring(conn: sqlite3.Connection) -> 
                     "guid",
                     "canonical_url",
                     "title",
+                    "display_title",
                     "content",
                     "author",
                     "published_at",
                     "fetched_at",
                     "content_hash",
                     "summary",
+                    "highlights_json",
                     "summary_status",
                     "summary_error",
                     "summary_version",
                     "summarized_at",
+                    "translated_content",
+                    "translation_status",
+                    "translation_error",
+                    "translation_version",
+                    "translated_at",
                     "raw_json",
                 ),
                 columns=item_columns,
@@ -370,16 +385,23 @@ def _rebuild_content_tables_without_legacy_scoring(conn: sqlite3.Connection) -> 
                     "guid": "printf('legacy-item-%s', id)",
                     "canonical_url": "''",
                     "title": "''",
+                    "display_title": "''",
                     "content": "''",
                     "author": "''",
                     "published_at": "NULL",
                     "fetched_at": "CURRENT_TIMESTAMP",
                     "content_hash": "''",
                     "summary": "''",
+                    "highlights_json": "'[]'",
                     "summary_status": "'pending'",
                     "summary_error": "''",
                     "summary_version": "0",
                     "summarized_at": "NULL",
+                    "translated_content": "''",
+                    "translation_status": "'pending'",
+                    "translation_error": "''",
+                    "translation_version": "0",
+                    "translated_at": "NULL",
                     "raw_json": "'{}'",
                 },
             )
@@ -402,11 +424,18 @@ def _upgrade_existing_schema(conn: sqlite3.Connection) -> None:
     # be copied into a complete, retryable summary/curation state.
     for name, definition in (
         ("content_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("display_title", "TEXT NOT NULL DEFAULT ''"),
         ("summary", "TEXT NOT NULL DEFAULT ''"),
+        ("highlights_json", "TEXT NOT NULL DEFAULT '[]'"),
         ("summary_status", "TEXT NOT NULL DEFAULT 'pending'"),
         ("summary_error", "TEXT NOT NULL DEFAULT ''"),
         ("summary_version", "INTEGER NOT NULL DEFAULT 0"),
         ("summarized_at", "TEXT"),
+        ("translated_content", "TEXT NOT NULL DEFAULT ''"),
+        ("translation_status", "TEXT NOT NULL DEFAULT 'pending'"),
+        ("translation_error", "TEXT NOT NULL DEFAULT ''"),
+        ("translation_version", "INTEGER NOT NULL DEFAULT 0"),
+        ("translated_at", "TEXT"),
     ):
         _ensure_column(conn, "items", name, definition)
     for name, definition in (

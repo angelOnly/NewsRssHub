@@ -14,6 +14,7 @@ from app.domain.curation import EditorialTier
 from app.domain.models import SourceDraft, SourceKind
 from app.runtime import ApplicationServices, build_services
 from app.services.connections import ConnectionRequiredError
+from app.services.llm_client import LLMRequestError
 from app.services.llm_connection import LLMConnectionError
 from app.services.x_session import XSessionError
 
@@ -131,6 +132,27 @@ def dashboard_redirect(
     return RedirectResponse(f"/?{query}", status_code=303)
 
 
+def event_detail_redirect(
+    event_id: int,
+    *,
+    tier: str = EditorialTier.MUST_READ.value,
+    period: str = "24h",
+    page: int = 1,
+    notice: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    query = urlencode(
+        {
+            "tier": _safe_tier(tier).value,
+            "period": period if period in {"24h", "7d", "30d", "all"} else "24h",
+            "page": max(1, page),
+            **({"notice": notice} if notice else {}),
+            **({"error": error} if error else {}),
+        }
+    )
+    return RedirectResponse(f"/events/{event_id}?{query}", status_code=303)
+
+
 def settings_redirect(*, anchor: str = "", notice: str = "", error: str = "") -> RedirectResponse:
     query = urlencode({key: value for key, value in {"notice": notice, "error": error}.items() if value})
     target = f"/settings?{query}" if query else "/settings"
@@ -160,6 +182,7 @@ def health(request: Request) -> JSONResponse:
             "curation_skill": "available" if services.pipeline.skill_loader.status().available else "unavailable",
             "pending_summary": stats["pending_summary"],
             "pending_curation": stats["pending_curation"],
+            "pending_translation": stats["pending_translation"],
         }
     )
 
@@ -202,6 +225,8 @@ def event_detail(
     tier: str = EditorialTier.MUST_READ.value,
     period: str = "24h",
     page: int = 1,
+    notice: str = "",
+    error: str = "",
 ) -> HTMLResponse:
     event = get_services(request).repository.get_event(event_id)
     if not event:
@@ -218,8 +243,49 @@ def event_detail(
             "return_tier": _safe_tier(tier).value,
             "return_period": period if period in {"24h", "7d", "30d", "all"} else "24h",
             "return_page": max(1, page),
+            "notice": notice,
+            "error": error,
         },
     )
+
+
+@app.post("/events/{event_id}/items/{item_id}/translate")
+def translate_event_item(
+    request: Request,
+    event_id: int,
+    item_id: int,
+    tier: str = Form(EditorialTier.MUST_READ.value),
+    period: str = Form("24h"),
+    page: int = Form(1),
+) -> RedirectResponse:
+    services = get_services(request)
+    event = services.repository.get_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="未找到该事件")
+    if item_id not in {int(item["id"]) for item in event["items"]}:
+        raise HTTPException(status_code=404, detail="未找到该事件中的来源内容")
+    try:
+        outcome = services.translator.translate_item(item_id)
+        notice = {
+            "cached": "中文译文已存在。",
+            "direct": "正文已经是中文，已保存为中文正文。",
+            "model": "中文译文已生成。",
+        }.get(outcome, "中文译文已生成。")
+        return event_detail_redirect(
+            event_id, tier=tier, period=period, page=page, notice=notice
+        )
+    except LLMRequestError as exc:
+        return event_detail_redirect(
+            event_id, tier=tier, period=period, page=page, error=str(exc)
+        )
+    except Exception:
+        return event_detail_redirect(
+            event_id,
+            tier=tier,
+            period=period,
+            page=page,
+            error="正文翻译暂时失败，请稍后重试。",
+        )
 
 
 @app.post("/events/{event_id}/not-interested")

@@ -29,7 +29,7 @@ def _decode_json(value: str | None, fallback: Any) -> Any:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in ("raw_json", "event_ids_json", "config_json"):
+    for key in ("raw_json", "event_ids_json", "config_json", "highlights_json"):
         if key in data:
             data[key.removesuffix("_json")] = _decode_json(
                 data[key], {} if key == "config_json" else []
@@ -335,8 +335,11 @@ class Repository:
                 """
                 UPDATE items
                 SET canonical_url = ?, title = ?, content = ?, author = ?, published_at = ?,
-                    fetched_at = ?, content_hash = ?, summary = '', summary_status = 'pending',
-                    summary_error = '', summary_version = 0, summarized_at = NULL, raw_json = ?
+                    fetched_at = ?, content_hash = ?, display_title = '', summary = '',
+                    highlights_json = '[]', summary_status = 'pending', summary_error = '',
+                    summary_version = 0, summarized_at = NULL, translated_content = '',
+                    translation_status = 'pending', translation_error = '', translation_version = 0,
+                    translated_at = NULL, raw_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -364,20 +367,25 @@ class Repository:
         return _row_to_dict(row) if row else None
 
     # Item summaries ----------------------------------------------------------
-    def list_items_needing_summary(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_items_needing_summary(
+        self, limit: int = 50, *, minimum_version: int = 1
+    ) -> list[dict[str, Any]]:
+        """Return live items whose Chinese reader-facing artifact is outdated."""
+
         limit = max(1, min(int(limit), 100))
+        minimum_version = max(1, int(minimum_version))
         with self.database.read() as conn:
             rows = conn.execute(
                 f"""
                 SELECT i.*, s.name AS source_name, s.is_official
                 FROM items i
                 JOIN sources s ON s.id = i.source_id
-                WHERE i.summary_status IN ('pending', 'retry')
+                WHERE (i.summary_status IN ('pending', 'retry') OR i.summary_version < ?)
                   AND {_source_is_live_clause('s')}
                 ORDER BY COALESCE(i.published_at, i.fetched_at) DESC, i.id DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (minimum_version, limit),
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 
@@ -386,6 +394,54 @@ class Repository:
         item_id: int,
         *,
         summary: str,
+        display_title: str = "",
+        highlights: Sequence[str] | None = None,
+        status: str = "complete",
+        error: str = "",
+        version: int = 1,
+    ) -> None:
+        cleaned_highlights = [str(item).strip()[:240] for item in (highlights or []) if str(item).strip()]
+        now = iso_now()
+        with self.database.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE items
+                SET display_title = ?, summary = ?, highlights_json = ?, summary_status = ?,
+                    summary_error = ?, summary_version = ?, summarized_at = ?
+                WHERE id = ?
+                """,
+                (
+                    display_title[:300],
+                    summary[:3000],
+                    json.dumps(cleaned_highlights[:4], ensure_ascii=False),
+                    status,
+                    error[:1000],
+                    version,
+                    now,
+                    item_id,
+                ),
+            )
+            # A refreshed reader artifact can change the Chinese event title
+            # and summary.  Recurate an existing event rather than leaving the
+            # previous English display representation in place.
+            conn.execute(
+                """
+                UPDATE events
+                SET curation_status = 'pending', updated_at = ?
+                WHERE id = (SELECT event_id FROM items WHERE id = ?) AND curation_status = 'complete'
+                """,
+                (now, item_id),
+            )
+
+    def mark_item_summary_retry(self, item_id: int, error: str) -> None:
+        self.save_item_summary(item_id, summary="", status="retry", error=error, version=0)
+
+    # Chinese translations ---------------------------------------------------
+    def save_item_translation(
+        self,
+        item_id: int,
+        *,
+        translated_content: str,
         status: str = "complete",
         error: str = "",
         version: int = 1,
@@ -394,15 +450,47 @@ class Repository:
             conn.execute(
                 """
                 UPDATE items
-                SET summary = ?, summary_status = ?, summary_error = ?, summary_version = ?,
-                    summarized_at = ?
+                SET translated_content = ?, translation_status = ?, translation_error = ?,
+                    translation_version = ?, translated_at = ?
                 WHERE id = ?
                 """,
-                (summary[:3000], status, error[:1000], version, iso_now(), item_id),
+                (translated_content[:60_000], status, error[:1000], version, iso_now(), item_id),
             )
 
-    def mark_item_summary_retry(self, item_id: int, error: str) -> None:
-        self.save_item_summary(item_id, summary="", status="retry", error=error, version=0)
+    def mark_item_translation_retry(self, item_id: int, error: str) -> None:
+        self.save_item_translation(
+            item_id,
+            translated_content="",
+            status="retry",
+            error=error,
+            version=0,
+        )
+
+    def list_primary_items_needing_translation(
+        self, limit: int = 12, *, minimum_version: int = 1
+    ) -> list[dict[str, Any]]:
+        """Return visible primary bodies that should be translated proactively."""
+
+        limit = max(1, min(int(limit), 30))
+        minimum_version = max(1, int(minimum_version))
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT i.*
+                FROM events e
+                JOIN items i ON i.id = e.primary_item_id
+                JOIN sources s ON s.id = i.source_id
+                WHERE e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important')
+                  AND i.content <> ''
+                  AND (i.translation_status IN ('pending', 'retry') OR i.translation_version < ?)
+                  AND {_source_is_live_clause('s')}
+                ORDER BY e.curation_order ASC, e.last_seen_at DESC, e.id DESC
+                LIMIT ?
+                """,
+                (minimum_version, limit),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
 
     def list_items_for_curation(self, limit: int = 50) -> list[dict[str, Any]]:
         """Return only the minimal fields allowed into the project Skill."""
@@ -495,6 +583,7 @@ class Repository:
                 ).fetchone()
                 if not primary:
                     raise ValueError("筛选结果引用了不存在的主条目。")
+                display_title = str(primary["display_title"] or primary["title"])
                 target_event_id, existing_event_ids = self._event_for_group(conn, item_ids)
                 if target_event_id is None:
                     cursor = conn.execute(
@@ -508,7 +597,7 @@ class Repository:
                         """,
                         (
                             self._fingerprint_for_item(group.primary_item_id),
-                            str(primary["title"]),
+                            display_title,
                             str(primary["summary"]),
                             group.tier.value,
                             group.reason,
@@ -556,7 +645,7 @@ class Repository:
                     WHERE id = ?
                     """,
                     (
-                        str(primary["title"]),
+                        display_title,
                         str(primary["summary"]),
                         group.tier.value,
                         group.reason,
@@ -691,6 +780,11 @@ class Repository:
                     LIMIT 1
                 ) AS primary_url,
                 (
+                    SELECT i.highlights_json
+                    FROM items i
+                    WHERE i.id = e.primary_item_id
+                ) AS highlights_json,
+                (
                     SELECT COUNT(DISTINCT i.source_id)
                     FROM event_items ei
                     JOIN items i ON i.id = ei.item_id
@@ -751,6 +845,7 @@ class Repository:
             return None
         data = _row_to_dict(event)
         data["items"] = [_row_to_dict(item) for item in items]
+        data["highlights"] = data["items"][0].get("highlights", [])
         data["user_hidden"] = bool(user_hidden)
         return data
 
@@ -851,10 +946,24 @@ class Repository:
                   AND (i.event_id IS NULL OR e.curation_status IN ('pending', 'retry', 'failed'))
                 """
             ).fetchone()[0]
+            pending_translation = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM events e
+                JOIN items i ON i.id = e.primary_item_id
+                JOIN sources s ON s.id = i.source_id
+                WHERE e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important')
+                  AND i.content <> ''
+                  AND i.translation_status IN ('pending', 'retry')
+                  AND {_source_is_live_clause('s')}
+                """
+            ).fetchone()[0]
         return {
             "source_count": int(source_count),
             "healthy_count": int(healthy_count),
             "event_count": int(event_count),
             "pending_summary": int(pending_summary),
             "pending_curation": int(pending_curation),
+            "pending_translation": int(pending_translation),
         }

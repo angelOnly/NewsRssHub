@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from app.config import Settings
-from app.domain.curation import EditorialTier
+from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FeedItem, SourceDraft, SourceKind
 from app.services.curator import CurationService
 from app.services.llm_connection import LLMRuntimeConfig
@@ -97,6 +97,19 @@ class FailingCrossBatchClient:
         }
 
 
+class SummaryArtifactClient:
+    def complete_json(self, *, system: str, user: dict[str, object]) -> dict[str, object]:
+        return {
+            "title_zh": "MiniMax H3 已支持在 RTX 3060 本地运行",
+            "summary": "MiniMax H3 已发布并获得 ComfyUI 原生支持。"
+            "社区实测显示，12GB 显存的 RTX 3060 可在本地生成 480p 视频。",
+            "highlights": [
+                "已获得 ComfyUI 原生支持。",
+                "12GB 显存 RTX 3060 可本地生成 480p 视频。",
+            ],
+        }
+
+
 def build_settings(root: Path) -> Settings:
     source_dir = root / "sources"
     source_dir.mkdir()
@@ -124,6 +137,61 @@ def build_settings(root: Path) -> Settings:
 
 
 class CurationTests(unittest.TestCase):
+    def test_model_summary_persists_chinese_title_and_key_facts(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = repository.create_source(
+                SourceDraft(name="Reddit", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            item_id, inserted = repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="minimax",
+                    title="Open-weight video model Minimax H3 can now run locally",
+                    link="https://example.test/minimax",
+                    content="MiniMax H3 is now natively supported in ComfyUI on an RTX 3060.",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            )
+            self.assertTrue(inserted)
+
+            service = SummaryService(
+                repository,
+                settings,
+                llm_connections=FixedConnection(),  # type: ignore[arg-type]
+                client_factory=lambda _config: SummaryArtifactClient(),  # type: ignore[arg-type]
+            )
+            result = service.summarize_pending()
+            item = repository.get_item(item_id)
+            assert item is not None
+
+            self.assertEqual(result.completed, 1)
+            self.assertEqual(item["display_title"], "MiniMax H3 已支持在 RTX 3060 本地运行")
+            self.assertEqual(item["summary_version"], 2)
+            self.assertEqual(
+                item["highlights"],
+                ["已获得 ComfyUI 原生支持。", "12GB 显存 RTX 3060 可本地生成 480p 视频。"],
+            )
+
+            event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[item_id],
+                        primary_item_id=item_id,
+                        tier=EditorialTier.MUST_READ,
+                        reason="已可在本地工作流使用",
+                        order=1,
+                    )
+                ]
+            )[0]
+            event = repository.get_event(event_id)
+            assert event is not None
+            self.assertEqual(event["title"], item["display_title"])
+            self.assertEqual(event["highlights"], item["highlights"])
+
     def test_cross_batch_failure_does_not_hide_completed_events(self) -> None:
         with TemporaryDirectory() as directory:
             settings = build_settings(Path(directory))
@@ -234,3 +302,7 @@ class CurationTests(unittest.TestCase):
             self.assertEqual(result.completed, 1)
             self.assertEqual(item["summary_status"], "complete")
             self.assertIn("一个简短更新", item["summary"])
+            # A fallback is version 1 and remains eligible for a future model
+            # upgrade, but it must not be regenerated on every worker pass
+            # while the model stays disabled.
+            self.assertEqual(service.summarize_pending().completed, 0)

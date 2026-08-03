@@ -28,7 +28,7 @@
 
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统先验证，成功后才加密保存。
 
-Web 服务只负责页面和配置；Worker 独立完成抓取 → 单帖摘要 → Skill 筛选 → 每日简报。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 会一并复制到镜像，缺失时系统会明确显示筛选不可用，而不会退回旧关键词评分。
+Web 服务只负责页面和配置；Worker 独立完成抓取 → 中文标题/摘要/重点 → Skill 筛选 → 必看与重要更新的正文译文 → 每日简报。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 会一并复制到镜像，缺失时系统会明确显示筛选不可用，而不会退回旧关键词评分。
 
 ## 本地开发
 
@@ -43,10 +43,10 @@ uvicorn app.web:app --reload
 ## 内容处理顺序
 
 ```text
-原始帖子 → 单帖摘要 → 项目 Skill（合并 / 去重 / 四层判断） → SQLite → 四层 Tab
+原始帖子 → 中文标题、摘要、重点 → 项目 Skill（合并 / 去重 / 四层判断） → 必看/重要正文中文译文 → SQLite → 四层 Tab
 ```
 
-筛选模型只收到用户自然语言画像及每条帖子的 `id`、标题、摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。
+筛选模型只收到用户自然语言画像及每条帖子的 `id`、原始标题、中文摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。正文翻译是详情页展示缓存：后台只预翻译“必看”和“重要更新”的主来源，其他来源可在详情页按需生成。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。
 
 ## 安全提示
 

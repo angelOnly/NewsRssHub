@@ -2,11 +2,21 @@
 {% block title %}{{ event.title }} · NewsRSSHub{% endblock %}
 {% block content %}
 <a class="back-link" href="/?{{ return_query }}">← 返回热点列表</a>
+{% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 <article class="detail-page">
   <header class="detail-head">
     <div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span><span>{{ event.source_count }} 个来源</span><span>{{ event.last_seen_at|relative_time }}</span></div>
     <h1>{{ event.title }}</h1>
     <p class="detail-lede">{{ event.summary }}</p>
+    {% if event.highlights %}
+    <section class="detail-highlights" aria-label="重点">
+      <span class="panel-kicker">重点</span>
+      <ul class="event-highlights">
+        {% for highlight in event.highlights %}<li>{{ highlight }}</li>{% endfor %}
+      </ul>
+    </section>
+    {% endif %}
     {% if event.tier_reason %}<p class="tier-reason detail-reason">筛选说明：{{ event.tier_reason }}</p>{% endif %}
     {% if not event.user_hidden %}
     <form class="event-feedback event-feedback-detail" method="post" action="/events/{{ event.id }}/not-interested">
@@ -21,9 +31,24 @@
     {% for item in event["items"] %}
       <article class="source-item">
         <div class="source-item-meta"><span class="source-badge">{{ item.source_name }}</span>{% if item.is_official %}<span class="official-badge">官方</span>{% endif %}<span>{{ item.published_at|relative_time if item.published_at else item.fetched_at|relative_time }}</span></div>
-        <h3>{{ item.title }}</h3>
+        <h3>{{ item.display_title or item.title }}</h3>
+        {% if item.display_title and item.display_title != item.title %}<p class="original-title">原始标题：{{ item.title }}</p>{% endif %}
         {% if item.summary %}<p class="item-summary">{{ item.summary }}</p>{% endif %}
-        {% if item.content %}<details class="original-content"><summary>查看原始内容</summary><p>{{ item.content[:4000] }}{% if item.content|length > 4000 %}…{% endif %}</p></details>{% endif %}
+        {% if item.translated_content %}
+        <section class="translation-content">
+          <h4>{% if item.translated_content == item.content %}中文正文{% else %}中文译文{% endif %}</h4>
+          <p>{{ item.translated_content }}</p>
+        </section>
+        {% elif item.content %}
+        <div class="translation-pending">
+          <span>{% if item.translation_status == 'retry' %}上次未能生成中文译文。{% else %}中文译文尚未生成。{% endif %}</span>
+          <form method="post" action="/events/{{ event.id }}/items/{{ item.id }}/translate">
+            <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
+            <button type="submit">生成中文译文</button>
+          </form>
+        </div>
+        {% endif %}
+        {% if item.content %}<details class="original-content"><summary>查看原始正文</summary><p>{{ item.content }}</p></details>{% endif %}
         {% if item.canonical_url %}<a class="original-link" href="{{ item.canonical_url }}" target="_blank" rel="noreferrer">打开原始内容 ↗</a>{% endif %}
       </article>
     {% endfor %}

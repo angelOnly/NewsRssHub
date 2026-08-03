@@ -57,7 +57,16 @@ class WebTests(unittest.TestCase):
                     published_at=datetime.now(timezone.utc),
                 ),
             )
-            services.repository.save_item_summary(item_id, summary="新模型已开放使用。")
+            services.repository.save_item_summary(
+                item_id,
+                display_title="OpenAI 新模型已开放使用",
+                summary="新模型已开放使用。",
+                highlights=["开发者现在可以开始使用新模型。"],
+                version=2,
+            )
+            services.repository.save_item_translation(
+                item_id, translated_content="这是原始正文的中文译文。"
+            )
             event_id = services.repository.apply_curation_groups(
                 [
                     CurationGroup(
@@ -82,14 +91,18 @@ class WebTests(unittest.TestCase):
                     self.assertIn("必看", dashboard.text)
                     self.assertIn("重要更新", dashboard.text)
                     self.assertIn("资讯速览", dashboard.text)
-                    self.assertIn("OpenAI 发布新模型", dashboard.text)
+                    self.assertIn("OpenAI 新模型已开放使用", dashboard.text)
+                    self.assertIn("开发者现在可以开始使用新模型", dashboard.text)
                     self.assertNotIn("全部主题", dashboard.text)
                     self.assertNotIn("重要性排序", dashboard.text)
 
                     detail = client.get(f"/events/{event_id}?tier=must_read&period=all")
                     self.assertEqual(detail.status_code, 200)
                     self.assertIn("原始内容与来源", detail.text)
-                    self.assertIn("查看原始内容", detail.text)
+                    self.assertIn("查看原始正文", detail.text)
+                    self.assertIn("中文译文", detail.text)
+                    self.assertIn("原始标题", detail.text)
+                    self.assertIn("OpenAI 发布新模型", detail.text)
                     self.assertNotIn("模型解读", detail.text)
 
                     form = client.get("/sources/new")

@@ -12,6 +12,7 @@ from app.services.llm_connection import LLMConnectionService
 from app.services.skill_loader import SkillLoader
 from app.services.sources import SourceService
 from app.services.summarizer import SummaryService
+from app.services.translator import TranslationService
 from app.storage.repository import Repository
 
 
@@ -38,6 +39,7 @@ class IntelligencePipeline:
         self.curator = CurationService(
             repository, settings, self.llm_connections, self.skill_loader
         )
+        self.translator = TranslationService(repository, settings, self.llm_connections)
         self.briefs = BriefService(repository, settings)
 
     def bootstrap(self) -> int:
@@ -47,10 +49,12 @@ class IntelligencePipeline:
         collected = self.collector.collect_due_sources(force=force)
         summarized = self.summarizer.summarize_pending(limit=50)
         curated = self.curator.curate_available(limit=120)
+        translated = self.translator.translate_visible_primary_items(limit=12)
         brief = self.briefs.generate_today()
         return {
             "collection": asdict(collected),
             "summary": asdict(summarized),
             "curation": asdict(curated),
+            "translation": asdict(translated),
             "brief": brief,
         }

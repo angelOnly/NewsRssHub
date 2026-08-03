@@ -28,7 +28,7 @@
 <section class="stat-grid" aria-label="情报台状态">
   <div class="stat-card"><span>活跃来源</span><strong>{{ stats.source_count }}</strong><small>{{ stats.healthy_count }} 个连接正常</small></div>
   <div class="stat-card"><span>过去 24 小时已筛选事件</span><strong>{{ stats.event_count }}</strong><small>重复消息已合并</small></div>
-  <div class="stat-card stat-card-wide"><span>处理队列</span><strong>{{ stats.pending_summary + stats.pending_curation }}</strong><small>等待摘要或语义筛选的条目</small></div>
+  <div class="stat-card stat-card-wide"><span>处理队列</span><strong>{{ stats.pending_summary + stats.pending_curation + stats.pending_translation }}</strong><small>等待摘要、筛选或重点正文翻译的条目</small></div>
 </section>
 
 <nav class="tier-tabs" aria-label="内容层级">
@@ -65,9 +65,19 @@
           <h3>{{ event.title }}</h3>
           {% if tier == 'must_read' %}
             <p>{{ event.summary }}</p>
+            {% if event.highlights %}
+            <ul class="event-highlights" aria-label="重点">
+              {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
+            </ul>
+            {% endif %}
             {% if event.tier_reason %}<small class="tier-reason">{{ event.tier_reason }}</small>{% endif %}
           {% elif tier == 'important' %}
             <p class="event-summary-compact">{{ event.summary }}</p>
+            {% if event.highlights %}
+            <ul class="event-highlights compact-highlights" aria-label="重点">
+              {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
+            </ul>
+            {% endif %}
           {% elif tier == 'hidden' %}
             <p class="event-summary-compact">{{ event.summary }}</p>
             {% if event.user_hidden %}<small class="tier-reason">你已隐藏</small>{% elif event.tier_reason %}<small class="tier-reason">{{ event.tier_reason }}</small>{% endif %}
