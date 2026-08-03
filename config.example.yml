@@ -1,0 +1,19 @@
+# Safe Docker default. Keep credentials only in .env, never in this file.
+app:
+  source_dir: "sources"
+  log_level: "INFO"
+  request_timeout: 30
+
+rsshub:
+  base_url: "https://rsshub.app"
+  exclude_paths: []
+
+crawler:
+  rss_interval_minutes: 60
+
+database:
+  type: "sqlite"
+  path: "rss_news.db"
+
+llm:
+  enabled: true

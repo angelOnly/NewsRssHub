@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from dataclasses import replace
+import re
+from typing import Any
+
+import yaml
+
+from app.config import Settings
+from app.domain.models import SourceDraft, SourceKind, ValidationResult
+from app.plugins.base import PluginRegistry
+from app.storage.repository import Repository
+
+
+THEME_PRIORITY = {
+    "AI_Tech": 9,
+    "GeneralNews": 7,
+}
+
+
+class SourceService:
+    def __init__(self, repository: Repository, registry: PluginRegistry, settings: Settings) -> None:
+        self.repository = repository
+        self.registry = registry
+        self.settings = settings
+
+    def add_source(self, draft: SourceDraft, validate: bool = True) -> tuple[dict[str, Any], ValidationResult | None]:
+        plugin = self.registry.get(draft.kind)
+        locator = plugin.normalize_locator(draft.locator)
+        feed_url = plugin.resolve_feed_url(locator, self.settings)
+        normalized = replace(draft, locator=locator)
+        source_id = self.repository.create_source(normalized, feed_url)
+        source = self.repository.get_source(source_id)
+        assert source is not None
+
+        result: ValidationResult | None = None
+        if validate:
+            result = self.validate_source(source_id)
+            source = self.repository.get_source(source_id)
+            assert source is not None
+        return source, result
+
+    @staticmethod
+    def detect_kind(locator: str) -> SourceKind:
+        """Choose the smallest useful connector from a pasted user value."""
+        value = locator.strip().casefold()
+        if "reddit.com/" in value or re.match(r"^(?:r|u|user)/", value):
+            return SourceKind.REDDIT
+        if "x.com/" in value or "twitter.com/" in value or value.startswith("@"):
+            return SourceKind.X_RSSHUB
+        return SourceKind.RSS
+
+    def update_source(self, source_id: int, draft: SourceDraft) -> tuple[dict[str, Any], ValidationResult | None]:
+        current = self.repository.get_source(source_id)
+        if not current:
+            raise ValueError("来源不存在。")
+        plugin = self.registry.get(draft.kind)
+        locator = plugin.normalize_locator(draft.locator)
+        if draft.kind.value != current["kind"] or locator != current["locator"]:
+            duplicate = self.repository.find_source(draft.kind.value, locator)
+            if duplicate and int(duplicate["id"]) != source_id:
+                raise ValueError("这个来源已经存在。")
+            # Changing provider identity is intentionally not implicit; it keeps
+            # existing historical records attached to the correct source.
+            raise ValueError("来源类型或地址已改变，请新增一个来源后再归档旧来源。")
+        self.repository.update_source(
+            source_id,
+            {
+                "name": draft.name,
+                "category": draft.category,
+                "priority": draft.priority,
+                "is_official": int(draft.is_official),
+                "enabled": int(draft.enabled),
+                "poll_interval_minutes": draft.poll_interval_minutes,
+                "fallback_url": draft.fallback_url,
+            },
+        )
+        source = self.repository.get_source(source_id)
+        assert source is not None
+        return source, None
+
+    def validate_source(self, source_id: int) -> ValidationResult:
+        source = self.repository.get_source(source_id)
+        if not source:
+            raise ValueError("来源不存在。")
+        plugin = self.registry.get(source["kind"])
+        try:
+            result = plugin.validate(source, self.settings)
+        except Exception as exc:
+            result = ValidationResult(
+                ok=False,
+                feed_url=source["feed_url"],
+                message=f"连接失败：{exc}",
+            )
+
+        if result.ok:
+            self.repository.update_source(
+                source_id,
+                {"feed_url": result.feed_url, "health_status": "healthy", "last_error": ""},
+            )
+        else:
+            self.repository.update_source(
+                source_id,
+                {"feed_url": result.feed_url, "health_status": "error", "last_error": result.message},
+            )
+        return result
+
+    def seed_existing_feeds(self) -> int:
+        """Import YAML-declared sources without overwriting UI-managed records.
+
+        ``feeds.yml`` is intentionally declarative: it can bootstrap a fresh
+        database and safely receive new source rows after the dashboard is
+        already in use. Existing source ids are never rewritten here.
+        """
+
+        if not self.settings.feeds_path.exists():
+            return 0
+        with self.settings.feeds_path.open("r", encoding="utf-8") as handle:
+            entries = yaml.safe_load(handle) or []
+        if not isinstance(entries, list):
+            return 0
+
+        created = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                kind = SourceKind(str(entry.get("kind", "rss")))
+            except ValueError:
+                continue
+            locator = str(entry.get("locator") or entry.get("url") or "").strip()
+            if not locator:
+                continue
+            try:
+                priority = max(1, min(int(entry.get("priority", THEME_PRIORITY.get(str(entry.get("theme")), 6))), 10))
+                poll_interval = max(5, min(int(entry.get("poll_interval_minutes", 120)), 1440))
+            except (TypeError, ValueError):
+                continue
+            draft = SourceDraft(
+                name=str(entry.get("name") or locator),
+                kind=kind,
+                locator=locator,
+                category=str(entry.get("category") or entry.get("theme") or "未分类"),
+                priority=priority,
+                is_official=bool(entry.get("official", False)),
+                poll_interval_minutes=poll_interval,
+                fallback_url=str(entry.get("fallback_url") or ""),
+                enabled=bool(entry.get("enabled", True)),
+            )
+            plugin = self.registry.get(draft.kind)
+            locator = plugin.normalize_locator(draft.locator)
+            if self.repository.find_source(draft.kind.value, locator):
+                continue
+            self.repository.create_source(replace(draft, locator=locator), plugin.resolve_feed_url(locator, self.settings))
+            created += 1
+        return created
+
+    def form_choices(self) -> list[tuple[str, str]]:
+        return [("auto", "自动识别（推荐）"), *self.registry.choices()]

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}来源管理 · NewsRSSHub{% endblock %}
+{% block content %}
+<header class="page-head compact">
+  <div>
+    <p class="eyebrow">SOURCE CONTROL</p>
+    <h1>来源管理</h1>
+    <p class="subhead">添加账号、社区或 RSS；每个来源独立验证、独立启停。</p>
+  </div>
+  <a class="button button-primary" href="/sources/new">＋ 添加来源</a>
+</header>
+
+{% if x_credential.state != 'valid' %}
+<section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
+  <div><strong>X 账号当前不会正常抓取</strong><p>{{ x_credential.message }}</p></div>
+  <a class="button button-secondary" href="/settings/x-session">维护 X Cookie</a>
+</section>
+{% endif %}
+
+{% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+{% if sources %}
+<section class="sources-table-wrap">
+  <table class="sources-table">
+    <thead><tr><th>来源</th><th>类型</th><th>优先级</th><th>状态</th><th>上次成功</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for source in sources %}
+      <tr>
+        <td>
+          <strong>{{ source.name }}</strong>
+          <small>{{ source.category }} · {{ source.locator }}</small>
+        </td>
+        <td>{{ source.kind|kind_label }}</td>
+        <td><span class="priority-value">{{ source.priority }}</span> / 10</td>
+        <td><span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'需处理','unknown':'待验证','archived':'已归档'}.get(source.health_status, source.health_status) }}</span></td>
+        <td>{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}</td>
+        <td class="table-actions">
+          <a href="/sources/{{ source.id }}/edit">编辑</a>
+          <form method="post" action="/sources/{{ source.id }}/test"><button type="submit">测试</button></form>
+          <form method="post" action="/sources/{{ source.id }}/toggle"><button type="submit">{{ '暂停' if source.enabled else '启用' }}</button></form>
+          <form method="post" action="/sources/{{ source.id }}/archive"><button class="danger" type="submit">归档</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<div class="empty-state">
+  <span>◎</span><h2>还没有可用来源</h2><p>添加一个 RSS、X 账号或 Reddit 社区，系统会先验证连接再开始抓取。</p>
+  <a class="button button-primary" href="/sources/new">添加第一个来源</a>
+</div>
+{% endif %}
+{% endblock %}

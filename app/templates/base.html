@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="个人化每日情报台：从可信来源中筛选真正重要的更新。">
+    <title>{% block title %}NewsRSSHub{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='x-session.css') }}">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="返回情报首页">
+          <span class="brand-mark">N</span>
+          <span>News<span>RSS</span>Hub</span>
+        </a>
+        <p class="brand-note">你的每日信号台</p>
+        <nav class="nav" aria-label="主导航">
+          <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/">
+            <span>⌁</span> 最新热点
+          </a>
+          <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs">
+            <span>▤</span> 每日简报
+          </a>
+          <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources">
+            <span>◎</span> 来源管理
+          </a>
+          <a class="nav-link {% if active_path.startswith('/settings/x-session') %}active{% endif %}" href="/settings/x-session">
+            <span>◇</span> X 登录状态
+          </a>
+          <a class="nav-link {% if active_path.startswith('/settings/llm') %}active{% endif %}" href="/settings/llm">
+            <span>✦</span> 模型设置
+          </a>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="pulse-dot"></span>
+          后台会按来源频率自动更新
+        </div>
+      </aside>
+      <main class="content">{% block content %}{% endblock %}</main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}最新热点 · NewsRSSHub{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <p class="eyebrow">PERSONAL INTELLIGENCE</p>
+    <h1>今天，什么真的值得看？</h1>
+    <p class="subhead">默认只展示摘要；点开后才查看原始内容、证据与完整解读。</p>
+  </div>
+  <a class="button button-primary" href="/sources/new">＋ 添加来源</a>
+</header>
+
+{% if x_credential.state != 'valid' %}
+<section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
+  <div>
+    <strong>X 账号抓取需要处理</strong>
+    <p>{{ x_credential.message }}</p>
+  </div>
+  <a class="button button-secondary" href="/settings/x-session">维护 X Cookie</a>
+</section>
+{% endif %}
+
+<section class="stat-grid" aria-label="情报台状态">
+  <div class="stat-card"><span>活跃来源</span><strong>{{ stats.source_count }}</strong><small>{{ stats.healthy_count }} 个连接正常</small></div>
+  <div class="stat-card"><span>过去 24 小时热点</span><strong>{{ stats.event_count }}</strong><small>已合并重复报道</small></div>
+  <div class="stat-card stat-card-wide"><span>阅读方式</span><strong>摘要优先</strong><small>每页最多 50 条，按重要性排序</small></div>
+</section>
+
+<form class="filter-bar" method="get" action="/">
+  <div class="filter-group" aria-label="时间范围">
+    {% for value, label in [('24h', '24 小时'), ('7d', '7 天'), ('30d', '30 天'), ('all', '全部')] %}
+      <a class="filter-pill {% if period == value %}selected{% endif %}" href="/?period={{ value }}&topic={{ topic }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <label class="select-wrap">
+    <span class="sr-only">主题筛选</span>
+    <select name="topic" onchange="this.form.submit()">
+      <option value="">全部主题</option>
+      {% for option in topics %}<option value="{{ option }}" {% if topic == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+    </select>
+  </label>
+  <input type="hidden" name="period" value="{{ period }}">
+</form>
+
+<section class="event-section">
+  <div class="section-caption">
+    <h2>重要事件</h2>
+    <span>第 {{ page }} 页 · 最多 50 条</span>
+  </div>
+  {% if events %}
+    <div class="event-list">
+      {% for event in events %}
+      <a class="event-card" href="/events/{{ event.id }}" aria-label="查看 {{ event.title }} 的详情">
+        <div class="event-rank">
+          <span class="rank-score">{{ '%.0f'|format(event.importance_score) }}</span>
+          <span>{{ event.importance_score|importance_label }}</span>
+        </div>
+        <div class="event-main">
+          <div class="event-meta">
+            <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
+            <span>{{ event.last_seen_at|relative_time }}</span>
+            {% if event.source_count > 1 %}<span>{{ event.source_count }} 个来源印证</span>{% endif %}
+          </div>
+          <h3>{{ event.title }}</h3>
+          <p>{{ event.summary or '正在生成摘要…' }}</p>
+          {% if event.why_matters %}<small class="why">为何值得看：{{ event.why_matters }}</small>{% endif %}
+          {% if event.tags %}<div class="tag-row">{% for tag in event.tags[:3] %}<span class="tag">{{ tag }}</span>{% endfor %}</div>{% endif %}
+        </div>
+        <span class="card-arrow" aria-hidden="true">→</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% if has_more %}
+      <div class="load-more"><a class="button button-secondary" href="/?period={{ period }}&topic={{ topic }}&page={{ page + 1 }}">加载下一页</a></div>
+    {% endif %}
+  {% else %}
+    <div class="empty-state">
+      <span>⌁</span>
+      <h2>这里很快会有真正重要的更新</h2>
+      <p>先在“来源管理”添加或启用来源，后台采集后会自动生成摘要和热点排序。</p>
+      <a class="button button-primary" href="/sources">管理来源</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

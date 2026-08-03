@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}每日简报 · NewsRSSHub{% endblock %}
+{% block content %}
+<header class="page-head compact"><div><p class="eyebrow">DAILY BRIEFS</p><h1>每日简报</h1><p class="subhead">每天保留一份可回看的重要事件摘要。</p></div></header>
+{% if briefs %}
+  <div class="brief-list">
+  {% for brief in briefs %}
+    <a class="brief-card" href="/briefs/{{ brief.brief_date }}"><span class="brief-date">{{ brief.brief_date }}</span><h2>{{ brief.title }}</h2><p>{{ brief.intro }}</p><span>查看简报 →</span></a>
+  {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state"><span>▤</span><h2>第一份日报正在路上</h2><p>后台完成采集和筛选后，会自动生成今天的简报。</p></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ event.title }} · NewsRSSHub{% endblock %}
+{% block content %}
+<a class="back-link" href="/">← 返回热点列表</a>
+<article class="detail-page">
+  <header class="detail-head">
+    <div class="event-meta">
+      <span class="importance-pill">{{ event.importance_score|importance_label }} {{ '%.0f'|format(event.importance_score) }}</span>
+      <span>{{ event.source_count }} 个来源</span>
+      <span>{{ event.last_seen_at|relative_time }}</span>
+    </div>
+    <h1>{{ analysis.headline or event.title }}</h1>
+    <p class="detail-lede">{{ analysis.summary or event.summary }}</p>
+    <div class="tag-row">{% for tag in event.tags %}<span class="tag">{{ tag }}</span>{% endfor %}</div>
+  </header>
+
+  <section class="detail-grid">
+    <div class="analysis-panel">
+      <div class="panel-kicker">模型解读</div>
+      <h2>为什么值得看</h2>
+      <p>{{ analysis.why_it_matters or event.why_matters }}</p>
+      <h2>确认的事实</h2>
+      {% if analysis.facts %}
+        <ul class="fact-list">
+        {% for fact in analysis.facts %}
+          <li>
+            <span>{{ fact.statement if fact is mapping else fact }}</span>
+            {% if fact is mapping and fact.source %}<a href="{{ fact.source }}" target="_blank" rel="noreferrer">来源 ↗</a>{% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+      {% else %}<p class="muted">等待模型分析完成。</p>{% endif %}
+      <h2>后续观察</h2>
+      {% if analysis.watch_points %}<ul class="watch-list">{% for point in analysis.watch_points %}<li>{{ point }}</li>{% endfor %}</ul>{% else %}<p class="muted">暂无。</p>{% endif %}
+    </div>
+    <aside class="confidence-card">
+      <span>分析可信度</span>
+      <strong>{{ analysis.confidence or event.confidence }}</strong>
+      <p>事实、来源观点与模型推论会保持分开显示。</p>
+    </aside>
+  </section>
+
+  <section class="source-section">
+    <div class="section-caption"><h2>原始内容与来源</h2><span>点击跳转原文</span></div>
+    {% for item in event["items"] %}
+      <article class="source-item">
+        <div class="source-item-meta">
+          <span class="source-badge">{{ item.source_name }}</span>
+          {% if item.is_official %}<span class="official-badge">官方</span>{% endif %}
+          <span>{{ item.published_at|relative_time if item.published_at else item.fetched_at|relative_time }}</span>
+        </div>
+        <h3>{{ item.title }}</h3>
+        {% if item.content %}<p>{{ item.content[:1800] }}{% if item.content|length > 1800 %}…{% endif %}</p>{% endif %}
+        {% if item.canonical_url %}<a class="original-link" href="{{ item.canonical_url }}" target="_blank" rel="noreferrer">打开原始内容 ↗</a>{% endif %}
+      </article>
+    {% endfor %}
+  </section>
+</article>
+{% endblock %}

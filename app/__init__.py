@@ -1,0 +1,1 @@
+"""NewsRSSHub application package."""

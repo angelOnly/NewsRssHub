@@ -1,0 +1,411 @@
+# ================================================================
+# NewsRSSHub 初始来源目录
+#
+# 说明：本文件用于首次导入和后续新增来源。已在网页中配置过的
+# 来源不会被本文件覆盖；网页配置才是运行时的最终状态。
+# kind 可选值：rss / x_rsshub / reddit
+# ================================================================
+
+# ------------------------------------------------
+# 既有 RSS 来源（保留原地址）
+# ------------------------------------------------
+- name: "36Kr_AI资讯"
+  kind: rss
+  url: "https://36kr.com/feed"
+  theme: "AI产品与行业前沿"
+  priority: 9
+  poll_interval_minutes: 120
+
+- name: "澎湃新闻-首页"
+  kind: rss
+  url: "https://rsshub.app/thepaper/featured"
+  theme: "国内重大事件与全网热点"
+  priority: 7
+  poll_interval_minutes: 120
+
+# 原有 rss.app 链接保持不动；如果服务恢复可继续使用。
+- name: "reddit-stable diffusion（旧 rss.app）"
+  kind: rss
+  url: "https://rss.app/feeds/6E0PVUhx279TAbME.xml"
+  theme: "ComfyUI与AI视频制作"
+  priority: 7
+  poll_interval_minutes: 120
+
+- name: "reddit-comfyui（旧 rss.app）"
+  kind: rss
+  url: "https://rss.app/feeds/ADU2v00mvRQhCyFn.xml"
+  theme: "ComfyUI与AI视频制作"
+  priority: 8
+  poll_interval_minutes: 120
+
+# ------------------------------------------------
+# 你在 X 上已关注的官方 / 机构账号
+# 通过 config.yml 中的 RSSHub 实例解析；首次导入后会逐个验证。
+# ------------------------------------------------
+- name: "OpenAI"
+  kind: x_rsshub
+  locator: "OpenAI"
+  theme: "AI产品与行业前沿"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "OpenAI Developers"
+  kind: x_rsshub
+  locator: "OpenAIDevs"
+  theme: "AI产品与行业前沿"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "ChatGPT"
+  kind: x_rsshub
+  locator: "ChatGPT"
+  theme: "AI产品与行业前沿"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Codex Changelog"
+  kind: x_rsshub
+  locator: "Codex_Changelog"
+  theme: "AI产品与行业前沿"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Anthropic"
+  kind: x_rsshub
+  locator: "AnthropicAI"
+  theme: "AI产品与行业前沿"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Claude"
+  kind: x_rsshub
+  locator: "claudeai"
+  theme: "AI产品与行业前沿"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Google Gemini"
+  kind: x_rsshub
+  locator: "GeminiApp"
+  theme: "AI产品与行业前沿"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "ComfyUI"
+  kind: x_rsshub
+  locator: "ComfyUI"
+  theme: "ComfyUI与AI视频制作"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Midjourney"
+  kind: x_rsshub
+  locator: "midjourney"
+  theme: "ComfyUI与AI视频制作"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Stability AI"
+  kind: x_rsshub
+  locator: "StabilityAI"
+  theme: "ComfyUI与AI视频制作"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Kling AI"
+  kind: x_rsshub
+  locator: "Kling_ai"
+  theme: "ComfyUI与AI视频制作"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Runway"
+  kind: x_rsshub
+  locator: "runwayml"
+  theme: "ComfyUI与AI视频制作"
+  priority: 10
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Luma"
+  kind: x_rsshub
+  locator: "LumaLabsAI"
+  theme: "ComfyUI与AI视频制作"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "PixVerse"
+  kind: x_rsshub
+  locator: "PixVerse_"
+  theme: "ComfyUI与AI视频制作"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Tripo"
+  kind: x_rsshub
+  locator: "tripoai"
+  theme: "ComfyUI与AI视频制作"
+  priority: 9
+  official: true
+  poll_interval_minutes: 30
+
+- name: "Civitai"
+  kind: x_rsshub
+  locator: "HelloCivitai"
+  theme: "ComfyUI与AI视频制作"
+  priority: 8
+  official: true
+  poll_interval_minutes: 60
+
+- name: "Blender"
+  kind: x_rsshub
+  locator: "Blender"
+  theme: "ComfyUI与AI视频制作"
+  priority: 8
+  official: true
+  poll_interval_minutes: 60
+
+- name: "Unity"
+  kind: x_rsshub
+  locator: "unity"
+  theme: "ComfyUI与AI视频制作"
+  priority: 7
+  official: true
+  poll_interval_minutes: 60
+
+- name: "3DxDEV"
+  kind: x_rsshub
+  locator: "3DxDEV7"
+  theme: "ComfyUI与AI视频制作"
+  priority: 5
+  poll_interval_minutes: 120
+
+- name: "SpaceX"
+  kind: x_rsshub
+  locator: "SpaceX"
+  theme: "科技新品与发布"
+  priority: 7
+  official: true
+  poll_interval_minutes: 60
+
+- name: "Google"
+  kind: x_rsshub
+  locator: "Google"
+  theme: "科技新品与发布"
+  priority: 6
+  official: true
+  poll_interval_minutes: 60
+
+- name: "Meta"
+  kind: x_rsshub
+  locator: "Meta"
+  theme: "AI产品与行业前沿"
+  priority: 6
+  official: true
+  poll_interval_minutes: 60
+
+- name: "BBC News World"
+  kind: x_rsshub
+  locator: "BBCWorld"
+  theme: "国际局势与地缘政治"
+  priority: 8
+  official: false
+  poll_interval_minutes: 30
+
+- name: "Elon Musk"
+  kind: x_rsshub
+  locator: "elonmusk"
+  theme: "科技新品与发布"
+  priority: 5
+  official: false
+  poll_interval_minutes: 60
+
+- name: "X Platform"
+  kind: x_rsshub
+  locator: "X"
+  theme: "科技新品与发布"
+  priority: 4
+  official: true
+  poll_interval_minutes: 120
+
+# ------------------------------------------------
+# 你已关注的建设者、创作者与分析账号
+# 保留全部关注；重要性由主题命中和优先级共同决定。
+# ------------------------------------------------
+- name: "逸尘"
+  kind: x_rsshub
+  locator: "gengdaJ"
+  theme: "商业洞察与趋势判断"
+  priority: 7
+  poll_interval_minutes: 60
+
+- name: "Tibo"
+  kind: x_rsshub
+  locator: "thsottiaux"
+  theme: "AI产品与行业前沿"
+  priority: 8
+  poll_interval_minutes: 60
+
+- name: "Ashraff Hathibelagal"
+  kind: x_rsshub
+  locator: "Hathibel"
+  theme: "AI产品与行业前沿"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "gimu"
+  kind: x_rsshub
+  locator: "gimu_ai"
+  theme: "AI产品与行业前沿"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "tamrat"
+  kind: x_rsshub
+  locator: "tamrrat"
+  theme: "ComfyUI与AI视频制作"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "Selphea"
+  kind: x_rsshub
+  locator: "Selphea_"
+  theme: "ComfyUI与AI视频制作"
+  priority: 5
+  poll_interval_minutes: 120
+
+- name: "Vincent AI Notes"
+  kind: x_rsshub
+  locator: "Vincent_AINotes"
+  theme: "AI产品与行业前沿"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "自己修行的才谷"
+  kind: x_rsshub
+  locator: "realCaigu"
+  theme: "商业洞察与趋势判断"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "Framer"
+  kind: x_rsshub
+  locator: "Framer_X"
+  theme: "ComfyUI与AI视频制作"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "Alexandra Aisling"
+  kind: x_rsshub
+  locator: "AllaAisling"
+  theme: "ComfyUI与AI视频制作"
+  priority: 5
+  poll_interval_minutes: 120
+
+- name: "Jake Fitzgerald"
+  kind: x_rsshub
+  locator: "earthtojake"
+  theme: "AI产品与行业前沿"
+  priority: 5
+  poll_interval_minutes: 120
+
+- name: "BLVCKLIGHT"
+  kind: x_rsshub
+  locator: "BLVCKLIGHTai"
+  theme: "ComfyUI与AI视频制作"
+  priority: 5
+  poll_interval_minutes: 120
+
+- name: "Larus Canus"
+  kind: x_rsshub
+  locator: "MrLarus"
+  theme: "商业洞察与趋势判断"
+  priority: 7
+  poll_interval_minutes: 60
+
+- name: "高军"
+  kind: x_rsshub
+  locator: "GoJun315"
+  theme: "ComfyUI与AI视频制作"
+  priority: 6
+  poll_interval_minutes: 120
+
+- name: "karminski-牙医"
+  kind: x_rsshub
+  locator: "karminski3"
+  theme: "AI产品与行业前沿"
+  priority: 7
+  poll_interval_minutes: 60
+
+# 加密资产账号保留为低优先级市场信号，默认不会压过股票/科技/AI 事件。
+- name: "舒琴分析"
+  kind: x_rsshub
+  locator: "Bitebishuqin"
+  theme: "理财与市场动态"
+  priority: 4
+  poll_interval_minutes: 120
+
+- name: "無名先生"
+  kind: x_rsshub
+  locator: "Wuming_Mr_"
+  theme: "理财与市场动态"
+  priority: 4
+  poll_interval_minutes: 120
+
+# ------------------------------------------------
+# Reddit：原生 RSS，作为社区信号；不把社区发言标记为官方事实。
+# ------------------------------------------------
+- name: "Reddit · r/OpenAI"
+  kind: reddit
+  locator: "r/OpenAI"
+  theme: "AI产品与行业前沿"
+  priority: 7
+  poll_interval_minutes: 60
+
+- name: "Reddit · r/Anthropic"
+  kind: reddit
+  locator: "r/Anthropic"
+  theme: "AI产品与行业前沿"
+  priority: 7
+  poll_interval_minutes: 60
+
+- name: "Reddit · r/comfyui"
+  kind: reddit
+  locator: "r/comfyui"
+  theme: "ComfyUI与AI视频制作"
+  priority: 8
+  poll_interval_minutes: 60
+
+- name: "Reddit · r/StableDiffusion"
+  kind: reddit
+  locator: "r/StableDiffusion"
+  theme: "ComfyUI与AI视频制作"
+  priority: 7
+  poll_interval_minutes: 60
+
+- name: "Reddit · r/LocalLLaMA"
+  kind: reddit
+  locator: "r/LocalLLaMA"
+  theme: "AI产品与行业前沿"
+  priority: 8
+  poll_interval_minutes: 60
+
+- name: "Reddit · r/MachineLearning"
+  kind: reddit
+  locator: "r/MachineLearning"
+  theme: "AI产品与行业前沿"
+  priority: 7
+  poll_interval_minutes: 60

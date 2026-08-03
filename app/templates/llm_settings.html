@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}模型设置 · NewsRSSHub{% endblock %}
+{% block content %}
+<a class="back-link" href="/">← 返回最新热点</a>
+
+<section class="form-page llm-settings-page">
+  <header class="page-head compact">
+    <div>
+      <p class="eyebrow">MODEL CONNECTION</p>
+      <h1>大模型设置</h1>
+      <p class="subhead">配置兼容 OpenAI Chat Completions 的模型服务。保存前会先发送一次极小请求验证连通性。</p>
+    </div>
+  </header>
+
+  {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
+  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+  <section class="credential-card {{ credential.state }}">
+    <div class="credential-status-row">
+      <div>
+        <span class="status {{ 'healthy' if credential.state in ('valid', 'environment') else 'error' }}">
+          {{ {
+            'valid': '可用',
+            'environment': '环境配置',
+            'missing': '未配置',
+            'invalid': '已失效',
+            'error': '需重试',
+            'needs_key': '需要安全密钥'
+          }.get(credential.state, '待验证') }}
+        </span>
+        <h2>{{ credential.message }}</h2>
+      </div>
+      {% if credential.fingerprint %}<code class="credential-fingerprint">指纹 · {{ credential.fingerprint }}</code>{% endif %}
+    </div>
+    <dl class="connection-details">
+      <div><dt>Base URL</dt><dd>{{ credential.base_url }}</dd></div>
+      <div><dt>模型</dt><dd>{{ credential.model_name }}</dd></div>
+      <div><dt>分析开关</dt><dd>{{ '已开启' if credential.enabled else '已关闭' }}</dd></div>
+    </dl>
+    {% if credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ credential.last_validated_at|relative_time }}</p>{% endif %}
+    {% if credential.updated_at %}<p class="credential-meta">最近更新：{{ credential.updated_at|relative_time }}</p>{% endif %}
+  </section>
+
+  {% if credential.state == 'needs_key' %}
+  <div class="notice error">请先在部署环境的 <code>.env</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是用于加密保存 API Key 的主密钥，不是模型 API Key 本身。</div>
+  {% else %}
+  <form class="source-form credential-form" method="post" action="/settings/llm" autocomplete="off">
+    <label>
+      API Key
+      <input name="api_key_value" type="password" {% if not credential.configured %}required{% endif %} autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="{{ '留空即可保留当前 Key' if credential.configured else '粘贴模型 API Key' }}">
+      <small>密钥不会显示在网页中，会以加密形式保存到 SQLite。已配置后留空，即保留当前 Key。</small>
+    </label>
+    <div class="two-col">
+      <label>
+        Base URL
+        <input name="base_url" type="url" required value="{{ credential.base_url }}" autocomplete="url" spellcheck="false" placeholder="https://api.openai.com/v1">
+        <small>填写服务商提供的 OpenAI 兼容 API 根地址。</small>
+      </label>
+      <label>
+        模型名称
+        <input name="model_name" required value="{{ credential.model_name }}" autocomplete="off" spellcheck="false" placeholder="gpt-4.1-mini">
+        <small>会用该模型做连接测试和后续新闻解读。</small>
+      </label>
+    </div>
+    <label class="setting-check">
+      <input name="enabled" type="checkbox" value="true" {% if credential.enabled %}checked{% endif %}>
+      <span>启用大模型解读；关闭时系统继续使用本地规则摘要。</span>
+    </label>
+    <div class="form-actions">
+      <a class="button button-secondary" href="/">取消</a>
+      <button class="button button-primary" type="submit">测试并保存</button>
+    </div>
+  </form>
+
+  {% if credential.configured %}
+  <form class="inline-test-form" method="post" action="/settings/llm/test">
+    <span>不改配置，只想确认当前模型是否可用？</span>
+    <button type="submit">测试当前模型连接</button>
+  </form>
+  {% endif %}
+  {% endif %}
+
+  <aside class="security-note">
+    <strong>维护说明</strong>
+    <p>Web 和 Worker 共享同一个 SQLite 配置。保存成功后，下一轮分析会自动使用新设置，无需重启 Docker；测试失败不会覆盖当前已验证的配置。</p>
+  </aside>
+</section>
+{% endblock %}

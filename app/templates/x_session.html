@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}X 登录状态 · NewsRSSHub{% endblock %}
+{% block content %}
+<a class="back-link" href="/sources">← 返回来源管理</a>
+
+<section class="form-page x-session-page">
+  <header class="page-head compact">
+    <div>
+      <p class="eyebrow">X CONNECTION</p>
+      <h1>X 登录状态</h1>
+      <p class="subhead">Cookie 仅以加密形式存入本地 SQLite；不会显示、不会写入来源配置，也不会传给 RSSHub。</p>
+    </div>
+  </header>
+
+  {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
+  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+  <section class="credential-card {{ credential.state }}">
+    <div class="credential-status-row">
+      <div>
+        <span class="status {{ 'healthy' if credential.state == 'valid' else 'error' }}">
+          {{ {'valid':'可用','missing':'未配置','invalid':'已失效','error':'需重试','needs_key':'需要安全密钥'}.get(credential.state, '待验证') }}
+        </span>
+        <h2>{{ credential.message }}</h2>
+      </div>
+      {% if credential.fingerprint %}<code class="credential-fingerprint">指纹 · {{ credential.fingerprint }}</code>{% endif %}
+    </div>
+    {% if credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ credential.last_validated_at|relative_time }}</p>{% endif %}
+    {% if credential.updated_at %}<p class="credential-meta">最近更新：{{ credential.updated_at|relative_time }}</p>{% endif %}
+  </section>
+
+  {% if credential.state == 'needs_key' %}
+  <div class="notice error">请先在部署环境的 <code>.env</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是一次性主密钥，不是 X Cookie；Cookie 更新后无需重启服务。</div>
+  {% else %}
+  <form class="source-form credential-form" method="post" action="/settings/x-session" autocomplete="off">
+    <label>
+      X Cookie
+      <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 auth_token 值，或完整 Cookie 字符串">
+      <small>支持单独的 <code>auth_token</code> 值，也支持包含 <code>auth_token</code> 和 <code>ct0</code> 的 Cookie 片段。提交后会先验证；失败时不会覆盖当前已保存的 Cookie。</small>
+    </label>
+    <div class="form-actions">
+      <a class="button button-secondary" href="/sources">取消</a>
+      <button class="button button-primary" type="submit">验证并更新 Cookie</button>
+    </div>
+  </form>
+
+  {% if credential.configured %}
+  <form class="inline-test-form" method="post" action="/settings/x-session/test">
+    <span>不确定 Cookie 是否失效？</span>
+    <button type="submit">立即验证当前 Cookie</button>
+  </form>
+  {% endif %}
+  {% endif %}
+
+  <aside class="security-note">
+    <strong>维护说明</strong>
+    <p>Worker 在每轮抓取 X 账号前都会先验证会话。验证失败时，来源管理页和首页会提示你更新 Cookie；系统不会继续对每个账号重复发起无效请求。</p>
+  </aside>
+</section>
+{% endblock %}
