@@ -5,15 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="个人化每日情报台：从可信来源中筛选真正重要的更新。">
     <title>{% block title %}NewsRSSHub{% endblock %}</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260803-mobile4">
-    <link rel="stylesheet" href="/static/x-session.css?v=20260803-mobile4">
+    <link rel="stylesheet" href="/static/app.css?v=20260803-mobile6">
+    <link rel="stylesheet" href="/static/x-session.css?v=20260803-mobile6">
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="/" aria-label="返回情报首页">
           <span class="brand-mark">N</span>
-          <span>News<span>RSS</span>Hub</span>
         </a>
         <p class="brand-note">你的每日信号台</p>
         <nav class="nav" aria-label="主导航">
@@ -34,6 +33,17 @@
           <span class="pulse-dot"></span>
           后台会按来源频率自动更新
         </div>
+        <details class="mobile-menu">
+          <summary class="mobile-menu-toggle" aria-label="打开导航" title="打开导航">
+            <span aria-hidden="true">☰</span><span class="sr-only">打开导航</span>
+          </summary>
+          <nav class="nav mobile-nav" aria-label="主导航">
+            <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/">最新热点</a>
+            <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs">每日简报</a>
+            <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources">来源管理</a>
+            <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings">设置与连接</a>
+          </nav>
+        </details>
       </aside>
       <main class="content">{% block content %}{% endblock %}</main>
     </div>

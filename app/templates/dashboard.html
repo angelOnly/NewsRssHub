@@ -1,14 +1,6 @@
 {% extends "base.html" %}
 {% block title %}最新热点 · NewsRSSHub{% endblock %}
 {% block content %}
-<header class="page-head">
-  <div>
-    <p class="eyebrow">PERSONAL INTELLIGENCE</p>
-    <h1>今天，什么真的值得看？</h1>
-    <p class="subhead">同一事件只保留一次；点开后可查看原始内容与全部来源。</p>
-  </div>
-  <a class="button button-primary" href="/sources/new">＋ 添加来源</a>
-</header>
 
 {% if request.query_params.get('notice') %}<div class="notice success">{{ request.query_params.get('notice') }}</div>{% endif %}
 
@@ -24,12 +16,6 @@
   <div><strong>资讯筛选暂未启用</strong><p>{{ skill_status.message }}</p></div>
 </section>
 {% endif %}
-
-<section class="stat-grid" aria-label="情报台状态">
-  <div class="stat-card"><span>活跃来源</span><strong>{{ stats.source_count }}</strong><small>{{ stats.healthy_count }} 个连接正常</small></div>
-  <div class="stat-card"><span class="stat-label-full">过去 24 小时已筛选事件</span><span class="stat-label-mobile">已筛选事件</span><strong>{{ stats.event_count }}</strong><small>重复消息已合并</small></div>
-  <div class="stat-card stat-card-wide"><span>处理队列</span><strong>{{ stats.pending_summary + stats.pending_curation + stats.pending_translation }}</strong><small>等待摘要、筛选或重点正文翻译的条目</small></div>
-</section>
 
 <nav class="tier-tabs" aria-label="内容层级">
   {% for value, label in tier_tabs %}
@@ -56,47 +42,44 @@
     <div class="event-list tier-{{ tier }}">
       {% for event in events %}
       <article class="event-card">
-        <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
-          <div class="event-meta">
-            <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
-            <span>{{ event.last_seen_at|relative_time }}</span>
-            {% if event.visible_source_count > 1 %}<span>{{ event.visible_source_count }} 个来源</span>{% endif %}
-          </div>
-          <h3>{{ event.title }}</h3>
-          {% if tier == 'must_read' %}
-            <p>{{ event.summary }}</p>
-            {% if event.highlights %}
-            <ul class="event-highlights" aria-label="重点">
-              {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
-            </ul>
+        <div class="event-card-row">
+          <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
+            <div class="event-meta">
+              <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
+              <span>{{ event.last_seen_at|relative_time }}</span>
+              {% if event.visible_source_count > 1 %}<span>{{ event.visible_source_count }} 个来源</span>{% endif %}
+            </div>
+            <h3>{{ event.title }}</h3>
+          </a>
+          <div class="event-actions">
+            {% if tier == 'hidden' and event.user_hidden %}
+            <form class="event-feedback" method="post" action="/events/{{ event.id }}/restore">
+              <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
+              <button type="submit" aria-label="恢复此条内容" title="恢复此条内容"><span aria-hidden="true">↺</span><span class="sr-only">恢复此条内容</span></button>
+            </form>
+            {% elif tier != 'hidden' %}
+            <form class="event-feedback" method="post" action="/events/{{ event.id }}/not-interested">
+              <input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
+              <button type="submit" aria-label="不感兴趣" title="不感兴趣"><span aria-hidden="true">⊘</span><span class="sr-only">不感兴趣</span></button>
+            </form>
             {% endif %}
-            {% if event.tier_reason %}<small class="tier-reason">{{ event.tier_reason }}</small>{% endif %}
-          {% elif tier == 'important' %}
-            <p class="event-summary-compact">{{ event.summary }}</p>
+            <a class="card-arrow" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看详情" title="查看详情">→</a>
+          </div>
+        </div>
+        {% if event.summary or event.highlights or event.tier_reason or event.user_hidden %}
+        <details class="event-preview">
+          <summary aria-label="展开摘要与重点" title="展开摘要与重点"><span>摘要</span><span aria-hidden="true">⌄</span></summary>
+          <div class="event-preview-content">
+            {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
             {% if event.highlights %}
             <ul class="event-highlights compact-highlights" aria-label="重点">
               {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
             </ul>
             {% endif %}
-          {% elif tier == 'hidden' %}
-            <p class="event-summary-compact">{{ event.summary }}</p>
             {% if event.user_hidden %}<small class="tier-reason">你已隐藏</small>{% elif event.tier_reason %}<small class="tier-reason">{{ event.tier_reason }}</small>{% endif %}
-          {% endif %}
-        </a>
-        <div class="event-actions">
-          {% if tier == 'hidden' and event.user_hidden %}
-          <form class="event-feedback" method="post" action="/events/{{ event.id }}/restore">
-            <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
-            <button type="submit">恢复</button>
-          </form>
-          {% elif tier != 'hidden' %}
-          <form class="event-feedback" method="post" action="/events/{{ event.id }}/not-interested">
-            <input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
-            <button type="submit" title="隐藏这条内容">不感兴趣</button>
-          </form>
-          {% endif %}
-          <a class="card-arrow" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看详情">→</a>
-        </div>
+          </div>
+        </details>
+        {% endif %}
       </article>
       {% endfor %}
     </div>
