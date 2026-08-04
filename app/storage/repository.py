@@ -1080,6 +1080,39 @@ class Repository:
             row = conn.execute(f"SELECT COUNT(*) FROM events e WHERE {where}", values).fetchone()
         return int(row[0])
 
+    def count_recent_unread_events(
+        self, *, hours: int = 6, now: datetime | None = None
+    ) -> int:
+        """统计近期仍会在首页展示、且尚未主动阅读的合并新闻。"""
+
+        window_hours = max(1, int(hours))
+        reference_time = now or utc_now()
+        if reference_time.tzinfo is None:
+            reference_time = reference_time.replace(tzinfo=timezone.utc)
+        cutoff = (reference_time.astimezone(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+        with self.database.read() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM events e
+                WHERE e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND e.last_seen_at >= ?
+                  AND {_event_has_live_item_clause('e')}
+                  AND NOT {_user_hidden_clause('e')}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM feedback read_feedback
+                      WHERE read_feedback.event_id = e.id
+                        AND read_feedback.action = 'read'
+                        -- 事件有新的内容加入后，需要重新计为未读。
+                        AND read_feedback.created_at >= e.last_seen_at
+                  )
+                """,
+                (cutoff,),
+            ).fetchone()
+        return int(row[0])
+
     def tier_counts(self, period: str = "24h") -> dict[str, int]:
         result: dict[str, int] = {}
         for tier in (EditorialTier.MUST_READ, EditorialTier.IMPORTANT, EditorialTier.BRIEF, EditorialTier.HIDDEN):

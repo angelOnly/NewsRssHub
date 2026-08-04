@@ -32,6 +32,7 @@ WEB_PUSH_STATE_SETTING = "web_push_state"
 
 # 等待短暂的收敛窗口，让同一批错峰来源的新增量合成一条提醒。
 PUSH_SETTLE_SECONDS = 60
+PUSH_RECENT_HOURS = 6
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
 
 
@@ -58,7 +59,8 @@ class WebPushStatus:
 
 @dataclass(slots=True)
 class PushState:
-    pending_count: int = 0
+    # 只记录是否有一轮新增待检查；实际通知条数在发送前按最新已读状态计算。
+    pending: bool = False
     due_at: str | None = None
     last_sent_at: str | None = None
     attempt_count: int = 0
@@ -138,7 +140,7 @@ class WebPushService:
             )
         return WebPushStatus(
             state="enabled",
-            message="手机通知已开启；每个抓取周期最多提醒一次。",
+            message="手机通知已开启；仅提醒最近 6 小时内未阅读的新内容。",
             configured=True,
             updated_at=record.get("updated_at"),
             last_error=last_error,
@@ -182,15 +184,15 @@ class WebPushService:
         self.repository.delete_connector_credential(WEB_PUSH_SUBSCRIPTION_CONNECTOR)
         self._save_state(PushState())
 
-    def record_new_items(self, count: int) -> bool:
-        """把本次新增量并入待发提醒；同一周期不会形成多条 Push。"""
+    def record_ready_items(self, count: int) -> bool:
+        """标记本轮已有内容完成筛选，待短暂收敛后再计算近期未读新闻数。"""
 
         if count <= 0 or not self._subscription():
             return False
 
         now = self._normalized_now()
         state = self._load_state()
-        state.pending_count = min(9999, state.pending_count + int(count))
+        state.pending = True
         if not state.due_at:
             due_at = now + timedelta(seconds=PUSH_SETTLE_SECONDS)
             previous_sent_at = self._parse_time(state.last_sent_at)
@@ -211,13 +213,13 @@ class WebPushService:
         """在 processor 中投递已到期的一条聚合提醒，并保留可恢复的失败状态。"""
 
         state = self._load_state()
-        if state.pending_count <= 0:
+        if not state.pending:
             return PushDelivery(state="idle")
 
         now = self._normalized_now()
         due_at = self._parse_time(state.due_at)
         if due_at and due_at > now:
-            return PushDelivery(state="waiting", pending_count=state.pending_count)
+            return PushDelivery(state="waiting")
 
         subscription = self._subscription()
         if not subscription:
@@ -225,18 +227,31 @@ class WebPushService:
             self._save_state(PushState())
             return PushDelivery(state="disabled", message="未绑定有效手机，已清除待发提醒。")
 
+        unread_count = self.repository.count_recent_unread_events(
+            hours=PUSH_RECENT_HOURS,
+            now=now,
+        )
+        if unread_count <= 0:
+            # 未读数以发送前的数据库状态为准，避免用户刚读完仍收到过期提醒。
+            self._save_state(PushState(last_sent_at=state.last_sent_at))
+            return PushDelivery(state="empty")
+
         try:
-            self._send_notification(subscription, state.pending_count)
+            self._send_notification(subscription, unread_count)
         except WebPushException as exc:
             status_code = self._response_status(exc)
             if status_code in {404, 410}:
                 self.repository.delete_connector_credential(WEB_PUSH_SUBSCRIPTION_CONNECTOR)
                 self._save_state(PushState())
                 return PushDelivery(state="invalid", message="手机订阅已失效，请重新开启通知。")
-            return self._reschedule_after_error(state, status_code=status_code)
+            return self._reschedule_after_error(
+                state,
+                pending_count=unread_count,
+                status_code=status_code,
+            )
         except Exception:
             logger.exception("Web Push 发送失败")
-            return self._reschedule_after_error(state)
+            return self._reschedule_after_error(state, pending_count=unread_count)
 
         self.repository.update_connector_credential_health(
             WEB_PUSH_SUBSCRIPTION_CONNECTOR,
@@ -245,7 +260,7 @@ class WebPushService:
             validated=True,
         )
         self._save_state(PushState(last_sent_at=now.isoformat()))
-        return PushDelivery(state="sent", pending_count=state.pending_count)
+        return PushDelivery(state="sent", pending_count=unread_count)
 
     def send_test(self) -> None:
         subscription = self._subscription()
@@ -286,7 +301,7 @@ class WebPushService:
         payload = json.dumps(
             {
                 "title": "NewsRSSHub",
-                "body": f"本轮抓取发现 {count} 条新内容，点此查看",
+                "body": f"最近 6 小时有 {count} 条未读新内容，点此查看",
                 "url": "/",
                 "tag": "newsrsshub-fetch",
             },
@@ -304,7 +319,7 @@ class WebPushService:
         )
 
     def _reschedule_after_error(
-        self, state: PushState, *, status_code: int | None = None
+        self, state: PushState, *, pending_count: int, status_code: int | None = None
     ) -> PushDelivery:
         state.attempt_count += 1
         delay = RETRY_DELAYS_SECONDS[min(state.attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)]
@@ -318,7 +333,7 @@ class WebPushService:
         )
         return PushDelivery(
             state="retry",
-            pending_count=state.pending_count,
+            pending_count=pending_count,
             message=state.last_error,
         )
 
@@ -429,8 +444,11 @@ class WebPushService:
             payload = json.loads(raw)
             if not isinstance(payload, dict):
                 raise ValueError("state is not an object")
+            if "pending" not in payload:
+                # 旧状态只保存原始条目累计数，升级后不能把它当作新的待发提醒。
+                return PushState(last_sent_at=self._clean_timestamp(payload.get("last_sent_at")))
             return PushState(
-                pending_count=max(0, min(int(payload.get("pending_count") or 0), 9999)),
+                pending=bool(payload.get("pending")),
                 due_at=self._clean_timestamp(payload.get("due_at")),
                 last_sent_at=self._clean_timestamp(payload.get("last_sent_at")),
                 attempt_count=max(0, min(int(payload.get("attempt_count") or 0), 100)),

@@ -64,11 +64,9 @@ class IntelligencePipeline:
             logging.getLogger(__name__).exception("来源自动备份失败，本轮抓取继续执行")
             source_backup = None
         collected = self.collector.collect_due_sources(force=force)
-        push_queued = self.web_push.record_new_items(collected.new_items)
         return {
             "collection": asdict(collected),
             "source_backup": source_backup.filename if source_backup else None,
-            "push_queued": push_queued,
         }
 
     def process_once(self) -> dict[str, object]:
@@ -76,6 +74,8 @@ class IntelligencePipeline:
 
         summarized = self.summarizer.summarize_pending(limit=50)
         curated = self.curator.curate_available(limit=120)
+        # 只在新闻已经完成摘要和筛选、首页可见后才进入通知队列。
+        push_queued = self.web_push.record_ready_items(curated.completed)
         translated = self.translator.translate_visible_primary_items(limit=12)
         brief = self.briefs.generate_today()
         cleanup = self.repository.purge_expired_content()
@@ -87,6 +87,7 @@ class IntelligencePipeline:
             "translation": asdict(translated),
             "brief": brief,
             "cleanup": cleanup,
+            "push_queued": push_queued,
             "web_push": asdict(push_delivery),
         }
 

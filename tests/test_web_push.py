@@ -12,6 +12,8 @@ from py_vapid import Vapid
 from pywebpush import WebPushException
 
 from app.config import Settings
+from app.domain.curation import CurationGroup, EditorialTier
+from app.domain.models import FeedItem, SourceDraft, SourceKind
 from app.runtime import build_services
 from app.services.web_push import WebPushConfigurationError, WebPushService
 from app.storage.database import Database
@@ -80,9 +82,42 @@ class WebPushServiceTests(unittest.TestCase):
         )
         return repository, service
 
-    def test_aggregates_new_items_into_one_homepage_notification_per_interval(self) -> None:
+    @staticmethod
+    def _create_event(
+        repository: Repository,
+        source_id: int,
+        *,
+        guid: str,
+        published_at: datetime,
+        tier: EditorialTier = EditorialTier.MUST_READ,
+    ) -> int:
+        item_id, inserted = repository.insert_item(
+            source_id,
+            FeedItem(
+                guid=guid,
+                title=f"新闻 {guid}",
+                link=f"https://news.example.test/{guid}",
+                content=f"新闻 {guid} 的正文",
+                published_at=published_at,
+            ),
+        )
+        assert inserted
+        repository.save_item_summary(item_id, summary=f"新闻 {guid} 的摘要")
+        return repository.apply_curation_groups(
+            [
+                CurationGroup(
+                    item_ids=[item_id],
+                    primary_item_id=item_id,
+                    tier=tier,
+                    reason="用于验证手机通知的新闻计数",
+                    order=1,
+                )
+            ]
+        )[0]
+
+    def test_notifies_with_recent_unread_event_count(self) -> None:
         with TemporaryDirectory() as directory:
-            now = [datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)]
+            now = [datetime.now(timezone.utc).replace(microsecond=0)]
             sent: list[dict[str, object]] = []
 
             def sender(**kwargs: object) -> None:
@@ -95,27 +130,90 @@ class WebPushServiceTests(unittest.TestCase):
             assert stored is not None
             self.assertNotIn("push.example.test", stored["ciphertext"])
 
-            self.assertTrue(service.record_new_items(2))
-            self.assertTrue(service.record_new_items(3))
+            source_id = repository.create_source(
+                SourceDraft(name="测试 RSS", kind=SourceKind.RSS, locator="https://news.example.test/feed"),
+                "https://news.example.test/feed",
+            )
+            self._create_event(repository, source_id, guid="one", published_at=now[0])
+            self._create_event(repository, source_id, guid="two", published_at=now[0])
+
+            # 原始抓取新增量即使很大，通知也以用户实际可阅读的合并新闻数为准。
+            self.assertTrue(service.record_ready_items(2))
+            self.assertTrue(service.record_ready_items(300))
             self.assertEqual(service.deliver_pending().state, "waiting")
 
             now[0] += timedelta(seconds=61)
             delivery = service.deliver_pending()
             self.assertEqual(delivery.state, "sent")
-            self.assertEqual(delivery.pending_count, 5)
+            self.assertEqual(delivery.pending_count, 2)
             self.assertEqual(len(sent), 1)
             payload = json.loads(str(sent[0]["data"]))
             self.assertEqual(payload["title"], "NewsRSSHub")
-            self.assertEqual(payload["body"], "本轮抓取发现 5 条新内容，点此查看")
+            self.assertEqual(payload["body"], "最近 6 小时有 2 条未读新内容，点此查看")
             self.assertEqual(payload["url"], "/")
 
-            self.assertTrue(service.record_new_items(1))
-            self.assertEqual(service.deliver_pending().state, "waiting")
-            now[0] += timedelta(minutes=29, seconds=59)
-            self.assertEqual(service.deliver_pending().state, "waiting")
-            now[0] += timedelta(seconds=1)
-            self.assertEqual(service.deliver_pending().state, "sent")
-            self.assertEqual(len(sent), 2)
+    def test_skips_push_when_recent_events_are_read_or_expired(self) -> None:
+        with TemporaryDirectory() as directory:
+            now = [datetime.now(timezone.utc).replace(microsecond=0)]
+            sent: list[dict[str, object]] = []
+            repository, service = self._build_service(
+                Path(directory),
+                sender=lambda **kwargs: sent.append(kwargs),
+                now=now,
+            )
+            service.save_subscription(sample_subscription())
+            source_id = repository.create_source(
+                SourceDraft(name="测试 RSS", kind=SourceKind.RSS, locator="https://news.example.test/feed"),
+                "https://news.example.test/feed",
+            )
+            read_event_id = self._create_event(
+                repository,
+                source_id,
+                guid="read",
+                published_at=now[0] - timedelta(hours=1),
+            )
+            self._create_event(
+                repository,
+                source_id,
+                guid="old",
+                published_at=now[0] - timedelta(hours=7),
+            )
+            self._create_event(
+                repository,
+                source_id,
+                guid="hidden",
+                published_at=now[0] - timedelta(hours=1),
+                tier=EditorialTier.HIDDEN,
+            )
+            repository.mark_event_read(read_event_id)
+
+            self.assertTrue(service.record_ready_items(200))
+            now[0] += timedelta(seconds=61)
+            self.assertEqual(service.deliver_pending().state, "empty")
+            self.assertEqual(sent, [])
+            self.assertEqual(service.deliver_pending().state, "idle")
+
+    def test_legacy_raw_item_counter_is_not_delivered_after_upgrade(self) -> None:
+        with TemporaryDirectory() as directory:
+            now = [datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)]
+            repository, service = self._build_service(
+                Path(directory),
+                sender=lambda **_kwargs: self.fail("不应投递旧版本累计的原始条目数"),
+                now=now,
+            )
+            service.save_subscription(sample_subscription())
+            repository.save_app_setting(
+                "web_push_state",
+                json.dumps(
+                    {
+                        "pending_count": 200,
+                        "due_at": (now[0] - timedelta(minutes=1)).isoformat(),
+                        "last_sent_at": (now[0] - timedelta(minutes=30)).isoformat(),
+                    }
+                ),
+            )
+
+            self.assertEqual(service.deliver_pending().state, "idle")
 
     def test_expired_subscription_is_removed_without_retrying_old_content(self) -> None:
         with TemporaryDirectory() as directory:
@@ -126,13 +224,18 @@ class WebPushServiceTests(unittest.TestCase):
 
             repository, service = self._build_service(Path(directory), sender=expired_sender, now=now)
             service.save_subscription(sample_subscription())
-            service.record_new_items(1)
+            source_id = repository.create_source(
+                SourceDraft(name="测试 RSS", kind=SourceKind.RSS, locator="https://news.example.test/feed"),
+                "https://news.example.test/feed",
+            )
+            self._create_event(repository, source_id, guid="expired", published_at=now[0])
+            service.record_ready_items(1)
             now[0] += timedelta(seconds=61)
 
             delivery = service.deliver_pending()
             self.assertEqual(delivery.state, "invalid")
             self.assertIsNone(repository.get_connector_credential("web_push_subscription"))
-            self.assertFalse(service.record_new_items(1))
+            self.assertFalse(service.record_ready_items(1))
 
     def test_temporary_failure_keeps_one_pending_notification_for_retry(self) -> None:
         with TemporaryDirectory() as directory:
@@ -145,9 +248,14 @@ class WebPushServiceTests(unittest.TestCase):
                 if calls == 1:
                     raise WebPushException("unavailable", FakePushResponse(503))
 
-            _repository, service = self._build_service(Path(directory), sender=flaky_sender, now=now)
+            repository, service = self._build_service(Path(directory), sender=flaky_sender, now=now)
             service.save_subscription(sample_subscription())
-            service.record_new_items(4)
+            source_id = repository.create_source(
+                SourceDraft(name="测试 RSS", kind=SourceKind.RSS, locator="https://news.example.test/feed"),
+                "https://news.example.test/feed",
+            )
+            self._create_event(repository, source_id, guid="retry", published_at=now[0])
+            service.record_ready_items(4)
             now[0] += timedelta(seconds=61)
             self.assertEqual(service.deliver_pending().state, "retry")
             self.assertEqual(service.deliver_pending().state, "waiting")
