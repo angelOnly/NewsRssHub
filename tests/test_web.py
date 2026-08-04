@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.domain.curation import CurationGroup, EditorialTier
-from app.domain.models import FeedItem, SourceDraft, SourceKind
+from app.domain.models import FeedItem, SourceDraft, SourceKind, ValidationResult
 from app.runtime import build_services
 from app.web import app
 
@@ -41,6 +42,68 @@ def build_settings(root: Path) -> Settings:
 
 
 class WebTests(unittest.TestCase):
+    def test_single_source_add_shows_a_clear_result_and_prevents_repeat_submit(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            successful_validation = ValidationResult(
+                ok=True,
+                feed_url="https://example.test/feed.xml",
+                message="RSS 地址可访问。",
+            )
+            failed_validation = ValidationResult(
+                ok=False,
+                feed_url="https://example.test/failed.xml",
+                message="远端暂时无法访问。",
+            )
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    form = client.get("/sources/new")
+                    self.assertIn("data-source-submit", form.text)
+                    self.assertIn("data-source-submit-status", form.text)
+                    self.assertIn('src="/static/source-submit.js?v=', form.text)
+
+                    with patch.object(services.sources, "validate_source", return_value=successful_validation):
+                        added = client.post(
+                            "/sources/new",
+                            data={
+                                "name": "Verified RSS",
+                                "kind": "rss",
+                                "locator": "https://example.test/feed.xml",
+                                "enabled": "true",
+                            },
+                            follow_redirects=False,
+                        )
+                    self.assertEqual(added.status_code, 303)
+                    success_query = parse_qs(urlparse(added.headers["location"]).query)
+                    self.assertEqual(success_query["kind"], ["rss"])
+                    self.assertEqual(success_query["notice_level"], ["success"])
+                    self.assertIn("已添加并验证成功", success_query["notice"][0])
+                    self.assertIsNotNone(services.repository.find_source("rss", "https://example.test/feed.xml"))
+
+                    success_page = client.get(added.headers["location"])
+                    self.assertIn('class="notice success"', success_page.text)
+                    self.assertIn('role="status"', success_page.text)
+                    self.assertIn("已添加并验证成功", success_page.text)
+
+                    with patch.object(services.sources, "validate_source", return_value=failed_validation):
+                        saved_with_warning = client.post(
+                            "/sources/new",
+                            data={
+                                "name": "Retry RSS",
+                                "kind": "rss",
+                                "locator": "https://example.test/failed.xml",
+                                "enabled": "true",
+                            },
+                            follow_redirects=False,
+                        )
+                    warning_query = parse_qs(urlparse(saved_with_warning.headers["location"]).query)
+                    self.assertEqual(warning_query["notice_level"], ["warning"])
+                    self.assertIn("已添加：Retry RSS", warning_query["notice"][0])
+                    self.assertIn("来源已保留", warning_query["notice"][0])
+            finally:
+                delattr(app.state, "services")
+
     def test_source_platform_paging_and_batch_add_work_without_an_x_cookie(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))

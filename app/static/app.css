@@ -214,3 +214,11 @@
 .event-card.is-read .event-main h3{font-weight:600}
 .event-card.is-read .source-badge{background:#edf1ec;color:#718076}
 .event-card.is-read .event-preview summary,.event-card.is-read .event-actions{color:#829087}
+
+/* 来源添加的远端验证可能稍慢，明确显示处理中并防止重复提交。 */
+.notice.warning{color:#825326;background:#fff3e5;border:1px solid #efd5b8}
+.form-submit-status{display:flex;align-items:center;gap:8px;margin:-4px 0 0;color:#406051;font-size:13px;font-weight:700}
+.form-submit-status::before{content:"";width:13px;height:13px;border:2px solid #b9d6c5;border-top-color:var(--accent);border-radius:50%;animation:source-submit-spin .75s linear infinite}
+.source-form [data-source-submit-button][disabled]{cursor:wait;opacity:.82;transform:none}
+@keyframes source-submit-spin{to{transform:rotate(360deg)}}
+@media(max-width:600px){.form-submit-status{font-size:12px;line-height:1.45}.source-form [data-source-submit-button][disabled]{min-width:148px}}

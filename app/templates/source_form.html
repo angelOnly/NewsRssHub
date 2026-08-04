@@ -4,7 +4,7 @@
 <a class="back-link" href="/sources">← 返回来源管理</a>
 <section class="form-page">
   <header class="page-head compact">
-    <div><p class="eyebrow">SOURCE SETUP</p><h1>{{ '编辑来源' if source else '添加来源' }}</h1><p class="subhead">保存时会自动进行一次连接验证。</p></div>
+    <div><p class="eyebrow">SOURCE SETUP</p><h1>{{ '编辑来源' if source else '添加来源' }}</h1><p class="subhead">提交后会立即显示验证中；完成后会返回来源列表并明确显示结果。</p></div>
   </header>
   {% if not source %}
   <section class="source-connection-guide">
@@ -32,8 +32,8 @@
     </div>
   </section>
   {% endif %}
-  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
-  <form class="source-form" method="post" action="{{ '/sources/' ~ source.id ~ '/edit' if source else '/sources/new' }}">
+  {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+  <form class="source-form" method="post" action="{{ '/sources/' ~ source.id ~ '/edit' if source else '/sources/new' }}" data-source-submit data-pending-text="{{ '正在保存并验证…' if source else '正在添加并验证…' }}">
     <label>来源名称<input name="name" required maxlength="120" value="{{ source.name if source else '' }}" placeholder="例如 OpenAI Developers"></label>
     <label>来源类型
       {% if source %}
@@ -56,7 +56,9 @@
       <label><input name="is_official" type="checkbox" value="true" {% if source and source.is_official %}checked{% endif %}> 官方或机构控制的来源</label>
       <label><input name="enabled" type="checkbox" value="true" {% if not source or source.enabled %}checked{% endif %}> 保存后启用抓取</label>
     </div>
-    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit">{{ '保存配置' if source else '添加并验证' }}</button></div>
+    <p class="form-submit-status" data-source-submit-status role="status" aria-live="polite" hidden></p>
+    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit" data-source-submit-button>{{ '保存配置' if source else '添加并验证' }}</button></div>
   </form>
 </section>
+<script src="/static/source-submit.js?v=20260804-1" defer></script>
 {% endblock %}

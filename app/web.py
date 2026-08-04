@@ -148,6 +148,7 @@ def render(
 def sources_redirect(
     *,
     notice: str = "",
+    notice_level: str = "success",
     error: str = "",
     kind: str = "all",
     page: int | str = 1,
@@ -158,6 +159,7 @@ def sources_redirect(
         **({"kind": selected_kind} if selected_kind != "all" else {}),
         **({"page": selected_page} if selected_page > 1 else {}),
         **({"notice": notice} if notice else {}),
+        **({"notice_level": notice_level} if notice else {}),
         **({"error": error} if error else {}),
     }
     query = urlencode(values)
@@ -404,6 +406,7 @@ def sources(
     kind: str = "all",
     page: int = 1,
     notice: str = "",
+    notice_level: str = "success",
     error: str = "",
 ) -> HTMLResponse:
     services = get_services(request)
@@ -446,6 +449,7 @@ def sources(
             "can_queue_current_page_test": can_queue_current_page_test,
             "platform_tabs": platform_tabs,
             "notice": notice,
+            "notice_level": notice_level if notice_level in {"success", "warning"} else "success",
             "error": error,
         },
     )
@@ -680,10 +684,24 @@ def create_source(
             fallback_url=fallback_url,
             enabled=enabled,
         )
-        _, validation = services.sources.add_source(draft, validate=True)
-        message = validation.message if validation else "来源已添加。"
-        prefix = "已添加：" if validation and validation.ok else "已保存，但需要检查："
-        return sources_redirect(notice=f"{prefix}{message}")
+        source, validation = services.sources.add_source(draft, validate=True)
+        selected_kind = str(source["kind"])
+        capture_state = "已启用抓取。" if source["enabled"] else "当前保持暂停。"
+        if validation and validation.ok:
+            return sources_redirect(
+                notice=f"已添加并验证成功：{source['name']}。连接正常，{capture_state}",
+                kind=selected_kind,
+            )
+        if validation:
+            return sources_redirect(
+                notice=(
+                    f"已添加：{source['name']}。但连接测试未通过：{validation.message}；"
+                    "来源已保留，可在列表中稍后重新测试。"
+                ),
+                notice_level="warning",
+                kind=selected_kind,
+            )
+        return sources_redirect(notice=f"已添加：{source['name']}。{capture_state}", kind=selected_kind)
     except ConnectionRequiredError as exc:
         return RedirectResponse(
             f"/sources/new?{urlencode({'error': str(exc), 'connection': exc.connection.key})}",

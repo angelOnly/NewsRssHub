@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">SOURCE CONTROL</p>
     <h1>来源管理</h1>
-    <p class="subhead">按平台维护来源；新增账号先保存，再由你决定何时测试连接。</p>
+    <p class="subhead">单个添加会立即验证；批量导入只保存，之后可按平台手动测试。</p>
   </div>
   <div class="source-head-actions">
     <a class="button button-secondary" href="/sources/batch">批量添加</a>
@@ -13,15 +13,15 @@
   </div>
 </header>
 
+{% if notice %}<div class="notice {{ notice_level }}" role="status" aria-live="polite">{{ notice }}</div>{% endif %}
+{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+
 {% if has_x_sources and x_credential.state != 'valid' and selected_source_kind in ('all', 'x_rsshub') %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
   <div><strong>X 来源暂不测试或抓取</strong><p>先在“设置与连接”保存并验证 Cookie；账号可以先批量录入，之后再手动点击“测试”。</p></div>
   <a class="button button-secondary" href="/settings#x">配置 X Cookie</a>
 </section>
 {% endif %}
-
-{% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
-{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 
 <nav class="source-platform-tabs" aria-label="按平台筛选来源">
   {% for tab in platform_tabs %}
