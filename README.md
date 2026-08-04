@@ -24,40 +24,13 @@
    ```
 
    将输出填入 `config.yml` 的 `CREDENTIAL_ENCRYPTION_KEY`。
-3. 执行：
+3. 在 Portainer 创建或更新 Git Stack：仓库填写本项目 GitHub 地址，Compose 文件路径填写 `docker-compose.yml`，然后点击“从 Git 仓库重新部署”。主 Stack 只包含 Web 和 Worker，Portainer 会负责拉取代码、构建镜像和启动服务。
 
-   ```bash
-   docker compose up -d --build
-   ```
+### SQLite 结构
 
-### 数据库结构升级
+当前项目固定使用 SQLite v7。你的线上数据库已完成一次性 v6 → v7 升级，因此后续正常更新只需要在 Portainer 点击“从 Git 仓库重新部署”，不再有迁移容器、`--check`、`--apply` 或 SSH 部署步骤。
 
-普通启动只会初始化空数据库，不会静默执行删表或重建表。遇到 v7 这类结构升级时，需要先执行内置迁移命令。
-
-若使用 Portainer Git Stack，`/home/jzb/docker/rss-hub` 只有持久化数据，并没有 Git 源码，不能在这里执行 `git pull`。先在 Portainer 部署最新提交以构建新镜像，再在服务器终端以本次构建出的镜像执行；例如：
-
-```bash
-docker run --rm -v /home/jzb/docker/rss-hub/data:/app/data newsrsshub-migrate:20260804 python -m app.migrate --check
-docker run --rm -v /home/jzb/docker/rss-hub/data:/app/data newsrsshub-migrate:20260804 python -m app.migrate --apply
-```
-
-迁移成功后，在 Portainer 再次部署 Stack。若服务器上确实有源码和 `docker-compose.yml`，才使用：
-
-```bash
-cd /home/jzb/docker/rss-hub
-git pull
-docker compose down
-docker compose --profile maintenance build migrate
-docker compose --profile maintenance run --rm migrate --check
-docker compose --profile maintenance run --rm migrate --apply
-docker compose up -d --build
-```
-
-迁移命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理与回滚步骤见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
-
-如果预检显示“日报将自动移除 N 个不存在的事件引用”，这是旧日报指向已删除事件的可修复数据，不需要手工修改 SQLite：`--apply` 会保留日报和其余有效事件引用。若显示日报 JSON 无法解析，迁移仍会停止，避免猜测或丢失数据。
-
-首次升级到 v7 时，请先执行上面的维护命令，再恢复平时的 GitHub/Docker 自动部署；如果你的面板只会直接执行 `docker compose up -d`，需要先通过服务器终端完成这一次迁移。
+空的数据目录会自动创建 v7 数据库；已有 v7 数据库会在启动时校验结构。项目不会自动修改旧版本数据库，避免普通部署意外改动历史数据。v7 数据结构和这次一次性升级的记录见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
 
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统先验证，成功后才加密保存。
 

@@ -23,7 +23,7 @@
 | 历史运行记录 | 移除 `fetch_runs`、`curation_runs` 的持久化 | 避免每轮 Worker 无限写入无页面消费者的历史记录 |
 | 来源模型 | 删除未使用的备用链接字段，保留归档、启停、抓取频率与当前健康状态 | 让来源表只承担“去哪里抓、如何抓、当前是否可用” |
 | 事件展示 | 来源数量按当前可见 `items` 实时计算 | 消除缓存 `source_count` 在暂停、归档或合并后可能过期的问题 |
-| 迁移方式 | 新增显式 `app.migrate --check/--apply` 与 Compose `maintenance` profile | 避免线上应用启动时进行不可逆结构重建 |
+| 一次性升级 | 完成 v6 → v7 升级后删除临时迁移逻辑 | 避免一次性维护代码干扰 Portainer 的日常部署 |
 | 来源导出 | 新增“导出全部来源”YAML 下载 | 用户可以在部署前或任意时点保留当前来源清单 |
 | 自动快照 | Worker 首次运行创建快照，之后每 3 天最多一次，保留 5 份 | 避免长期依赖单一 SQLite 文件保存来源配置 |
 | 批量恢复 | 导出/快照 YAML 可直接上传到“批量添加” | 备份文件可用于恢复，不需要手工逐条重录 |
@@ -49,26 +49,14 @@ flowchart LR
 - `feedback` 使用 `(event_id, action)` 复合主键：同一事件同一状态只有一份事实，支持 `read`、`not_interested` 与 `saved`。
 - `fetch_runs`、`curation_runs` 不再写库：来源表的最后成功时间、错误和健康状态已经满足当前页面与运维需求，详细故障看 Docker 日志即可。
 
-### 3.2 显式安全迁移，不在运行时改线上库
+### 3.2 一次性升级完成后，回归固定 v7 结构
 
-调用链：
+v6 → v7 是当前唯一一次历史结构升级，已在 2026-08-04 完成并创建一致性备份。由于项目只供当前单用户使用，升级完成后删除了 `app.migrate`、`--check`、`--apply` 和 Compose 维护 profile。
 
-```text
-docker compose maintenance profile
-  → python -m app.migrate --check
-  → 只读预检（完整性、关系、行数、目标可迁移性）
-  → python -m app.migrate --apply
-  → SQLite backup API 创建一致性备份
-  → 单事务重建 v7 表并复核
-  → 正常启动 web / worker
-```
-
-- `Database.initialize()` 只允许空库初始化为 v7，或打开已经是 v7 的库。
-- 发现旧结构时，普通 Web/Worker 会明确拒绝启动并提示维护命令；不会修改线上文件。
-- `--check` 通过 SQLite `mode=ro` 打开数据库，不创建文件或 WAL。
-- `--apply` 先在 `/app/data/backups/` 创建可校验备份，再执行单事务迁移；失败时事务回滚，备份仍保留。
-
-实际开发中，本地已有旧结构数据库被 Web 启动检查拒绝，这验证了“普通启动不自动迁移”的保护路径确实生效，而不是一个只写在文档里的约定。
+- `Database.initialize()` 只允许空库初始化为 v7，或打开已经是 v7 的库；
+- 发现旧结构时，普通 Web/Worker 会明确拒绝启动，不会修改线上文件；
+- 日常代码更新只需在 Portainer 点击“从 Git 仓库重新部署”，没有额外迁移容器或终端操作；
+- 未来如果确实需要破坏性结构变更，应为当次升级单独设计、验证和执行一次方案，不预先保留通用迁移框架。
 
 ### 3.3 来源导出、自动快照与恢复
 
@@ -133,33 +121,22 @@ sources:
 
 | 文件 | 本次职责 |
 | --- | --- |
-| `app/storage/migrations.py` | 定义 v7 目标结构、预检、表重建、关系与完整性校验 |
-| `app/migrate.py` | 提供只读预检和带一致性备份的显式迁移 CLI |
+| `app/storage/migrations.py` | 定义固定 v7 目标结构、空库初始化与已有结构校验 |
 | `app/storage/database.py` | 禁止旧结构在普通运行时自动升级 |
 | `app/storage/repository.py` | 使用 `items.event_id`、动态来源数和复合反馈主键 |
 | `app/services/source_backups.py` | 来源 YAML 导出、定期快照、保留 5 份、下载路径保护 |
 | `app/services/pipeline.py` | Worker 每轮开头触发非阻断式来源快照检查 |
 | `app/services/batch_sources.py` | 解析归档状态，支持恢复文件与 1000 条导入 |
 | `app/web.py`、`app/templates/sources.html` | 导出路由、历史快照下载和来源管理页面展示 |
-| `docker-compose.yml` | 增加只在维护时启动的 `migrate` profile |
+| `docker-compose.yml` | 仅定义 Portainer 日常运行所需的 Web 与 Worker |
 | `.agents/skills/curate-personal-news/SKILL.md` | 收紧同一事件的合并前置条件 |
 | `tests/` | 覆盖迁移、来源导出回传、快照留存、下载路由和现有页面行为 |
 
 ## 5. 部署与恢复说明
 
-如果服务器仍是旧 SQLite 结构，先执行一次迁移，再恢复日常部署：
+当前服务器已经完成 v7 升级。后续部署只在 Portainer 的 `new-rss-hub` Stack 页面点击“从 Git 仓库重新部署”，无需在 `/home/jzb/docker/rss-hub` 执行 Git、Docker 或迁移命令。
 
-```bash
-cd /home/jzb/docker/rss-hub
-git pull
-docker compose down
-docker compose --profile maintenance build migrate
-docker compose --profile maintenance run --rm migrate --check
-docker compose --profile maintenance run --rm migrate --apply
-docker compose up -d --build
-```
-
-迁移完成后：
+日常运行中：
 
 1. Worker 下一轮会创建第一份来源快照；无需额外定时任务。
 2. 在“来源管理”可立即下载“导出全部来源”，或下载任一历史快照。
@@ -167,25 +144,17 @@ docker compose up -d --build
 
 ## 6. 验证结果
 
-- 完整自动化测试：`50 passed`。
+- 完整自动化测试：以当前代码执行结果为准。
 - 新增覆盖：导出 YAML 不泄露连接器缓存或抓取地址；可在空数据库中回传；暂停、归档和轮询间隔保持一致；首次备份、3 天间隔、5 份留存、路径校验和 Web 下载均通过。
-- SQLite 覆盖：空库初始化、旧库拒绝普通启动、只读预检、备份后迁移、关系不一致阻断、迁移后完整性与外键检查。
+- SQLite 覆盖：空库初始化、已有 v7 正常启动、旧库拒绝普通启动，以及不完整 v7 拒绝自动修复。
 
 ## 7. 已知边界
 
 - 自动来源快照依赖 Worker 正常运行；Worker 停止期间不会产生时间驱动的备份，恢复运行后的下一轮会继续检查。
 - 快照是“来源配置恢复”，不是完整数据库灾备。资讯、事件、已读、收藏和凭据仍由 SQLite 数据库备份/迁移备份承担。
 - YAML 重新上传只新增不存在的来源，不会以旧备份覆盖当前已经编辑过的同一来源，避免恢复操作误改线上配置。
-- v7 迁移需在停止 Web 和 Worker 后执行；这是用一次显式维护换取线上数据安全的必要边界。
+- 当前版本不包含迁移命令；发现旧结构会拒绝启动，而不会在 Portainer 日常部署中修改历史数据。
 
-## 8. 后续修复：旧日报的失效事件引用
+## 8. 一次性日报修复记录
 
-服务器预检发现过“日报引用了不存在事件”的历史数据：这不是内容、来源或凭证损坏，而是旧日报列表中残留了已经不存在的事件 ID。原先的预检会把它与无法解析的 JSON 一样直接阻断，导致即使其余数据完整也无法迁移。
-
-现已调整为以下边界：
-
-- 旧库且 `event_ids_json` 合法：预检显示待移除数量但允许迁移；迁移在已经创建 SQLite 一致性备份后的同一事务内，只删失效 ID，保留日报行、有效 ID 和原有顺序。
-- `event_ids_json` 非法：继续阻断迁移，绝不猜测内容或把日报直接清空。
-- 已完成 v7 的数据库：运行时和普通迁移命令均不会静默改写日报；若仍有失效 ID，预检会明确报出数据问题，避免掩盖后续的数据清理缺陷。
-
-对应回归测试覆盖“`[有效 ID, 失效 ID]` 修复为 `[有效 ID]`、日报行数不变”“非法 JSON 仍阻断”“CLI 明确显示修复项”三种场景。
+升级时发现日报列表中有 1 个已经不存在的事件 ID。一次性升级仅移除了这个失效引用，保留日报行、其余有效事件 ID 和所有资讯数据。该修复已随 v7 升级完成，相关预检、自动修复和 CLI 代码不再保留在日常项目中。
