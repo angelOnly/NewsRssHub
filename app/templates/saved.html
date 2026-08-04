@@ -16,29 +16,33 @@
           <a class="event-main" href="/events/{{ event.id }}?origin=saved&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
             <div class="event-meta">
               <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
-              <span>收藏于 {{ event.saved_at|relative_time }}</span>
+              <span class="event-facts"><span>收藏于{{ event.saved_at|compact_relative_time|replace(' ', '') }}</span></span>
             </div>
             <h3>{{ event.title }}</h3>
           </a>
+        </div>
+        <div class="event-card-footer{% if event.summary or event.highlights or event.user_hidden %} has-preview{% endif %}">
           <div class="event-actions">
             <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/unsave">
               <input type="hidden" name="origin" value="saved"><input type="hidden" name="page" value="{{ page }}">
               <button type="submit" aria-label="取消收藏" title="取消收藏"><span aria-hidden="true">★</span><span class="sr-only">取消收藏</span></button>
             </form>
-            <a class="card-arrow" href="/events/{{ event.id }}?origin=saved&page={{ page }}" aria-label="查看详情" title="查看详情">→</a>
           </div>
-        </div>
         {% if event.summary or event.highlights or event.user_hidden %}
-        <div class="saved-event-summary">
-          {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
-          {% if event.highlights %}
-          <ul class="event-highlights compact-highlights" aria-label="重点">
-            {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
-          </ul>
-          {% endif %}
-          {% if event.user_hidden %}<small class="tier-reason">你已在热点列表中隐藏此内容</small>{% endif %}
-        </div>
+        <details class="event-preview" data-read-event-id="{{ event.id }}">
+          <summary aria-label="展开摘要与重点" title="展开摘要与重点"><span>摘要</span><span aria-hidden="true">⌄</span></summary>
+          <div class="event-preview-content">
+            {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
+            {% if event.highlights %}
+            <ul class="event-highlights compact-highlights" aria-label="重点">
+              {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% if event.user_hidden %}<small class="tier-reason">你已在热点列表中隐藏此内容</small>{% endif %}
+          </div>
+        </details>
         {% endif %}
+        </div>
       </article>
       {% endfor %}
     </div>

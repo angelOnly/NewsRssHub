@@ -116,11 +116,16 @@
 .card-arrow{color:var(--accent);font-size:19px}
 .card-arrow:hover{background:#edf5ef}
 .event-preview{margin-top:5px}
-/* 操作放到底部工具行，标题可以占满整行。 */
-.event-card-footer{position:relative;min-height:30px;margin-top:5px}
-.event-card-footer .event-preview{margin-top:0}
-.event-card-footer .event-actions{position:absolute;top:0;right:52px;z-index:1}
-.event-counts{white-space:nowrap}
+/* 摘要保持正常流，按钮只占摘要左侧固定区域，展开时正文仍是整卡宽。 */
+.event-card-footer{position:relative;margin-top:4px}
+.event-card-footer .event-actions{position:absolute;top:0;right:0;z-index:1;display:flex;align-items:center;gap:2px;height:28px;margin:0;padding:0;border:0}
+.event-card-footer.has-preview .event-actions{right:52px}
+.event-card-footer .event-preview{display:block;min-width:0;margin:0}
+.event-card-footer .event-preview summary{display:flex;align-items:center;justify-content:flex-end;min-height:28px}
+.event-card-footer .event-preview-content{width:100%;min-width:0}
+.event-facts{display:flex;flex:0 1 auto;flex-wrap:wrap;align-items:center;max-width:100%;min-width:0}
+.event-facts>span{white-space:nowrap}
+.event-facts>span+span::before{content:'·';margin:0 4px;color:#9aa69e}
 .event-preview summary{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-height:24px;color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
 .event-preview summary::-webkit-details-marker{display:none}
 .event-preview summary span:last-child{font-size:16px;line-height:1;transition:transform .15s}
@@ -240,8 +245,6 @@
 /* 收藏按钮使用暖色强调，和“不感兴趣”的危险操作保持可区分。 */
 .event-save button{color:#aa7a16}
 .event-save button:hover{color:#8b6512;background:#fff7df}
-.saved-event-summary{padding:0 0 2px;color:#516258;font-size:14px}
-.saved-event-summary p{margin:8px 0 0}
 
 /* 媒体仅使用抓取到的直链或受信任平台嵌入地址，加载失败时仍可打开原链接。 */
 .media-preview{margin:15px 0;padding:14px;border:1px solid #d8e7dc;border-radius:11px;background:#f7fbf7}.media-preview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}.media-preview-head h4{margin:0;color:#176548;font-size:13px}.media-preview-head span{color:var(--muted);font-size:12px}.media-preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.media-card{min-width:0;margin:0;overflow:hidden;border:1px solid #d9e5da;border-radius:8px;background:#fff}.media-image-card a{display:block;background:#eef3ee}.media-image-card img{display:block;width:100%;min-height:142px;max-height:340px;object-fit:contain}.media-video-card video,.media-embed-card iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#19241f}.media-card figcaption{padding:7px 9px;color:var(--muted);font-size:12px}.media-card figcaption a{color:var(--accent);font-weight:700}.media-image-card:hover{border-color:#9cc5a9;box-shadow:0 2px 8px rgba(23,101,72,.1)}
@@ -285,12 +288,6 @@
   .brief-card>span:last-child{display:inline-block;margin-top:10px;font-size:12px}
   .brief-title-full{display:none}
   .brief-title-mobile{display:inline}
-
-  .saved-events .event-card{padding:11px 12px}
-  .saved-events .event-main h3{font-size:15px;line-height:1.38}
-  .saved-event-summary{font-size:13px}
-  .saved-event-summary p{display:-webkit-box;margin:5px 0 0;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;font-size:13px;line-height:1.5}
-  .saved-event-summary .event-highlights{display:none}
 
   .source-page-head{gap:4px;margin-bottom:10px}
   .source-page-head h1{font-size:24px}

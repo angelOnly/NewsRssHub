@@ -50,14 +50,16 @@
           <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
             <div class="event-meta">
               <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
-              {% if event.latest_published_at %}<span>发布{{ event.latest_published_at|compact_relative_time|replace(' ', '') }}</span>{% else %}<span>发布时间未知</span>{% endif %}
-              {% if event.latest_fetched_at %}<span>抓取{{ event.latest_fetched_at|compact_relative_time|replace(' ', '') }}</span>{% endif %}
-              {% if event.visible_item_count > 1 %}<span class="event-counts">来源{{ event.visible_source_count }} · 条目{{ event.visible_item_count }}</span>{% endif %}
+              <span class="event-facts">
+                {% if event.latest_published_at %}<span>发布{{ event.latest_published_at|compact_relative_time|replace(' ', '') }}</span>{% else %}<span>发布时间未知</span>{% endif %}
+                {% if event.latest_fetched_at %}<span>抓取{{ event.latest_fetched_at|compact_relative_time|replace(' ', '') }}</span>{% endif %}
+                {% if event.visible_item_count > 1 %}<span>来源{{ event.visible_source_count }} · 条目{{ event.visible_item_count }}</span>{% endif %}
+              </span>
             </div>
             <h3>{{ event.title }}</h3>
           </a>
         </div>
-        <div class="event-card-footer">
+        <div class="event-card-footer{% if event.summary or event.highlights or event.tier_reason or event.user_hidden %} has-preview{% endif %}">
           <div class="event-actions">
             {% if event.user_saved %}
             <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/unsave">
