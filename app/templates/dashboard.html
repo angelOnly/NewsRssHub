@@ -87,7 +87,7 @@
           </div>
         {% if event.summary or event.highlights or event.tier_reason or event.user_hidden %}
         <details class="event-preview" data-read-event-id="{{ event.id }}">
-          <summary aria-label="展开摘要与重点" title="展开摘要与重点"><span>摘要</span>{{ icon('chevron-down', 'summary-icon') }}</summary>
+          <summary aria-label="展开摘要与重点" title="展开摘要与重点">{{ icon('chevron-down', 'summary-icon') }}</summary>
           <div class="event-preview-content">
             {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
             {% if event.highlights %}
