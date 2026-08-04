@@ -23,7 +23,15 @@
         <span class="status pending" data-push-state>检查中</span>
       </summary>
       <div class="settings-fold-content">
-        <p class="settings-fold-intro">仅提醒最近 6 小时内尚未主动阅读的可见新闻；点击通知始终打开首页，不会逐条推送资讯。</p>
+        <p class="settings-fold-intro">仅提醒最近 {{ web_push_window_hours }} 小时内尚未主动阅读的可见新闻；点击通知始终打开首页，不会逐条推送资讯。</p>
+        <form class="source-form credential-form" method="post" action="/settings/web-push-window">
+          <label>
+            通知统计范围（小时）
+            <input name="window_hours" type="number" min="1" max="24" step="1" required value="{{ web_push_window_hours }}">
+            <small>只统计这个时间范围内还未主动阅读的可见新闻；设短一些，提醒会更聚焦。</small>
+          </label>
+          <div class="form-actions"><button class="button button-primary" type="submit">保存通知范围</button></div>
+        </form>
         <p class="push-help">iPhone 请先将网站添加到主屏幕，并从主屏幕图标打开后再开启通知。</p>
         <p class="push-message" data-push-message role="status"></p>
         <div class="form-actions push-actions">

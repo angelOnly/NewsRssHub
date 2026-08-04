@@ -149,8 +149,42 @@ class WebPushServiceTests(unittest.TestCase):
             self.assertEqual(len(sent), 1)
             payload = json.loads(str(sent[0]["data"]))
             self.assertEqual(payload["title"], "NewsRSSHub")
-            self.assertEqual(payload["body"], "最近 6 小时有 2 条未读新内容，点此查看")
+            self.assertEqual(payload["body"], "最近 2 小时有 2 条未读新内容，点此查看")
             self.assertEqual(payload["url"], "/")
+
+    def test_uses_saved_notification_window(self) -> None:
+        with TemporaryDirectory() as directory:
+            now = [datetime.now(timezone.utc).replace(microsecond=0)]
+            sent: list[dict[str, object]] = []
+            repository, service = self._build_service(
+                Path(directory),
+                sender=lambda **kwargs: sent.append(kwargs),
+                now=now,
+            )
+            service.save_subscription(sample_subscription())
+            source_id = repository.create_source(
+                SourceDraft(name="测试 RSS", kind=SourceKind.RSS, locator="https://news.example.test/feed"),
+                "https://news.example.test/feed",
+            )
+            self._create_event(
+                repository,
+                source_id,
+                guid="three-hours-old",
+                published_at=now[0] - timedelta(hours=3),
+            )
+
+            self.assertEqual(repository.get_web_push_window_hours(), 2)
+            self.assertTrue(service.record_ready_items(1))
+            now[0] += timedelta(seconds=61)
+            self.assertEqual(service.deliver_pending().state, "empty")
+            self.assertEqual(sent, [])
+
+            self.assertEqual(repository.save_web_push_window_hours(4), 4)
+            self.assertTrue(service.record_ready_items(1))
+            now[0] += timedelta(seconds=61)
+            self.assertEqual(service.deliver_pending().state, "sent")
+            payload = json.loads(str(sent[0]["data"]))
+            self.assertEqual(payload["body"], "最近 4 小时有 1 条未读新内容，点此查看")
 
     def test_skips_push_when_recent_events_are_read_or_expired(self) -> None:
         with TemporaryDirectory() as directory:

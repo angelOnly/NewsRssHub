@@ -290,6 +290,10 @@ def fetch_settings_redirect(*, notice: str = "", error: str = "") -> RedirectRes
     return settings_redirect(anchor="fetch", notice=notice, error=error)
 
 
+def push_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="push", notice=notice, error=error)
+
+
 @app.get("/manifest.webmanifest", include_in_schema=False)
 def web_manifest() -> FileResponse:
     return FileResponse(
@@ -697,6 +701,7 @@ def settings(request: Request, notice: str = "", error: str = "") -> HTMLRespons
             "notice": notice,
             "error": error,
             "fetch_policy": services.repository.get_fetch_policy(),
+            "web_push_window_hours": services.repository.get_web_push_window_hours(),
         },
     )
 
@@ -716,6 +721,18 @@ def save_fetch_policy(
         )
     except Exception:
         return fetch_settings_redirect(error="抓取策略保存失败，请输入 5 到 1440 的整数分钟数。")
+
+
+@app.post("/settings/web-push-window")
+def save_web_push_window(
+    request: Request,
+    window_hours: int = Form(...),
+) -> RedirectResponse:
+    try:
+        hours = get_services(request).repository.save_web_push_window_hours(window_hours)
+        return push_settings_redirect(notice=f"手机通知统计范围已设为最近 {hours} 小时。")
+    except Exception:
+        return push_settings_redirect(error="通知统计范围保存失败，请输入 1 到 24 的整数小时数。")
 
 
 @app.get("/connections")

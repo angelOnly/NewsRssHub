@@ -32,7 +32,6 @@ WEB_PUSH_STATE_SETTING = "web_push_state"
 
 # 等待短暂的收敛窗口，让同一批错峰来源的新增量合成一条提醒。
 PUSH_SETTLE_SECONDS = 60
-PUSH_RECENT_HOURS = 6
 RETRY_DELAYS_SECONDS = (60, 300, 1800)
 
 
@@ -138,9 +137,10 @@ class WebPushService:
                 updated_at=record.get("updated_at"),
                 last_error=last_error,
             )
+        window_hours = self.repository.get_web_push_window_hours()
         return WebPushStatus(
             state="enabled",
-            message="手机通知已开启；仅提醒最近 6 小时内未阅读的新内容。",
+            message=f"手机通知已开启；仅提醒最近 {window_hours} 小时内未阅读的新内容。",
             configured=True,
             updated_at=record.get("updated_at"),
             last_error=last_error,
@@ -227,8 +227,9 @@ class WebPushService:
             self._save_state(PushState())
             return PushDelivery(state="disabled", message="未绑定有效手机，已清除待发提醒。")
 
+        window_hours = self.repository.get_web_push_window_hours()
         unread_count = self.repository.count_recent_unread_events(
-            hours=PUSH_RECENT_HOURS,
+            hours=window_hours,
             now=now,
         )
         if unread_count <= 0:
@@ -237,7 +238,7 @@ class WebPushService:
             return PushDelivery(state="empty")
 
         try:
-            self._send_notification(subscription, unread_count)
+            self._send_notification(subscription, unread_count, window_hours)
         except WebPushException as exc:
             status_code = self._response_status(exc)
             if status_code in {404, 410}:
@@ -296,12 +297,12 @@ class WebPushService:
         except Exception as exc:
             raise WebPushError("暂时无法发送测试通知，请稍后重试。") from exc
 
-    def _send_notification(self, subscription: dict[str, Any], count: int) -> None:
+    def _send_notification(self, subscription: dict[str, Any], count: int, window_hours: int) -> None:
         vapid = self._get_or_create_vapid()
         payload = json.dumps(
             {
                 "title": "NewsRSSHub",
-                "body": f"最近 6 小时有 {count} 条未读新内容，点此查看",
+                "body": f"最近 {window_hours} 小时有 {count} 条未读新内容，点此查看",
                 "url": "/",
                 "tag": "newsrsshub-fetch",
             },

@@ -95,6 +95,10 @@ class Repository:
     FETCH_INTERVAL_SETTING = "global_fetch_interval_minutes"
     MIN_FETCH_INTERVAL_MINUTES = 5
     MAX_FETCH_INTERVAL_MINUTES = 1440
+    WEB_PUSH_WINDOW_HOURS_SETTING = "web_push_window_hours"
+    DEFAULT_WEB_PUSH_WINDOW_HOURS = 2
+    MIN_WEB_PUSH_WINDOW_HOURS = 1
+    MAX_WEB_PUSH_WINDOW_HOURS = 24
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -128,6 +132,28 @@ class Repository:
             ).fetchone()
         interval = self._normalize_fetch_interval(row["value"] if row else FetchPolicy().interval_minutes)
         return FetchPolicy(interval_minutes=interval)
+
+    @classmethod
+    def _normalize_web_push_window_hours(cls, value: int | str | None) -> int:
+        try:
+            hours = int(value) if value is not None else cls.DEFAULT_WEB_PUSH_WINDOW_HOURS
+        except (TypeError, ValueError):
+            hours = cls.DEFAULT_WEB_PUSH_WINDOW_HOURS
+        return max(cls.MIN_WEB_PUSH_WINDOW_HOURS, min(hours, cls.MAX_WEB_PUSH_WINDOW_HOURS))
+
+    def get_web_push_window_hours(self) -> int:
+        """读取 Web Push 的未读新闻统计范围，默认最近 2 小时。"""
+
+        return self._normalize_web_push_window_hours(
+            self.get_app_setting(self.WEB_PUSH_WINDOW_HOURS_SETTING)
+        )
+
+    def save_web_push_window_hours(self, value: int | str) -> int:
+        """保存 Web Push 的未读新闻统计范围，供 Web 和 Worker 共同读取。"""
+
+        hours = self._normalize_web_push_window_hours(value)
+        self.save_app_setting(self.WEB_PUSH_WINDOW_HOURS_SETTING, str(hours))
+        return hours
 
     def get_app_setting(self, key: str) -> str | None:
         """读取少量应用级状态；调用方负责解析具体值的格式。"""
@@ -1081,7 +1107,7 @@ class Repository:
         return int(row[0])
 
     def count_recent_unread_events(
-        self, *, hours: int = 6, now: datetime | None = None
+        self, *, hours: int = 2, now: datetime | None = None
     ) -> int:
         """统计近期仍会在首页展示、且尚未主动阅读的合并新闻。"""
 

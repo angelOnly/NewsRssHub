@@ -25,16 +25,20 @@
   {% endfor %}
 </nav>
 
-<div class="filter-bar">
+<div class="filter-bar dashboard-filter-bar">
   <div class="filter-group" aria-label="时间范围">
     {% for value, label in [('24h', '24 小时'), ('7d', '7 天'), ('30d', '30 天'), ('all', '全部')] %}
       <a class="filter-pill {% if period == value %}selected{% endif %}" href="/?tier={{ tier }}&period={{ value }}">{{ label }}</a>
     {% endfor %}
   </div>
+  <span class="mobile-page-meta" aria-label="第 {{ page }} 页，每页最多 50 条">
+    <span class="mobile-page-meta-full">第 {{ page }} 页 · 50 条/页</span>
+    <span class="mobile-page-meta-short">{{ page }}/50</span>
+  </span>
 </div>
 
 <section class="event-section">
-  <div class="section-caption">
+  <div class="section-caption dashboard-section-caption">
     <h2>{{ tier|tier_label }}</h2>
     <span>第 {{ page }} 页 · 最多 50 条</span>
   </div>

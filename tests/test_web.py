@@ -519,6 +519,8 @@ sources:
                     self.assertEqual(settings.status_code, 200)
                     self.assertIn("统一抓取策略", settings.text)
                     self.assertIn('name="interval_minutes"', settings.text)
+                    self.assertIn("通知统计范围", settings.text)
+                    self.assertIn('name="window_hours"', settings.text)
 
                     policy = client.post(
                         "/settings/fetch-policy",
@@ -528,6 +530,15 @@ sources:
                     self.assertEqual(policy.status_code, 303)
                     self.assertIn("#fetch", policy.headers["location"])
                     self.assertEqual(services.repository.get_fetch_policy().interval_minutes, 30)
+
+                    push_window = client.post(
+                        "/settings/web-push-window",
+                        data={"window_hours": "4"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(push_window.status_code, 303)
+                    self.assertIn("#push", push_window.headers["location"])
+                    self.assertEqual(services.repository.get_web_push_window_hours(), 4)
 
                     form = client.get("/sources/new")
                     self.assertNotIn('name="poll_interval_minutes"', form.text)
