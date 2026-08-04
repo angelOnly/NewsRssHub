@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}来源管理 · NewsRSSHub{% endblock %}
 {% block content %}
 <header class="page-head compact source-page-head">
@@ -8,8 +9,8 @@
     <p class="subhead">单个添加会立即验证；批量导入后会在未来 1–5 分钟内错峰排期，也可按平台手动测试。</p>
   </div>
   <div class="source-head-actions">
-    <a class="button button-secondary" href="/sources/batch">批量添加</a>
-    <a class="button button-primary" href="/sources/new">＋ 单个添加</a>
+    <a class="button button-secondary button-with-icon" href="/sources/batch">{{ icon('batch-add') }}<span>批量添加</span></a>
+    <a class="button button-primary button-with-icon" href="/sources/new">{{ icon('plus') }}<span>单个添加</span></a>
   </div>
 </header>
 
@@ -18,11 +19,13 @@
 
 <details class="source-backup-details">
   <summary>
+    <span class="source-summary-icon">{{ icon('backup') }}</span>
     <span class="source-backup-summary-copy">
       <strong>来源导出与备份</strong>
       <small>导出当前来源或下载最近自动备份</small>
     </span>
     <span class="source-backup-summary-meta">{% if source_backups %}{{ source_backups|length }} 份备份{% else %}暂无备份{% endif %}</span>
+    {{ icon('chevron-right', 'source-summary-chevron') }}
   </summary>
   <div class="source-backup-content">
     <section class="source-backup-panel" aria-label="来源导出">
@@ -30,7 +33,7 @@
         <strong>导出全部来源</strong>
         <p>下载的 YAML 可直接上传到“批量添加”恢复来源；不包含 Cookie、API Key 或抓取记录。</p>
       </div>
-      <a class="button button-secondary" href="/sources/export.yml" download>导出全部来源</a>
+      <a class="button button-secondary button-with-icon" href="/sources/export.yml" download>{{ icon('download') }}<span>导出全部来源</span></a>
     </section>
     <section class="source-backup-history" aria-label="来源备份列表">
       <div class="source-backup-history-head">
@@ -44,7 +47,7 @@
             <strong>{{ backup.filename }}</strong>
             <small>{{ backup.created_at|relative_time }} · {{ backup.source_count }} 个来源</small>
           </div>
-          <a href="/sources/backups/{{ backup.filename }}" download>下载</a>
+          <a class="button-with-icon" href="/sources/backups/{{ backup.filename }}" download>{{ icon('download') }}<span>下载</span></a>
         </li>
         {% endfor %}
       </ul>
@@ -55,8 +58,9 @@
   </div>
 </details>
 
-<section class="source-platform-tip">
-  <strong>统一抓取策略：</strong>每 {{ fetch_policy.interval_minutes }} 分钟一次，来源会额外随机延后 1–5 分钟；同一批请求之间随机等待 2–5 秒。
+<section class="source-platform-tip source-policy-tip">
+  <span class="source-tip-icon">{{ icon('settings') }}</span>
+  <span><strong>统一抓取策略：</strong>每 {{ fetch_policy.interval_minutes }} 分钟一次，来源会额外随机延后 1–5 分钟；同一批请求之间随机等待 2–5 秒。</span>
 </section>
 
 {% if has_x_sources and x_credential.state != 'valid' and selected_source_kind in ('all', 'x_rsshub') %}
@@ -96,14 +100,14 @@
     <form class="source-current-page-test" method="post" action="/sources/test-current-page">
       <input type="hidden" name="source_kind" value="{{ selected_source_kind }}">
       <input type="hidden" name="page" value="{{ source_page }}">
-      <button class="button button-secondary" type="submit">测试当前页（{{ current_page_testable_count }}）</button>
+      <button class="button button-secondary button-with-icon" type="submit">{{ icon('test') }}<span>测试当前页（{{ current_page_testable_count }}）</span></button>
     </form>
     {% endif %}
     {% if source_page_count > 1 %}
     <nav class="source-pagination" aria-label="来源分页">
-      {% if source_page > 1 %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page - 1 }}">上一页</a>{% endif %}
+      {% if source_page > 1 %}<a class="button-with-icon" href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page - 1 }}">{{ icon('chevron-left') }}<span>上一页</span></a>{% endif %}
       <span>{{ source_page }} / {{ source_page_count }}</span>
-      {% if source_page < source_page_count %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page + 1 }}">下一页</a>{% endif %}
+      {% if source_page < source_page_count %}<a class="button-with-icon" href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page + 1 }}"><span>下一页</span>{{ icon('chevron-right') }}</a>{% endif %}
     </nav>
     {% endif %}
   </div>
@@ -139,10 +143,10 @@
         </td>
         <td>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
         <td class="table-actions">
-          <a href="/sources/{{ source.id }}/edit">编辑</a>
-          <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button type="submit">测试</button></form>
-          <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button type="submit">{{ '暂停' if source.enabled else '启用' }}</button></form>
-          <form method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="danger" type="submit">归档</button></form>
+          <a class="source-action-icon" href="/sources/{{ source.id }}/edit" aria-label="编辑 {{ source.name }}" title="编辑">{{ icon('edit') }}<span class="sr-only">编辑</span></a>
+          <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon" type="submit" aria-label="测试 {{ source.name }}" title="测试">{{ icon('test') }}<span class="sr-only">测试</span></button></form>
+          <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon" type="submit" aria-label="{{ '暂停' if source.enabled else '启用' }} {{ source.name }}" title="{{ '暂停' if source.enabled else '启用' }}">{{ icon('pause' if source.enabled else 'play') }}<span class="sr-only">{{ '暂停' if source.enabled else '启用' }}</span></button></form>
+          <form method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon danger" type="submit" aria-label="归档 {{ source.name }}" title="归档此来源">{{ icon('archive') }}<span class="sr-only">归档</span></button></form>
         </td>
       </tr>
     {% endfor %}
@@ -189,10 +193,10 @@
         </details>
       {% endif %}
       <div class="source-mobile-actions">
-        <a class="button button-secondary" href="/sources/{{ source.id }}/edit">编辑</a>
-        <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary" type="submit">测试</button></form>
-        <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary" type="submit">{{ '暂停' if source.enabled else '启用' }}</button></form>
-        <form class="source-mobile-archive" method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button type="submit"><span class="source-action-label-full">归档此来源</span><span class="source-action-label-short">归档</span></button></form>
+        <a class="button button-secondary button-with-icon source-action-button" href="/sources/{{ source.id }}/edit">{{ icon('edit') }}<span>编辑</span></a>
+        <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary button-with-icon source-action-button" type="submit">{{ icon('test') }}<span>测试</span></button></form>
+        <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary button-with-icon source-action-button" type="submit">{{ icon('pause' if source.enabled else 'play') }}<span>{{ '暂停' if source.enabled else '启用' }}</span></button></form>
+        <form class="source-mobile-archive" method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button-with-icon source-action-button" type="submit">{{ icon('archive') }}<span class="source-action-label-full">归档此来源</span><span class="source-action-label-short">归档</span></button></form>
       </div>
     </article>
   {% endfor %}
@@ -200,15 +204,15 @@
 
 {% if source_page_count > 1 %}
 <nav class="source-pagination source-pagination-bottom" aria-label="来源分页">
-  {% if source_page > 1 %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page - 1 }}">上一页</a>{% endif %}
+  {% if source_page > 1 %}<a class="button-with-icon" href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page - 1 }}">{{ icon('chevron-left') }}<span>上一页</span></a>{% endif %}
   <span>{{ source_page }} / {{ source_page_count }}</span>
-  {% if source_page < source_page_count %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page + 1 }}">下一页</a>{% endif %}
+  {% if source_page < source_page_count %}<a class="button-with-icon" href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page + 1 }}"><span>下一页</span>{{ icon('chevron-right') }}</a>{% endif %}
 </nav>
 {% endif %}
 
 {% else %}
 <div class="empty-state">
-  <span>◎</span><h2>{% if selected_source_kind == 'all' %}还没有可用来源{% else %}这个平台还没有来源{% endif %}</h2><p>可以单个添加，也可以一次粘贴一批账号、社区或 RSS 地址。</p>
+  <span class="empty-state-icon">{{ icon('sources') }}</span><h2>{% if selected_source_kind == 'all' %}还没有可用来源{% else %}这个平台还没有来源{% endif %}</h2><p>可以单个添加，也可以一次粘贴一批账号、社区或 RSS 地址。</p>
   <a class="button button-primary" href="/sources/batch?kind={{ selected_source_kind if selected_source_kind != 'all' else 'x_rsshub' }}">批量添加来源</a>
 </div>
 {% endif %}

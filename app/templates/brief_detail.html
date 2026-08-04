@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ brief.title }} · NewsRSSHub{% endblock %}
 {% block content %}
-<a class="back-link" href="/briefs">← 返回每日简报</a>
+<a class="back-link" href="/briefs">{{ icon('arrow-left', 'back-icon') }}<span>返回每日简报</span></a>
 <section class="brief-detail"><p class="eyebrow">{{ brief.brief_date }}</p><h1>{{ brief.title }}</h1><p class="detail-lede">{{ brief.intro }}</p></section>
 <section class="event-section"><div class="section-caption"><h2>重点事件</h2><span>{{ events|length }} 条</span></div>
-{% for event in events %}<a class="event-card" href="/events/{{ event.id }}"><div class="event-main"><div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span></div><h3>{{ event.title }}</h3><p>{{ event.summary }}</p></div><span class="card-arrow">→</span></a>{% endfor %}
+{% for event in events %}<a class="event-card" href="/events/{{ event.id }}"><div class="event-main"><div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span></div><h3>{{ event.title }}</h3><p>{{ event.summary }}</p></div><span class="card-arrow">{{ icon('chevron-right') }}</span></a>{% endfor %}
 </section>
 {% endblock %}

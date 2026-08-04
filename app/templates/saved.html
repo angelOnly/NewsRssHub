@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}收藏 · NewsRSSHub{% endblock %}
 {% block content %}
 {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
@@ -23,9 +24,9 @@
           <div class="event-actions">
             <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/unsave">
               <input type="hidden" name="origin" value="saved"><input type="hidden" name="page" value="{{ page }}">
-              <button type="submit" aria-label="取消收藏" title="取消收藏"><span aria-hidden="true">★</span><span class="sr-only">取消收藏</span></button>
+              <button class="icon-button icon-button-save is-saved" type="submit" aria-label="取消收藏" title="取消收藏">{{ icon('star', 'is-filled') }}<span class="sr-only">取消收藏</span></button>
             </form>
-            <a class="card-arrow" href="/events/{{ event.id }}?origin=saved&page={{ page }}" aria-label="查看详情" title="查看详情">→</a>
+            <a class="card-arrow" href="/events/{{ event.id }}?origin=saved&page={{ page }}" aria-label="查看详情" title="查看详情">{{ icon('chevron-right') }}</a>
           </div>
         </div>
         {% if event.summary or event.highlights or event.user_hidden %}
@@ -47,7 +48,7 @@
     {% endif %}
   {% else %}
     <div class="empty-state">
-      <span>☆</span><h2>还没有收藏内容</h2>
+      <span class="empty-state-icon">{{ icon('bookmark') }}</span><h2>还没有收藏内容</h2>
       <p>在热点列表或详情页点按收藏，之后可以在这里继续阅读。</p>
       <a class="button button-primary" href="/">返回热点列表</a>
     </div>

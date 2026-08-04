@@ -1,0 +1,66 @@
+{# 松针线稿：所有图标共用 24px 画布与圆角描边，避免页面混入系统 Emoji。 #}
+{% macro icon(name, extra_class='') -%}
+<svg class="icon icon-{{ name }}{% if extra_class %} {{ extra_class }}{% endif %}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  {% if name == 'trending' %}
+  <path d="M4 18v-3.5M9.3 18v-6.2M14.6 18V8.3M20 18V5.2"/>
+  <path d="m4 11.8 5.3-4.2 5.3 2.1L20 4.6"/>
+  <circle cx="20" cy="4.6" r="1.35" fill="currentColor" stroke="none"/>
+  {% elif name == 'bookmark' %}
+  <path d="M6.25 4.75h11.5v14.5L12 15.55l-5.75 3.7z"/>
+  <circle cx="16.25" cy="6.7" r="1.15" fill="currentColor" stroke="none"/>
+  {% elif name == 'brief' %}
+  <path d="M6 3.75h7.5l4.5 4.55v11.95H6z"/>
+  <path d="M13.5 3.75V8.3H18M9.25 12h5.5M9.25 15.35h3.5"/>
+  <circle cx="15.5" cy="15.35" r="1.15" fill="currentColor" stroke="none"/>
+  {% elif name == 'sources' %}
+  <circle cx="12" cy="12" r="8.1"/>
+  <circle cx="12" cy="12" r="2"/>
+  <path d="m17.75 6.25-4.15 4.15M17.75 6.25v3.35M17.75 6.25H14.4"/>
+  {% elif name == 'settings' %}
+  <path d="M4 6.5h16M4 12h16M4 17.5h16"/>
+  <circle cx="9" cy="6.5" r="2.15"/>
+  <circle cx="15.5" cy="12" r="2.15"/>
+  <circle cx="7" cy="17.5" r="2.15"/>
+  {% elif name == 'star' %}
+  <path d="m12 3.9 2.48 5.02 5.54.8-4.01 3.91.95 5.52L12 16.53l-4.96 2.6.95-5.52-4.01-3.91 5.54-.8z"/>
+  {% elif name == 'hide' %}
+  <circle cx="12" cy="12" r="8.25"/>
+  <path d="m6.15 17.85 11.7-11.7"/>
+  {% elif name == 'restore' %}
+  <path d="M7.35 8.6A6.5 6.5 0 1 1 6.5 14"/>
+  <path d="M7.35 4.9v3.7h3.7"/>
+  {% elif name == 'arrow-left' %}
+  <path d="M19 12H5M11 6l-6 6 6 6"/>
+  {% elif name == 'chevron-down' %}
+  <path d="m7.25 9.5 4.75 4.75 4.75-4.75"/>
+  {% elif name == 'chevron-right' %}
+  <path d="m9.5 6.75 5.75 5.25-5.75 5.25"/>
+  {% elif name == 'chevron-left' %}
+  <path d="m14.5 6.75-5.75 5.25 5.75 5.25"/>
+  {% elif name == 'plus' %}
+  <path d="M12 5v14M5 12h14"/>
+  {% elif name == 'batch-add' %}
+  <path d="M5.25 5.25h8.5v10.5h-8.5zM8.25 8.25h8.5v10.5h-8.5z"/>
+  <path d="M18.75 5.5v4.5M16.5 7.75H21"/>
+  {% elif name == 'backup' %}
+  <path d="M4.5 8h15v11.25H4.5zM7.25 8V5h9.5v3"/>
+  <path d="M12 11v5M9.75 13.75 12 16l2.25-2.25"/>
+  {% elif name == 'download' %}
+  <path d="M12 4.5v10M8.5 11.25 12 14.75l3.5-3.5M5.25 18.5h13.5"/>
+  {% elif name == 'upload' %}
+  <path d="M12 19.5v-10M8.5 12.75 12 9.25l3.5 3.5M5.25 5.5h13.5"/>
+  {% elif name == 'edit' %}
+  <path d="m5.25 18.75 3.25-.8 9.2-9.2-2.45-2.45-9.2 9.2z"/>
+  <path d="m13.95 5.8 2.45 2.45M5.25 18.75h4.2"/>
+  {% elif name == 'test' %}
+  <path d="M4.5 12h3l1.55-4.25 3.1 8.5 1.7-4.25h5.65"/>
+  <circle cx="19.5" cy="12" r="1.1" fill="currentColor" stroke="none"/>
+  {% elif name == 'pause' %}
+  <path d="M8.5 6.25v11.5M15.5 6.25v11.5"/>
+  {% elif name == 'play' %}
+  <path d="m9 6.75 8 5.25-8 5.25z"/>
+  {% elif name == 'archive' %}
+  <path d="M4.5 7.5h15v11.25h-15zM3.75 4.75h16.5V7.5H3.75zM9.5 12h5"/>
+  {% endif %}
+</svg>
+{%- endmacro %}

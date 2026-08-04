@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon %}
 <!doctype html>
 <html lang="zh-CN">
   <head>
@@ -11,7 +12,7 @@
     <title>{% block title %}NewsRSSHub{% endblock %}</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/newsrsshub-icon.svg">
-    <link rel="stylesheet" href="/static/app.css?v=20260804-mobiletopnav5">
+    <link rel="stylesheet" href="/static/app.css?v=20260805-pineicons1">
     <link rel="stylesheet" href="/static/x-session.css?v=20260804-push4">
     <script src="/static/scroll-restore.js?v=20260804-2" defer></script>
     <script src="/static/read-state.js?v=20260804-1" defer></script>
@@ -21,24 +22,24 @@
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="/" aria-label="返回情报首页">
-          <span class="brand-mark">N</span>
+          <span class="brand-mark">{{ icon('trending') }}</span>
         </a>
         <p class="brand-note">你的每日信号台</p>
         <nav class="nav" aria-label="主导航">
-          <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/">
-            <span>⌁</span> 最新热点
+          <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/" {% if active_path == '/' %}aria-current="page"{% endif %}>
+            <span class="nav-icon">{{ icon('trending') }}</span><span class="nav-label">最新热点</span>
           </a>
-          <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved">
-            <span>☆</span> 收藏
+          <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved" {% if active_path.startswith('/saved') %}aria-current="page"{% endif %}>
+            <span class="nav-icon">{{ icon('bookmark') }}</span><span class="nav-label">收藏</span>
           </a>
-          <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs">
-            <span>▤</span> 每日简报
+          <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs" {% if active_path.startswith('/briefs') %}aria-current="page"{% endif %}>
+            <span class="nav-icon">{{ icon('brief') }}</span><span class="nav-label">每日简报</span>
           </a>
-          <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources">
-            <span>◎</span> 来源管理
+          <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources" {% if active_path.startswith('/sources') %}aria-current="page"{% endif %}>
+            <span class="nav-icon">{{ icon('sources') }}</span><span class="nav-label">来源管理</span>
           </a>
-          <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings">
-            <span>✦</span> 设置与连接
+          <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings" {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}aria-current="page"{% endif %}>
+            <span class="nav-icon">{{ icon('settings') }}</span><span class="nav-label">设置与连接</span>
           </a>
         </nav>
         <div class="sidebar-foot">
@@ -46,11 +47,11 @@
           后台会按全局策略自动更新
         </div>
         <nav class="mobile-primary-nav" aria-label="主导航">
-          <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/" {% if active_path == '/' %}aria-current="page"{% endif %}>热点</a>
-          <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved" {% if active_path.startswith('/saved') %}aria-current="page"{% endif %}>收藏</a>
-          <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs" {% if active_path.startswith('/briefs') %}aria-current="page"{% endif %}>简报</a>
-          <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources" {% if active_path.startswith('/sources') %}aria-current="page"{% endif %}>来源</a>
-          <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings" {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}aria-current="page"{% endif %}>设置</a>
+          <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/" {% if active_path == '/' %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('trending') }}</span><span class="nav-label">热点</span></a>
+          <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved" {% if active_path.startswith('/saved') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('bookmark') }}</span><span class="nav-label">收藏</span></a>
+          <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs" {% if active_path.startswith('/briefs') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('brief') }}</span><span class="nav-label">简报</span></a>
+          <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources" {% if active_path.startswith('/sources') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('sources') }}</span><span class="nav-label">来源</span></a>
+          <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings" {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('settings') }}</span><span class="nav-label">设置</span></a>
         </nav>
       </aside>
       <main class="content">{% block content %}{% endblock %}</main>
