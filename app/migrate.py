@@ -64,6 +64,17 @@ def _format_report(path: Path, report: MigrationReport) -> str:
         lines.append(f"不再持久化的 raw_json 约：{report.raw_json_bytes} 字节")
     if report.fallback_url_rows:
         lines.append(f"不再使用的备用链接：{report.fallback_url_rows} 条")
+    if report.brief_missing_event_references:
+        if report.current_version < report.target_version:
+            lines.append(
+                "日报将自动移除 "
+                f"{report.brief_missing_event_references} 个不存在的事件引用"
+                "（保留日报和其余有效事件引用）"
+            )
+        else:
+            lines.append(
+                f"日报存在 {report.brief_missing_event_references} 个不存在的事件引用"
+            )
     if report.issues:
         lines.append("预检问题：")
         lines.extend(f"- {issue}" for issue in report.issues)

@@ -21,7 +21,11 @@ from app.storage.migrations import (
 
 
 def create_v6_database(
-    path: Path, *, mismatched_event_items: bool = False, schema_version: int = 6
+    path: Path,
+    *,
+    mismatched_event_items: bool = False,
+    schema_version: int = 6,
+    brief_event_ids_json: str = "[1]",
 ) -> None:
     """构造与已部署 v6 一致的最小数据库，不依赖真实用户数据。"""
 
@@ -147,8 +151,8 @@ def create_v6_database(
         (now,),
     )
     connection.execute(
-        "INSERT INTO briefs (brief_date, title, intro, event_ids_json, generated_at) VALUES ('2026-08-04', '日报', '导语', '[1]', ?)",
-        (now,),
+        "INSERT INTO briefs (brief_date, title, intro, event_ids_json, generated_at) VALUES ('2026-08-04', '日报', '导语', ?, ?)",
+        (brief_event_ids_json, now),
     )
     connection.executemany(
         "INSERT INTO feedback (event_id, source_id, action, created_at) VALUES (1, 1, 'read', ?)",
@@ -239,6 +243,80 @@ class MigrationTests(unittest.TestCase):
             finally:
                 check.close()
 
+    def test_dangling_brief_references_are_repaired_without_discarding_the_brief(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.db"
+            create_v6_database(path, brief_event_ids_json="[2, 999, 1]")
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO events (
+                        id, fingerprint, title, first_seen_at, last_seen_at, created_at, updated_at
+                    ) VALUES (2, 'second-event', '第二个事件', ?, ?, ?, ?)
+                    """,
+                    ("2026-08-04T08:00:00+00:00",) * 4,
+                )
+                connection.commit()
+                report = inspect_migration(connection)
+                self.assertTrue(report.can_apply)
+                self.assertEqual(report.brief_missing_event_references, 1)
+                verified = apply_v7_migration(connection, report)
+                self.assertTrue(verified.is_current)
+            finally:
+                connection.close()
+
+            check = sqlite3.connect(path)
+            try:
+                self.assertEqual(check.execute("SELECT COUNT(*) FROM briefs").fetchone()[0], 1)
+                self.assertEqual(
+                    check.execute("SELECT event_ids_json FROM briefs").fetchone()[0], "[2,1]"
+                )
+                self.assertEqual(check.execute("SELECT COUNT(*) FROM events").fetchone()[0], 2)
+            finally:
+                check.close()
+
+    def test_unparseable_brief_json_still_blocks_migration(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "broken-brief.db"
+            create_v6_database(path, brief_event_ids_json="not valid json")
+            connection = sqlite3.connect(path)
+            try:
+                report = inspect_migration(connection)
+                self.assertFalse(report.can_apply)
+                self.assertIn("日报 event_ids_json 不是可解析的 JSON", report.issues)
+                with self.assertRaises(MigrationPreflightError):
+                    apply_v7_migration(connection, report)
+            finally:
+                connection.close()
+
+            check = sqlite3.connect(path)
+            try:
+                self.assertEqual(check.execute("PRAGMA user_version").fetchone()[0], 6)
+                self.assertEqual(
+                    check.execute("SELECT event_ids_json FROM briefs").fetchone()[0], "not valid json"
+                )
+            finally:
+                check.close()
+
+    def test_current_v7_database_reports_dangling_brief_references_without_rewriting_data(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "current.db"
+            create_v6_database(path)
+            connection = sqlite3.connect(path)
+            try:
+                apply_v7_migration(connection)
+                connection.execute("UPDATE briefs SET event_ids_json = '[999]'")
+                connection.commit()
+                report = inspect_migration(connection)
+                self.assertFalse(report.is_current)
+                self.assertFalse(report.can_apply)
+                self.assertEqual(report.brief_missing_event_references, 1)
+                self.assertTrue(any("当前 v7 数据库不自动修改数据" in issue for issue in report.issues))
+            finally:
+                connection.close()
+
     def test_v5_legacy_database_uses_the_same_explicit_path(self) -> None:
         """当前已部署实例仍可能是 v5，不能只验证 v6 升级。"""
 
@@ -326,12 +404,13 @@ class MigrationTests(unittest.TestCase):
             root = Path(directory)
             path = root / "legacy.db"
             backup_dir = root / "backups"
-            create_v6_database(path)
+            create_v6_database(path, brief_event_ids_json="[1, 999]")
 
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(run_migration(["--check", "--database", str(path)]), 0)
             self.assertIn("需要迁移", output.getvalue())
+            self.assertIn("日报将自动移除 1 个不存在的事件引用", output.getvalue())
             self.assertFalse(backup_dir.exists())
 
             output = io.StringIO()
@@ -353,6 +432,9 @@ class MigrationTests(unittest.TestCase):
                     backup.execute(
                         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'event_items'"
                     ).fetchone()
+                )
+                self.assertEqual(
+                    migrated.execute("SELECT event_ids_json FROM briefs").fetchone()[0], "[1]"
                 )
             finally:
                 migrated.close()

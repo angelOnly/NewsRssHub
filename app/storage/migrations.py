@@ -274,6 +274,7 @@ class MigrationReport:
     discarded_rows: dict[str, int]
     raw_json_bytes: int
     fallback_url_rows: int
+    brief_missing_event_references: int
     issues: tuple[str, ...]
 
     @property
@@ -343,6 +344,29 @@ def _count(conn: sqlite3.Connection, table: str) -> int:
 def _scalar(conn: sqlite3.Connection, sql: str, values: Iterable[object] = ()) -> int:
     row = conn.execute(sql, tuple(values)).fetchone()
     return int(row[0] or 0) if row else 0
+
+
+def _brief_missing_event_reference_count(conn: sqlite3.Connection) -> int:
+    """返回日报中引用不到现有事件的数量。
+
+    ``event_ids_json`` 是小型日报的有序列表，不使用外键表。旧库中偶发的
+    已删除事件引用可以在迁移时安全移除；JSON 本身无法解析时由调用方阻断迁移。
+    """
+
+    if not {"briefs", "events"} <= _table_names(conn):
+        return 0
+    if "event_ids_json" not in _columns(conn, "briefs"):
+        return 0
+    return _scalar(
+        conn,
+        """
+        SELECT COUNT(*)
+        FROM briefs b
+        JOIN json_each(b.event_ids_json) ids
+        LEFT JOIN events e ON e.id = CAST(ids.value AS INTEGER)
+        WHERE e.id IS NULL
+        """,
+    )
 
 
 def _schema_issues(conn: sqlite3.Connection) -> list[str]:
@@ -469,23 +493,6 @@ def _legacy_relation_issues(conn: sqlite3.Connection) -> list[str]:
     if primary_invalid:
         issues.append(f"有 {primary_invalid} 个事件的主条目无效或不属于该事件")
 
-    if "briefs" in tables and "event_ids_json" in _columns(conn, "briefs"):
-        try:
-            missing_brief_events = _scalar(
-                conn,
-                """
-                SELECT COUNT(*)
-                FROM briefs b, json_each(b.event_ids_json) ids
-                LEFT JOIN events e ON e.id = CAST(ids.value AS INTEGER)
-                WHERE e.id IS NULL
-                """,
-            )
-        except sqlite3.DatabaseError:
-            issues.append("日报 event_ids_json 不是可解析的 JSON")
-        else:
-            if missing_brief_events:
-                issues.append(f"日报引用了 {missing_brief_events} 个不存在的事件")
-
     if "feedback" in tables:
         feedback_columns = _columns(conn, "feedback")
         if {"event_id", "action", "created_at"} <= feedback_columns:
@@ -531,6 +538,7 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
             discarded_rows={},
             raw_json_bytes=0,
             fallback_url_rows=0,
+            brief_missing_event_references=0,
             issues=(),
         )
 
@@ -543,6 +551,12 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
     if foreign_key_errors:
         issues.append(f"foreign_key_check 发现 {len(foreign_key_errors)} 条问题")
 
+    brief_missing_event_references = 0
+    try:
+        brief_missing_event_references = _brief_missing_event_reference_count(conn)
+    except sqlite3.DatabaseError:
+        issues.append("日报 event_ids_json 不是可解析的 JSON")
+
     if current_version > SCHEMA_VERSION:
         issues.append(
             f"数据库版本 {current_version} 高于当前程序支持的 {SCHEMA_VERSION}，不能降级迁移"
@@ -550,6 +564,11 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
 
     if current_version == SCHEMA_VERSION:
         issues.extend(_schema_issues(conn))
+        if brief_missing_event_references:
+            issues.append(
+                f"日报引用了 {brief_missing_event_references} 个不存在的事件；"
+                "当前 v7 数据库不自动修改数据"
+            )
         return MigrationReport(
             current_version=current_version,
             target_version=SCHEMA_VERSION,
@@ -560,6 +579,7 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
             discarded_rows={},
             raw_json_bytes=0,
             fallback_url_rows=0,
+            brief_missing_event_references=brief_missing_event_references,
             issues=tuple(issues),
         )
 
@@ -601,6 +621,7 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
         discarded_rows=discarded_rows,
         raw_json_bytes=raw_json_bytes,
         fallback_url_rows=fallback_url_rows,
+        brief_missing_event_references=brief_missing_event_references,
         issues=tuple(issues),
     )
 
@@ -773,6 +794,43 @@ def _assert_preserved_counts(conn: sqlite3.Connection, report: MigrationReport) 
         )
 
 
+def _repair_brief_missing_event_references(conn: sqlite3.Connection) -> int:
+    """仅从旧日报移除不存在事件，保留日报行、有效 ID 与原有顺序。"""
+
+    missing_count = _brief_missing_event_reference_count(conn)
+    if not missing_count:
+        return 0
+
+    conn.execute(
+        """
+        UPDATE briefs AS b
+        SET event_ids_json = COALESCE(
+            (
+                SELECT json_group_array(event_id)
+                FROM (
+                    SELECT e.id AS event_id
+                    FROM json_each(b.event_ids_json) AS ids
+                    JOIN events AS e ON e.id = CAST(ids.value AS INTEGER)
+                    ORDER BY CAST(ids.key AS INTEGER)
+                )
+            ),
+            '[]'
+        )
+        WHERE EXISTS (
+            SELECT 1
+            FROM json_each(b.event_ids_json) AS ids
+            LEFT JOIN events AS e ON e.id = CAST(ids.value AS INTEGER)
+            WHERE e.id IS NULL
+        )
+        """
+    )
+
+    remaining = _brief_missing_event_reference_count(conn)
+    if remaining:
+        raise MigrationPreflightError(f"日报无效事件引用清理后仍剩余 {remaining} 个")
+    return missing_count
+
+
 def apply_v7_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
     """将已通过预检的旧结构重建为精简后的 v7。
 
@@ -829,6 +887,11 @@ def apply_v7_migration(conn: sqlite3.Connection, report: MigrationReport | None 
             legacy=_legacy_name("briefs"),
             fields=BRIEF_COPY_FIELDS,
         )
+        repaired_brief_references = _repair_brief_missing_event_references(conn)
+        if repaired_brief_references != report.brief_missing_event_references:
+            raise MigrationPreflightError(
+                "迁移期间日报无效事件引用数量发生变化，请重新执行预检"
+            )
         _copy_columns(
             conn,
             target="connector_credentials",

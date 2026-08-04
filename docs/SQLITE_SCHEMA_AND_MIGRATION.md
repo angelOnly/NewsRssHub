@@ -102,7 +102,18 @@ flowchart LR
     F --> G["docker compose up -d"]
 ```
 
-推荐命令：
+若使用 Portainer Git Stack，`/home/jzb/docker/rss-hub` 只保存 `data/` 等宿主机挂载数据，不是 Git 工作目录，因此不要在这里执行 `git pull`。代码更新由 Portainer 拉取 GitHub 的最新提交并构建镜像。
+
+首次迁移时，先在 Portainer 部署包含迁移修复的最新提交，让新镜像构建完成；旧结构数据库会让 Web/Worker 拒绝启动，但不会修改数据。随后在服务器终端使用这次构建出的镜像执行维护命令。例如镜像名为 `newsrsshub-migrate:20260804` 时：
+
+```bash
+docker run --rm -v /home/jzb/docker/rss-hub/data:/app/data newsrsshub-migrate:20260804 python -m app.migrate --check
+docker run --rm -v /home/jzb/docker/rss-hub/data:/app/data newsrsshub-migrate:20260804 python -m app.migrate --apply
+```
+
+两条命令都必须保持单行。`--apply` 成功后，在 Portainer 再次部署该 Stack，使 Web 和 Worker 使用已完成迁移的数据库正常启动。
+
+如果服务器上确实有项目源码和 Compose 文件，才使用以下 Compose 方式：
 
 ```bash
 cd /home/jzb/docker/rss-hub
@@ -119,16 +130,18 @@ docker compose up -d --build
 - `PRAGMA integrity_check` 与 `foreign_key_check`；
 - 当前版本和目标版本；
 - `items.event_id` 与旧 `event_items` 是否完全一致；
-- 事件主条目、日报引用、来源与凭证关系是否完整；
+- 事件主条目、来源与凭证关系是否完整；
+- 日报 JSON 是否可解析；旧库中仅指向已删除事件的日报引用会列为“自动移除”项，不阻断迁移；
 - 本次要保留和丢弃的数据规模。
 
 `--apply` 的顺序：
 
 1. 用 SQLite `backup()` API 在容器的 `/app/data/backups/` 创建带时间戳备份（对应宿主机 `/home/jzb/docker/rss-hub/data/backups/`）；不直接复制 WAL 工作中的 `.db` 文件。
 2. 再次执行预检，失败即中止。
-3. 在一个事务中创建 v7 表、按主键复制保留数据、重建索引、删除旧结构、写入 `PRAGMA user_version = 7`。
-4. 迁移后复核行数、外键、事件关系、X 配置缓存与加密凭证记录。
-5. 失败时回滚数据库事务；已创建的备份保留用于人工恢复。
+3. 在同一事务中创建 v7 表、按主键复制保留数据；对于旧日报，仅移除指向不存在事件的 ID，保留日报行、其余有效 ID 及原有顺序。
+4. 重建索引、删除旧结构、写入 `PRAGMA user_version = 7`。
+5. 迁移后复核行数、外键、事件关系、X 配置缓存与加密凭证记录。
+6. 失败时回滚数据库事务；已创建的备份保留用于人工恢复。
 
 普通应用启动仅允许两种情况：空数据库初始化为 v7，或数据库已经是 v7。遇到旧版本会拒绝启动并提示先运行迁移命令，避免在 Web 服务启动过程中悄悄做不可逆重建。
 
@@ -148,6 +161,7 @@ docker compose up -d --build
 
 - `Database.initialize()` 只接受空库或完整 v7；旧库会给出迁移提示，不会在 Web/Worker 启动时改表。
 - `app.migrate` 提供 `--check`（SQLite `mode=ro` 只读连接）与 `--apply`（backup API 备份、单事务迁移、迁移后校验）。命令输出只含版本和行数，不输出任何凭证。
+- 对旧库日报中仅有的失效事件引用，`--check` 会明确显示可自动移除数量，`--apply` 才会在备份后的事务中修复；无法解析的日报 JSON 仍会拒绝迁移。已是 v7 的数据库不会被普通运行时或迁移命令静默改写。
 - `docker-compose.yml` 的 `migrate` 是独立 `maintenance` profile；常规 `docker compose up -d` 不会执行它。
 - 仓储层以 `items.event_id` 作为事件归属唯一事实来源，来源数在读取时动态统计；抓取和筛选保留来源当前状态与条目重试状态，不再写无限增长的运行历史。
 - 来源表单与导入模型不再暴露未使用的备用链接；`FeedItem.raw` 仍可供连接器在内存中解析，但不会再写入 SQLite。
