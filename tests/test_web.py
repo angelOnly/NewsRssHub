@@ -13,7 +13,7 @@ from app.config import Settings
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FeedItem, SourceDraft, SourceKind, ValidationResult
 from app.runtime import build_services
-from app.web import _compact_relative_time, app
+from app.web import _compact_relative_time, app, templates
 
 
 def build_settings(root: Path) -> Settings:
@@ -48,6 +48,25 @@ class WebTests(unittest.TestCase):
         self.assertEqual(_compact_relative_time((now - timedelta(minutes=47)).isoformat()), "47 min")
         self.assertEqual(_compact_relative_time((now + timedelta(minutes=2)).isoformat()), "2 min")
         self.assertEqual(_compact_relative_time((now - timedelta(hours=3)).isoformat()), "3 h")
+
+    def test_mobile_navigation_and_compact_brief_markup_are_present(self) -> None:
+        navigation = templates.get_template("base.html").render(request=object(), active_path="/briefs")
+        brief_page = templates.get_template("briefs.html").render(
+            request=object(),
+            active_path="/briefs",
+            briefs=[
+                {
+                    "brief_date": "2026-08-04",
+                    "title": "2026年08月04日 每日情报",
+                    "intro": "过去 24 小时收录重要更新。",
+                }
+            ],
+        )
+
+        self.assertIn('class="mobile-primary-nav"', navigation)
+        self.assertIn('href="/briefs" aria-current="page"', navigation)
+        self.assertNotIn('class="mobile-menu"', navigation)
+        self.assertIn('class="brief-title-mobile">每日情报</span>', brief_page)
 
     def test_single_source_add_shows_a_clear_result_and_prevents_repeat_submit(self) -> None:
         with TemporaryDirectory() as directory:
@@ -387,7 +406,7 @@ sources:
                     self.assertNotIn("今天，什么真的值得看？", dashboard.text)
                     self.assertNotIn("＋ 添加来源", dashboard.text)
                     self.assertNotIn('aria-label="情报台状态"', dashboard.text)
-                    self.assertIn('class="mobile-menu"', dashboard.text)
+                    self.assertIn('class="mobile-primary-nav"', dashboard.text)
                     self.assertIn('class="event-preview"', dashboard.text)
                     self.assertIn(f'data-read-event-id="{event_id}"', dashboard.text)
                     self.assertIn('aria-label="不感兴趣"', dashboard.text)

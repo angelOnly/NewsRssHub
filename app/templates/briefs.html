@@ -5,7 +5,7 @@
 {% if briefs %}
   <div class="brief-list">
   {% for brief in briefs %}
-    <a class="brief-card" href="/briefs/{{ brief.brief_date }}"><span class="brief-date">{{ brief.brief_date }}</span><h2>{{ brief.title }}</h2><p>{{ brief.intro }}</p><span>查看简报 →</span></a>
+    <a class="brief-card" href="/briefs/{{ brief.brief_date }}" aria-label="查看 {{ brief.title }}"><span class="brief-date">{{ brief.brief_date }}</span><h2><span class="brief-title-full">{{ brief.title }}</span><span class="brief-title-mobile">每日情报</span></h2><p>{{ brief.intro }}</p><span>查看简报 →</span></a>
   {% endfor %}
   </div>
 {% else %}

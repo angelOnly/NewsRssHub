@@ -105,9 +105,8 @@
 }
 @media(max-width:350px){.nav-link{font-size:11px}}
 
-/* Compact reading mode: the list is the product, while navigation and the
-   longer model output stay available on demand. */
-.mobile-menu{display:none}
+/* Compact reading mode: the list is the product, while secondary output
+   stays available on demand. */
 .brand-note{margin-left:0}
 .event-card{display:block;padding:13px 15px}
 .event-card-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}
@@ -129,12 +128,6 @@
 @media(max-width:800px){
   .sidebar{position:sticky;top:0;z-index:20;display:block;height:auto;min-height:52px;padding:8px 14px;overflow:visible}
   .sidebar>.brand,.sidebar>.brand-note,.sidebar>.nav,.sidebar>.sidebar-foot{display:none}
-  .mobile-menu{display:block;position:relative;width:max-content}
-  .mobile-menu-toggle{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:rgba(207,243,220,.13);color:#eaf2ea;font-size:20px;line-height:1;cursor:pointer;list-style:none}
-  .mobile-menu-toggle::-webkit-details-marker{display:none}
-  .mobile-menu .mobile-nav{display:none}
-  .mobile-menu[open] .mobile-nav{position:absolute;top:43px;left:0;z-index:30;display:grid;grid-template-columns:1fr;width:min(240px,calc(100vw - 28px));gap:4px;margin-top:0;padding:7px;border:1px solid rgba(207,243,220,.2);border-radius:12px;background:#18392d;box-shadow:0 14px 30px rgba(12,31,24,.28)}
-  .mobile-menu .nav-link{justify-content:flex-start;min-height:39px;padding:8px 10px;font-size:14px}
   .content{padding:16px 17px 38px}
 }
 
@@ -253,3 +246,48 @@
 .sources-platform-table th:nth-child(1){width:27%}.sources-platform-table th:nth-child(2){width:24%;min-width:220px}.sources-platform-table th:nth-child(3){width:12%}.sources-platform-table th:nth-child(4){width:11%}.sources-platform-table th:nth-child(5){width:12%}.sources-platform-table th:nth-child(6){width:14%}.source-description{color:#526158;font-size:13px;line-height:1.5;overflow-wrap:anywhere}.source-form textarea[name="description"]{min-height:86px;font-family:inherit}
 .source-mobile-description{margin:8px 0 0;color:#526158;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 @media(max-width:600px){.source-form textarea[name="description"]{min-height:78px;font-size:13px}.source-mobile-description{margin-top:6px}}
+
+/* 手机优先展示全局去向，再把页面标题和摘要降为辅助信息，避免首屏被导航和大字占满。 */
+.mobile-primary-nav,.brief-title-mobile{display:none}
+@media(max-width:800px){
+  .sidebar{min-height:0;padding:7px 10px}
+  .mobile-primary-nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;width:100%}
+  .mobile-primary-nav .nav-link{display:flex;justify-content:center;min-width:0;min-height:36px;padding:7px 1px;border-radius:8px;font-size:12px;line-height:1;white-space:nowrap}
+}
+@media(max-width:600px){
+  .content{padding:14px 16px 34px}
+  .page-head{gap:3px;margin-bottom:14px}
+  .page-head .eyebrow{display:none}
+  .page-head h1{font-size:24px;letter-spacing:-.8px;line-height:1.2}
+  .page-head .subhead{margin-top:3px;font-size:13px;line-height:1.45}
+
+  .settings-page>.page-head .subhead{display:none}
+  .settings-page .settings-section{margin-top:26px;padding-top:26px;border-top:1px solid var(--line)}
+  .settings-page #fetch{margin-top:18px;padding-top:0;border-top:0}
+  .settings-section-head{margin-bottom:11px}
+  .settings-section-head .eyebrow{display:none}
+  .settings-section-head h2{margin:0;font-size:20px;letter-spacing:-.6px;line-height:1.25}
+  .settings-section-head p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
+  .settings-page .source-form{gap:12px;padding:15px;border-radius:13px}
+  .settings-page .source-form label{gap:5px}
+  .settings-page .form-actions{margin-top:0}
+  .settings-page .form-actions .button{width:100%;min-height:40px}
+
+  .brief-list{gap:9px}
+  .brief-card{padding:15px;border-radius:12px}
+  .brief-card h2{margin:5px 0;font-size:17px;line-height:1.35}
+  .brief-card p{display:-webkit-box;min-height:0;margin:0;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:13px;line-height:1.5}
+  .brief-card>span:last-child{display:inline-block;margin-top:10px;font-size:12px}
+  .brief-title-full{display:none}
+  .brief-title-mobile{display:inline}
+
+  .saved-events .event-card{padding:11px 12px}
+  .saved-events .event-main h3{font-size:15px;line-height:1.38}
+  .saved-event-summary{font-size:13px}
+  .saved-event-summary p{display:-webkit-box;margin:5px 0 0;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;font-size:13px;line-height:1.5}
+  .saved-event-summary .event-highlights{display:none}
+
+  .source-page-head{gap:4px;margin-bottom:10px}
+  .source-page-head h1{font-size:24px}
+}
+@media(max-width:350px){.mobile-primary-nav .nav-link{font-size:11px}}
