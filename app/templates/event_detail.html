@@ -6,7 +6,7 @@
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 <article class="detail-page">
   <header class="detail-head">
-    <div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span><span>{{ event.visible_source_count }} 个来源</span><span>{{ event.last_seen_at|relative_time }}</span></div>
+    <div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span><span>条目 {{ event.visible_item_count }} · 来源 {{ event.visible_source_count }}</span><span>{{ event.last_seen_at|relative_time }}</span></div>
     <h1>{{ event.title }}</h1>
     <p class="detail-lede">{{ event.summary }}</p>
     {% if event.highlights %}

@@ -1078,6 +1078,12 @@ class Repository:
                     WHERE i.id = e.primary_item_id
                 ) AS highlights_json,
                 (
+                    SELECT COUNT(*)
+                    FROM items i
+                    JOIN sources s ON s.id = i.source_id
+                    WHERE i.event_id = e.id AND {_source_is_live_clause('s')}
+                ) AS visible_item_count,
+                (
                     SELECT COUNT(DISTINCT i.source_id)
                     FROM items i
                     JOIN sources s ON s.id = i.source_id
@@ -1243,6 +1249,8 @@ class Repository:
         data["highlights"] = data["items"][0].get("highlights", [])
         data["user_hidden"] = bool(user_hidden)
         data["user_saved"] = bool(user_saved)
+        # 与详情页实际渲染的原始内容列表保持一致。
+        data["visible_item_count"] = len(data["items"])
         data["visible_source_count"] = int(visible_source_count)
         return data
 

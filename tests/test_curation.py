@@ -275,6 +275,7 @@ class CurationTests(unittest.TestCase):
             self.assertEqual(len(repository.list_events(tier=EditorialTier.MUST_READ, period="all")), 1)
             self.assertEqual(len(repository.list_events(tier=EditorialTier.BRIEF, period="all")), 1)
             event = repository.list_events(tier=EditorialTier.MUST_READ, period="all")[0]
+            self.assertEqual(event["visible_item_count"], 2)
             self.assertEqual(event["visible_source_count"], 1)
 
     def test_skill_receives_recent_explicit_feedback_without_raw_body(self) -> None:

@@ -411,10 +411,21 @@ sources:
             services.repository.save_item_translation(
                 item_id, translated_content="这是原始正文的中文译文。"
             )
+            related_item_id, _ = services.repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="related",
+                    title="OpenAI 新模型相关进展",
+                    link="https://example.test/related",
+                    content="另一条原始内容",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            )
+            services.repository.save_item_summary(related_item_id, summary="相关进展摘要。")
             event_id = services.repository.apply_curation_groups(
                 [
                     CurationGroup(
-                        item_ids=[item_id],
+                        item_ids=[item_id, related_item_id],
                         primary_item_id=item_id,
                         tier=EditorialTier.MUST_READ,
                         reason="直接影响当前模型选择",
@@ -449,10 +460,12 @@ sources:
                     self.assertIn("资讯速览", dashboard.text)
                     self.assertIn("OpenAI 新模型已开放使用", dashboard.text)
                     self.assertIn("开发者现在可以开始使用新模型", dashboard.text)
+                    self.assertIn("来源1 · 条目2", dashboard.text)
                     self.assertNotIn("全部主题", dashboard.text)
                     self.assertNotIn("重要性排序", dashboard.text)
-                    # 整条卡片与右侧“查看详情”箭头都走同一个详情地址。
-                    self.assertGreaterEqual(dashboard.text.count(f'href="/events/{event_id}?'), 2)
+                    self.assertIn('class="event-card-footer"', dashboard.text)
+                    self.assertNotIn('aria-label="查看详情"', dashboard.text)
+                    self.assertEqual(dashboard.text.count(f'href="/events/{event_id}?'), 1)
 
                     detail = client.get(f"/events/{event_id}?tier=must_read&period=all")
                     self.assertEqual(detail.status_code, 200)
@@ -461,6 +474,7 @@ sources:
                     self.assertIn("中文译文", detail.text)
                     self.assertIn("原始标题", detail.text)
                     self.assertIn("OpenAI 发布新模型", detail.text)
+                    self.assertIn("条目 2 · 来源 1", detail.text)
                     self.assertNotIn("模型解读", detail.text)
                     read_dashboard = client.get("/?tier=must_read&period=all")
                     self.assertIn('class="event-card is-read"', read_dashboard.text)

@@ -322,6 +322,11 @@ class EventTests(unittest.TestCase):
             self.assertEqual(event["title"], "ComfyUI 增加 Flux 3 官方节点")
             self.assertEqual(event["editorial_tier"], EditorialTier.MUST_READ.value)
             self.assertEqual(len(event["items"]), 2)
+            self.assertEqual(event["visible_item_count"], 2)
+            self.assertEqual(event["visible_source_count"], 1)
+            listed_event = repository.list_events(tier=EditorialTier.MUST_READ, period="all")[0]
+            self.assertEqual(listed_event["visible_item_count"], 2)
+            self.assertEqual(listed_event["visible_source_count"], 1)
             self.assertNotIn("importance_score", event)
 
     def test_curation_order_is_stable_within_a_tier(self) -> None:
