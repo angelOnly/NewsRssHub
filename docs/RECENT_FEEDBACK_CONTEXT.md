@@ -6,6 +6,7 @@
 - 功能实现提交：`b9c79e000f3b53307781e3cd76d110e81e8c19c8`
 - 文档提交：`3909b53`
 - 当前整合分支：`codex/integration-main-fetch-media-favorites`
+- 本次整合实现提交：`98cbe2fe35a945e681ef7fa0a3d24f853f0ea889`
 - 变更范围：项目级资讯筛选 Skill、筛选输入组装、反馈查询与回归测试。
 
 ## 背景与问题

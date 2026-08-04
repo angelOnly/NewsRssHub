@@ -4,6 +4,8 @@
 >
 > 整合分支：`codex/integration-main-fetch-media-favorites`
 >
+> 整合实现提交：`98cbe2fe35a945e681ef7fa0a3d24f853f0ea889`
+>
 > 基线：`main@f31965e8c043738ed8014d9fa75cbf4139722a75`
 
 ## 1. 整合范围
