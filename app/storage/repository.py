@@ -129,6 +129,26 @@ class Repository:
         interval = self._normalize_fetch_interval(row["value"] if row else FetchPolicy().interval_minutes)
         return FetchPolicy(interval_minutes=interval)
 
+    def get_app_setting(self, key: str) -> str | None:
+        """读取少量应用级状态；调用方负责解析具体值的格式。"""
+
+        with self.database.read() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else None
+
+    def save_app_setting(self, key: str, value: str) -> None:
+        """原子写入应用级状态，供独立 Worker 之间共享。"""
+
+        with self.database.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, value, iso_now()),
+            )
+
     @staticmethod
     def _jitter_seconds(
         policy: FetchPolicy,

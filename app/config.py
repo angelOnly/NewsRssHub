@@ -59,6 +59,7 @@ class Settings:
     credential_encryption_key: str | None
     timezone: str
     rsshub_base_url: str | None = None
+    web_push_subject: str = "mailto:newsrsshub@localhost"
 
     @property
     def profile_path(self) -> Path:
@@ -105,6 +106,9 @@ def build_settings() -> Settings:
         credential_encryption_key=config.get("CREDENTIAL_ENCRYPTION_KEY") or None,
         timezone=str(app_config.get("timezone", "Asia/Shanghai")),
         rsshub_base_url=str(rsshub_base_url).rstrip("/") if rsshub_base_url else None,
+        web_push_subject=str(
+            app_config.get("web_push_subject", "mailto:newsrsshub@localhost")
+        ).strip(),
     )
 
 

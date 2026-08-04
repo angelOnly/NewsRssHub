@@ -38,6 +38,25 @@
 
 Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → Skill 筛选 → 正文译文 → 每日简报与过期内容清理。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 会一并复制到镜像，缺失时系统会明确显示筛选不可用，而不会退回旧关键词评分。
 
+## iPhone 手机通知
+
+NewsRSSHub 支持标准 Web Push。它只发送一条聚合提醒，不会按资讯逐条打扰手机：
+
+```text
+NewsRSSHub
+本轮抓取发现 X 条新内容，点此查看
+```
+
+其中 `X` 是本轮真正新写入数据库的条目数；点击通知始终打开首页。首次发现新增后会等待 1 分钟收拢错峰来源，之后在当前全局抓取间隔内最多再发一条。临时网络错误会重试；浏览器返回订阅失效时，系统会停止推送并要求重新开启。
+
+启用步骤：
+
+1. 站点必须以稳定 HTTPS 域名访问，并在 `config.yml` 的 `app.web_push_subject` 中填写同一站点的 HTTPS 地址或有效的 `mailto:` 地址。
+2. 重新部署后，用 iPhone Safari 删除旧的主屏幕图标，再通过“分享 → 添加到主屏幕”创建新版 Web App。
+3. 从主屏幕图标打开 NewsRSSHub，进入“设置与连接 → 手机通知”，点击“开启手机通知”，允许 iOS 系统权限后可用“发送测试通知”验证。
+
+VAPID 私钥会在首次开启时自动生成，并使用 `CREDENTIAL_ENCRYPTION_KEY` 加密保存到 SQLite；不需要 Apple 开发者账号、App Store 或额外容器。若这台手机在 iOS 设置中关闭了通知，或浏览器订阅被系统回收，只需按上述页面重新开启即可。
+
 ## 本地开发
 
 ```bash

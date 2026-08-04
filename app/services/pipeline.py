@@ -15,6 +15,7 @@ from app.services.source_backups import SourceBackupService
 from app.services.sources import SourceService
 from app.services.summarizer import SummaryService
 from app.services.translator import TranslationService
+from app.services.web_push import WebPushService
 from app.storage.repository import Repository
 
 
@@ -29,6 +30,7 @@ class IntelligencePipeline:
         llm_connections: LLMConnectionService | None = None,
         source_connections: ConnectionCatalog | None = None,
         source_backups: SourceBackupService | None = None,
+        web_push: WebPushService | None = None,
     ) -> None:
         self.repository = repository
         self.registry = registry
@@ -47,6 +49,7 @@ class IntelligencePipeline:
         )
         self.translator = TranslationService(repository, settings, self.llm_connections)
         self.briefs = BriefService(repository, settings)
+        self.web_push = web_push or WebPushService(repository, settings)
 
     def bootstrap(self) -> int:
         return self.sources.seed_existing_feeds()
@@ -61,9 +64,11 @@ class IntelligencePipeline:
             logging.getLogger(__name__).exception("来源自动备份失败，本轮抓取继续执行")
             source_backup = None
         collected = self.collector.collect_due_sources(force=force)
+        push_queued = self.web_push.record_new_items(collected.new_items)
         return {
             "collection": asdict(collected),
             "source_backup": source_backup.filename if source_backup else None,
+            "push_queued": push_queued,
         }
 
     def process_once(self) -> dict[str, object]:
@@ -74,12 +79,15 @@ class IntelligencePipeline:
         translated = self.translator.translate_visible_primary_items(limit=12)
         brief = self.briefs.generate_today()
         cleanup = self.repository.purge_expired_content()
+        # 处理完成后再提醒，用户点开首页时能直接看到本轮已落库的内容。
+        push_delivery = self.web_push.deliver_pending()
         return {
             "summary": asdict(summarized),
             "curation": asdict(curated),
             "translation": asdict(translated),
             "brief": brief,
             "cleanup": cleanup,
+            "web_push": asdict(push_delivery),
         }
 
     def run_once(self, force: bool = False) -> dict[str, object]:

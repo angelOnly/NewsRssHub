@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "NewsRSSHub",
+  "short_name": "NewsRSSHub",
+  "description": "个人化每日情报台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f7f2",
+  "theme_color": "#173c2d",
+  "icons": [
+    {
+      "src": "/static/newsrsshub-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

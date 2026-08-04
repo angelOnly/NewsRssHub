@@ -12,6 +12,7 @@ from app.services.sources import SourceService
 from app.services.source_backups import SourceBackupService
 from app.services.translator import TranslationService
 from app.services.x_session import XSessionService
+from app.services.web_push import WebPushService
 from app.storage.database import Database
 from app.storage.repository import Repository
 
@@ -28,6 +29,7 @@ class ApplicationServices:
     translator: TranslationService
     batch_sources: BatchSourceImportService
     source_backups: SourceBackupService
+    web_push: WebPushService
 
 
 def build_services(settings: Settings | None = None) -> ApplicationServices:
@@ -40,6 +42,7 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     connections = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
     registry = build_source_registry(x_sessions)
     source_backups = SourceBackupService(repository, settings)
+    web_push = WebPushService(repository, settings)
     pipeline = IntelligencePipeline(
         repository,
         registry,
@@ -47,6 +50,7 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         llm_connections,
         connections,
         source_backups,
+        web_push,
     )
     source_service = SourceService(repository, registry, settings, connections)
     batch_source_service = BatchSourceImportService(source_service)
@@ -61,4 +65,5 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         translator=pipeline.translator,
         batch_sources=batch_source_service,
         source_backups=source_backups,
+        web_push=web_push,
     )

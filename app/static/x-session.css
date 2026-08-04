@@ -64,12 +64,20 @@
 .source-state-note { color: #97602d !important; margin-top: 3px; }
 .status.attention { color: #9d4e22; background: #f8eadf; }
 .status.paused { color: #5d6d62; background: #e9eeea; }
+.push-card { margin-bottom: 0; }
+.push-help { color: var(--muted); font-size: 13px; line-height: 1.65; margin: 15px 0 0; }
+.push-message { min-height: 20px; color: #447252; font-size: 13px; margin: 10px 0 0; }
+.push-message.error { color: #a13d37; }
+.push-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
+.push-actions .button { margin: 0; }
+.push-actions .button[hidden] { display: none; }
 
 @media (max-width: 800px) {
   .credential-alert { align-items: flex-start; flex-direction: column; }
   .credential-status-row { align-items: flex-start; flex-direction: column; gap: 8px; }
   .connection-details { grid-template-columns: 1fr; }
   .inline-test-form { align-items: flex-start; flex-direction: column; }
+  .push-actions { align-items: stretch; flex-direction: column; }
   .connection-card-top, .connection-card-foot, .source-connection-guide-head, .settings-section-head { align-items: flex-start; flex-direction: column; }
   .source-connection-item { grid-template-columns: auto minmax(0, 1fr); }
   .source-connection-item > a { grid-column: 2; }

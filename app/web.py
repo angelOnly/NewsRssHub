@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
+import logging
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -18,6 +20,7 @@ from app.services.connections import ConnectionRequiredError
 from app.services.llm_client import LLMRequestError
 from app.services.llm_connection import LLMConnectionError
 from app.services.x_session import XSessionError
+from app.services.web_push import WebPushError, WebPushSubscriptionError
 
 
 TIER_TABS: tuple[tuple[str, str], ...] = (
@@ -147,6 +150,13 @@ templates.env.filters["tier_label"] = _tier_label
 
 def get_services(request: Request) -> ApplicationServices:
     return request.app.state.services
+
+
+def _require_push_request(request: Request) -> None:
+    """Push 写接口只接受页面脚本发起的 JSON 请求，拦住跨站表单提交。"""
+
+    if request.headers.get("X-NewsRSSHub-Push") != "1":
+        raise HTTPException(status_code=403, detail="通知请求来源无效。")
 
 
 def render(
@@ -280,6 +290,84 @@ def fetch_settings_redirect(*, notice: str = "", error: str = "") -> RedirectRes
     return settings_redirect(anchor="fetch", notice=notice, error=error)
 
 
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest() -> FileResponse:
+    return FileResponse(
+        Path("app/static/manifest.webmanifest"),
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    # 根路径的 Worker 才能控制首页和资讯详情页；禁止长缓存以便发布后及时更新。
+    return FileResponse(
+        Path("app/static/sw.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/api/push/config")
+def web_push_config(request: Request) -> JSONResponse:
+    services = get_services(request)
+    try:
+        payload = services.web_push.public_config()
+    except WebPushError as exc:
+        payload = {
+            "available": False,
+            "message": str(exc),
+            "status": asdict(services.web_push.status()),
+        }
+    except Exception:
+        logging.getLogger(__name__).exception("读取 Web Push 配置失败")
+        payload = {
+            "available": False,
+            "message": "手机通知暂不可用，请稍后重试。",
+            "status": asdict(services.web_push.status()),
+        }
+    return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/push/subscription")
+async def save_web_push_subscription(request: Request) -> JSONResponse:
+    _require_push_request(request)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise WebPushSubscriptionError("手机通知订阅格式无效，请重新开启通知。")
+        status = get_services(request).web_push.save_subscription(payload)
+        return JSONResponse({"status": asdict(status)}, headers={"Cache-Control": "no-store"})
+    except WebPushError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("保存 Web Push 订阅失败")
+        raise HTTPException(status_code=500, detail="保存手机通知失败，请稍后重试。") from exc
+
+
+@app.delete("/api/push/subscription")
+def remove_web_push_subscription(request: Request) -> Response:
+    _require_push_request(request)
+    get_services(request).web_push.unsubscribe()
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/push/test")
+def test_web_push(request: Request) -> JSONResponse:
+    _require_push_request(request)
+    try:
+        get_services(request).web_push.send_test()
+        return JSONResponse({"ok": True, "message": "测试通知已发送。"})
+    except WebPushSubscriptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except WebPushError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("发送 Web Push 测试通知失败")
+        raise HTTPException(status_code=503, detail="测试通知发送失败，请稍后重试。") from exc
+
+
 @app.get("/health")
 def health(request: Request) -> JSONResponse:
     services = get_services(request)
@@ -290,6 +378,7 @@ def health(request: Request) -> JSONResponse:
             "database": "ok",
             "x_session": services.x_sessions.status().state,
             "llm_connection": services.llm_connections.status().state,
+            "web_push": services.web_push.status().state,
             "curation_skill": "available" if services.pipeline.skill_loader.status().available else "unavailable",
             "pending_summary": stats["pending_summary"],
             "pending_curation": stats["pending_curation"],

@@ -13,6 +13,31 @@
   {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
   {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 
+  <section class="settings-section" id="push">
+    <header class="settings-section-head">
+      <div>
+        <p class="eyebrow">MOBILE NOTIFICATIONS</p>
+        <h2>手机通知</h2>
+        <p>每个抓取周期最多发送一条提醒：<strong>“本轮抓取发现 X 条新内容，点此查看”</strong>。点击通知会打开首页，不会逐条推送资讯。</p>
+      </div>
+    </header>
+    <div class="credential-card push-card" data-push-controls>
+      <div class="credential-status-row">
+        <div>
+          <span class="status pending" data-push-state>检查中</span>
+          <p class="credential-meta" data-push-status>正在检查手机通知状态…</p>
+        </div>
+      </div>
+      <p class="push-help">iPhone 请先用 Safari 将网站添加到主屏幕，并从主屏幕图标打开后再开启通知。</p>
+      <p class="push-message" data-push-message role="status"></p>
+      <div class="form-actions push-actions">
+        <button class="button button-primary" type="button" data-push-enable>开启手机通知</button>
+        <button class="button button-secondary" type="button" data-push-test hidden>发送测试通知</button>
+        <button class="button button-secondary" type="button" data-push-disable hidden>关闭此设备通知</button>
+      </div>
+    </div>
+  </section>
+
   <section class="settings-section" id="fetch">
     <header class="settings-section-head">
       <div>
