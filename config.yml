@@ -5,7 +5,7 @@ app:
   request_timeout: 30
   # Web Push 的 VAPID 发件人标识；域名或端口变更时请同步更新。
   web_push_subject: "https://news-rss.xiaolicloud.cn:18443"
-  # YouTube 来源通过你已部署的 RSSHub 抓取。
+  # X、Reddit、YouTube 与通用 RSS 均通过你已部署的自定义 RSSHub 抓取。
   rsshub_base_url: "https://rsshub.xiaolicloud.cn:18443"
 
 # ===============================================================

@@ -1,0 +1,21 @@
+services:
+  rsshub:
+    build:
+      context: .
+    image: local/newsrsshub-rsshub:latest
+    restart: unless-stopped
+    ports:
+      - "31200:1200"
+    volumes:
+      # 只暴露运行时子目录；RSSHub 无法读取 NewsRSSHub 的 SQLite 数据库。
+      - /home/jzb/docker/rss-hub/data/rsshub-runtime:/run/newsrsshub-runtime:ro
+    environment:
+      TZ: "Asia/Shanghai"
+      NODE_ENV: "production"
+      CACHE_TYPE: "memory"
+      CACHE_EXPIRE: "300"
+      CACHE_CONTENT_EXPIRE: "43200"
+      DEBUG_INFO: "false"
+      NEWSRSSHUB_RUNTIME_DIR: "/run/newsrsshub-runtime"
+      # 保留你现有的 YOUTUBE_KEY 配置；不要把 X 的 auth_token 写到 Compose 或 .env。
+      YOUTUBE_KEY: "${YOUTUBE_KEY:-}"

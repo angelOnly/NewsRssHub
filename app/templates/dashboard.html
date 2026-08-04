@@ -6,7 +6,7 @@
 
 {% if has_x_sources and x_credential.state != 'valid' %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
-  <div><strong>X 抓取已暂停</strong><p>你已添加 X 来源，但登录 Cookie 尚未通过验证。其他公开 RSS / Reddit 来源不受影响。</p></div>
+  <div><strong>X 抓取已暂停</strong><p>你已添加 X 来源，但登录 Cookie 尚未通过验证。其他 RSSHub 来源不受影响。</p></div>
   <a class="button button-secondary" href="/settings#x">前往设置</a>
 </section>
 {% endif %}

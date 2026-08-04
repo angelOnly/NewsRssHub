@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from app.config import Settings
 from app.domain.models import FeedItem, SourceKind
 from app.plugins.base import SourcePlugin
+from app.services.rsshub_runtime import RssHubRuntimeFiles
 
 
 USER_AGENT = "NewsRSSHub/1.0 (+local personal intelligence dashboard)"
@@ -306,13 +307,14 @@ class RssSourcePlugin(SourcePlugin):
     label = "RSS / Atom 地址"
 
     def normalize_locator(self, locator: str) -> str:
-        candidate = locator.strip()
-        if not candidate.startswith(("http://", "https://")):
-            raise ValueError("RSS 地址必须以 http:// 或 https:// 开头。")
-        return candidate
+        return RssHubRuntimeFiles.normalize_rss_feed_url(locator)
 
     def resolve_feed_url(self, locator: str, settings: Settings) -> str:
-        return self.normalize_locator(locator)
+        if not settings.rsshub_base_url:
+            raise ValueError("请先在 config.yml 的 app.rsshub_base_url 填入已部署 RSSHub 的地址。")
+        normalized = self.normalize_locator(locator)
+        key = RssHubRuntimeFiles.rss_feed_key(normalized)
+        return f"{settings.rsshub_base_url}/newsrsshub/rss/{key}"
 
     def fetch(self, source: dict[str, Any], settings: Settings) -> list[FeedItem]:
         _, items = fetch_feed(source["feed_url"], settings.request_timeout, source.get("name", ""))

@@ -65,43 +65,24 @@ class ConnectionCatalog:
         if source_kind == SourceKind.X_RSSHUB:
             return self._x_connection()
         if source_kind == SourceKind.REDDIT:
-            return PlatformConnection(
-                key="reddit_public",
+            return self._rsshub_public_connection(
+                key="rsshub_reddit",
                 platform="Reddit",
                 source_kind=source_kind,
-                requires_credentials=False,
-                state="public",
-                usable=True,
-                message="当前使用公开 RSS，不需要 Cookie 或 API Key。未来启用 Reddit OAuth 时会在此单独配置。",
+                message="通过已配置的 RSSHub 抓取 Reddit，不需要 Cookie 或 API Key。",
             )
         if source_kind == SourceKind.YOUTUBE:
-            if not self.rsshub_base_url:
-                return PlatformConnection(
-                    key="rsshub_youtube",
-                    platform="YouTube",
-                    source_kind=source_kind,
-                    requires_credentials=False,
-                    state="missing",
-                    usable=False,
-                    message="请先在 config.yml 的 app.rsshub_base_url 填入已部署 RSSHub 的地址。",
-                )
-            return PlatformConnection(
-                key="youtube_public",
+            return self._rsshub_public_connection(
+                key="rsshub_youtube",
                 platform="YouTube",
                 source_kind=source_kind,
-                requires_credentials=False,
-                state="public",
-                usable=True,
                 message="通过已配置的 RSSHub 抓取 YouTube 频道，不需要 Cookie 或 API Key。",
             )
-        return PlatformConnection(
-            key="rss_public",
+        return self._rsshub_public_connection(
+            key="rsshub_rss",
             platform="RSS / Atom",
             source_kind=source_kind,
-            requires_credentials=False,
-            state="public",
-            usable=True,
-            message="公开 RSS/Atom 地址不需要平台登录。",
+            message="通过已配置的 RSSHub 抓取受管 RSS/Atom 地址，不需要平台登录。",
         )
 
     def ensure_source_ready(self, kind: SourceKind | str) -> PlatformConnection:
@@ -111,6 +92,18 @@ class ConnectionCatalog:
         return connection
 
     def _x_connection(self) -> PlatformConnection:
+        if not self.rsshub_base_url:
+            return PlatformConnection(
+                key="x_session",
+                platform="X",
+                source_kind=SourceKind.X_RSSHUB,
+                requires_credentials=True,
+                state="missing",
+                usable=False,
+                message="请先在 config.yml 的 app.rsshub_base_url 填入已部署 RSSHub 的地址。",
+                setup_url="/settings#x",
+                setup_label="配置 X Cookie",
+            )
         if not self.x_sessions:
             return PlatformConnection(
                 key="x_session",
@@ -138,4 +131,32 @@ class ConnectionCatalog:
             ),
             setup_url="/settings#x",
             setup_label="配置并测试 X Cookie",
+        )
+
+    def _rsshub_public_connection(
+        self,
+        *,
+        key: str,
+        platform: str,
+        source_kind: SourceKind,
+        message: str,
+    ) -> PlatformConnection:
+        if not self.rsshub_base_url:
+            return PlatformConnection(
+                key=key,
+                platform=platform,
+                source_kind=source_kind,
+                requires_credentials=False,
+                state="missing",
+                usable=False,
+                message="请先在 config.yml 的 app.rsshub_base_url 填入已部署 RSSHub 的地址。",
+            )
+        return PlatformConnection(
+            key=key,
+            platform=platform,
+            source_kind=source_kind,
+            requires_credentials=False,
+            state="public",
+            usable=True,
+            message=message,
         )

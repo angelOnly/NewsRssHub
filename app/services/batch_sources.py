@@ -236,6 +236,9 @@ class BatchSourceImportService:
                         message=str(exc),
                     )
                 )
+        if result.added:
+            # 批量导入绕过单条 add_source，结束后一次性刷新 RSSHub 白名单即可。
+            self.sources.sync_rsshub_runtime()
         return result
 
     def _parse_yaml_source(
