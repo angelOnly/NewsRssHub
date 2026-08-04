@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}最新热点 · NewsRSSHub{% endblock %}
 {% block content %}
 
@@ -64,29 +65,29 @@
             {% if event.user_saved %}
             <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/unsave">
               <input type="hidden" name="origin" value="dashboard"><input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
-              <button type="submit" aria-label="取消收藏" title="取消收藏"><span aria-hidden="true">★</span><span class="sr-only">取消收藏</span></button>
+              <button class="icon-button icon-button-save is-saved" type="submit" aria-label="取消收藏" title="取消收藏">{{ icon('star', 'is-filled') }}<span class="sr-only">取消收藏</span></button>
             </form>
             {% else %}
             <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/save">
               <input type="hidden" name="origin" value="dashboard"><input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
-              <button type="submit" aria-label="收藏" title="收藏，稍后阅读"><span aria-hidden="true">☆</span><span class="sr-only">收藏，稍后阅读</span></button>
+              <button class="icon-button icon-button-save" type="submit" aria-label="收藏" title="收藏，稍后阅读">{{ icon('star') }}<span class="sr-only">收藏，稍后阅读</span></button>
             </form>
             {% endif %}
             {% if tier == 'hidden' and event.user_hidden %}
             <form class="event-feedback" method="post" action="/events/{{ event.id }}/restore">
               <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
-              <button type="submit" aria-label="恢复此条内容" title="恢复此条内容"><span aria-hidden="true">↺</span><span class="sr-only">恢复此条内容</span></button>
+              <button class="icon-button icon-button-restore" type="submit" aria-label="恢复此条内容" title="恢复此条内容">{{ icon('restore') }}<span class="sr-only">恢复此条内容</span></button>
             </form>
             {% elif tier != 'hidden' %}
             <form class="event-feedback" method="post" action="/events/{{ event.id }}/not-interested">
               <input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
-              <button type="submit" aria-label="不感兴趣" title="不感兴趣"><span aria-hidden="true">⊘</span><span class="sr-only">不感兴趣</span></button>
+              <button class="icon-button icon-button-hide" type="submit" aria-label="不感兴趣" title="不感兴趣">{{ icon('hide') }}<span class="sr-only">不感兴趣</span></button>
             </form>
             {% endif %}
           </div>
         {% if event.summary or event.highlights or event.tier_reason or event.user_hidden %}
         <details class="event-preview" data-read-event-id="{{ event.id }}">
-          <summary aria-label="展开摘要与重点" title="展开摘要与重点"><span>摘要</span><span aria-hidden="true">⌄</span></summary>
+          <summary aria-label="展开摘要与重点" title="展开摘要与重点"><span>摘要</span>{{ icon('chevron-down', 'summary-icon') }}</summary>
           <div class="event-preview-content">
             {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
             {% if event.highlights %}
@@ -107,7 +108,7 @@
     {% endif %}
   {% else %}
     <div class="empty-state">
-      <span>⌁</span><h2>{{ tier|tier_label }}暂无内容</h2>
+      <span class="empty-state-icon">{{ icon('trending') }}</span><h2>{{ tier|tier_label }}暂无内容</h2>
       {% if tier == 'must_read' %}<p>这不是漏抓提示：这里只放真正影响工具、项目或近期决策的变化。</p>{% else %}<p>切换时间范围，或等待后台完成下一轮抓取、摘要和筛选。</p>{% endif %}
       <a class="button button-primary" href="/sources">管理来源</a>
     </div>

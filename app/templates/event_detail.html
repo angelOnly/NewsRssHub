@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ event.title }} · NewsRSSHub{% endblock %}
 {% block content %}
-<a class="back-link" href="{{ return_url }}">← {{ return_label }}</a>
+<a class="back-link" href="{{ return_url }}">{{ icon('arrow-left', 'back-icon') }}<span>{{ return_label }}</span></a>
 {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 <article class="detail-page">
@@ -18,16 +19,23 @@
     </section>
     {% endif %}
     {% if event.tier_reason %}<p class="tier-reason detail-reason">筛选说明：{{ event.tier_reason }}</p>{% endif %}
-    <form class="event-feedback event-feedback-detail event-save" method="post" action="/events/{{ event.id }}/{% if event.user_saved %}unsave{% else %}save{% endif %}">
-      <input type="hidden" name="origin" value="{{ action_origin }}"><input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
-      <button type="submit">{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}</button>
-    </form>
-    {% if not event.user_hidden %}
-    <form class="event-feedback event-feedback-detail" method="post" action="/events/{{ event.id }}/not-interested">
-      <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}"><input type="hidden" name="origin" value="{{ action_origin }}">
-      <button type="submit">不感兴趣</button>
-    </form>
-    {% endif %}
+    <div class="detail-actions" aria-label="文章操作">
+      <form class="event-feedback event-feedback-detail event-save" method="post" action="/events/{{ event.id }}/{% if event.user_saved %}unsave{% else %}save{% endif %}">
+        <input type="hidden" name="origin" value="{{ action_origin }}"><input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
+        <button class="icon-button icon-button-save{% if event.user_saved %} is-saved{% endif %}" type="submit" aria-label="{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}" title="{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}">{{ icon('star', 'is-filled' if event.user_saved else '') }}<span class="sr-only">{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}</span></button>
+      </form>
+      {% if event.user_hidden %}
+      <form class="event-feedback event-feedback-detail" method="post" action="/events/{{ event.id }}/restore">
+        <input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
+        <button class="icon-button icon-button-restore" type="submit" aria-label="恢复此条内容" title="恢复此条内容">{{ icon('restore') }}<span class="sr-only">恢复此条内容</span></button>
+      </form>
+      {% else %}
+      <form class="event-feedback event-feedback-detail" method="post" action="/events/{{ event.id }}/not-interested">
+        <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}"><input type="hidden" name="origin" value="{{ action_origin }}">
+        <button class="icon-button icon-button-hide" type="submit" aria-label="不感兴趣" title="不感兴趣">{{ icon('hide') }}<span class="sr-only">不感兴趣</span></button>
+      </form>
+      {% endif %}
+    </div>
   </header>
 
   <section class="source-section">

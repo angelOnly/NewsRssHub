@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ '编辑来源' if source else '添加来源' }} · NewsRSSHub{% endblock %}
 {% block content %}
-<a class="back-link" href="/sources">← 返回来源管理</a>
+<a class="back-link" href="/sources">{{ icon('arrow-left', 'back-icon') }}<span>返回来源管理</span></a>
 <section class="form-page">
   <header class="page-head compact">
     <div><p class="eyebrow">SOURCE SETUP</p><h1>{{ '编辑来源' if source else '添加来源' }}</h1><p class="subhead">提交后会立即显示验证中；完成后会返回来源列表并明确显示结果。</p></div>
@@ -60,7 +61,7 @@
       <label><input name="enabled" type="checkbox" value="true" {% if not source or source.enabled %}checked{% endif %}> 保存后启用抓取</label>
     </div>
     <p class="form-submit-status" data-source-submit-status role="status" aria-live="polite" hidden></p>
-    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit" data-source-submit-button>{{ '保存配置' if source else '添加并验证' }}</button></div>
+    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary button-with-icon" type="submit" data-source-submit-button>{{ icon('edit' if source else 'plus') }}<span>{{ '保存配置' if source else '添加并验证' }}</span></button></div>
   </form>
 </section>
 <script src="/static/source-submit.js?v=20260804-1" defer></script>

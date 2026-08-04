@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}批量添加来源 · NewsRSSHub{% endblock %}
 {% block content %}
-<a class="back-link" href="/sources">← 返回来源管理</a>
+<a class="back-link" href="/sources">{{ icon('arrow-left', 'back-icon') }}<span>返回来源管理</span></a>
 <section class="form-page batch-source-page">
   <header class="page-head compact batch-source-head">
     <div>
@@ -17,8 +18,8 @@
       <p>一个文件可以混合 X、Reddit、YouTube 和 RSS；保留需要的条目，改好名称和地址后再上传。来源管理页导出或自动备份的 YAML 也能直接上传恢复。</p>
     </div>
     <div class="batch-template-actions">
-      <a class="button button-secondary" href="/sources/batch/template.yml" download>下载 YAML 示例</a>
-      <a class="button button-primary" href="/sources/batch/recommended.yml" download>下载推荐来源包</a>
+      <a class="button button-secondary button-with-icon" href="/sources/batch/template.yml" download>{{ icon('download') }}<span>下载 YAML 示例</span></a>
+      <a class="button button-primary button-with-icon" href="/sources/batch/recommended.yml" download>{{ icon('download') }}<span>下载推荐来源包</span></a>
     </div>
   </section>
 
@@ -51,7 +52,7 @@
       <strong>连通性测试不会自动执行。</strong>
       上传成功后，启用来源会在未来 1–5 分钟内自动错峰抓取；也可到对应平台页点击“测试当前页”或单条“测试”。
     </div>
-    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit">上传并导入来源</button></div>
+    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary button-with-icon" type="submit">{{ icon('upload') }}<span>上传并导入来源</span></button></div>
   </form>
 
   {% if batch_result %}
