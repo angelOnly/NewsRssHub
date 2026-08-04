@@ -13,6 +13,24 @@
   {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
   {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 
+  <section class="settings-section" id="fetch">
+    <header class="settings-section-head">
+      <div>
+        <p class="eyebrow">FETCH POLICY</p>
+        <h2>统一抓取策略</h2>
+        <p>所有启用来源共用同一个抓取间隔。每次抓取完成后，系统会额外随机延后 1–5 分钟；同一批请求之间也会随机等待 2–5 秒，避免集中请求平台。</p>
+      </div>
+    </header>
+    <form class="source-form credential-form" method="post" action="/settings/fetch-policy">
+      <label>
+        抓取间隔（分钟）
+        <input name="interval_minutes" type="number" min="5" max="1440" required value="{{ fetch_policy.interval_minutes }}">
+        <small>保存后会在未来 1–5 分钟内为全部启用来源重新错峰排期，不会立即同时抓取。</small>
+      </label>
+      <div class="form-actions"><button class="button button-primary" type="submit">保存抓取策略</button></div>
+    </form>
+  </section>
+
   <section class="settings-section" id="model">
     <header class="settings-section-head">
       <div>

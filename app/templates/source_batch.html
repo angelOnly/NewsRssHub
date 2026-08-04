@@ -7,7 +7,7 @@
     <div>
       <p class="eyebrow">BATCH SOURCE FILE</p>
       <h1>批量添加来源</h1>
-      <p class="subhead">下载示例文件，填写账号后上传；导入只保存来源，不会自动抓取或测试。</p>
+      <p class="subhead">下载示例文件，填写账号后上传；导入不立即抓取或测试，启用的来源会在未来 1–5 分钟内错峰排期。</p>
     </div>
   </header>
 
@@ -43,12 +43,12 @@
         <div><dt><code>name</code></dt><dd>页面显示名称。</dd></div>
         <div><dt><code>kind</code></dt><dd><code>x_rsshub</code>、<code>reddit</code>、<code>youtube</code> 或 <code>rss</code>。</dd></div>
         <div><dt><code>locator</code></dt><dd>X 填 <code>@账号</code>，Reddit 填 <code>r/社区</code>，YouTube 填 <code>@频道</code> 或频道地址，RSS 填订阅地址。</dd></div>
-        <div><dt><code>official</code> / <code>enabled</code> / <code>archived</code> / <code>poll_interval_minutes</code></dt><dd>可在 <code>defaults</code> 中统一设置，也可在单条来源中覆盖；来源导出文件会保留暂停、归档和抓取间隔。</dd></div>
+        <div><dt><code>official</code> / <code>enabled</code> / <code>archived</code></dt><dd>可在 <code>defaults</code> 中统一设置，也可在单条来源中覆盖；来源导出文件会保留暂停和归档状态，抓取间隔统一在“设置与连接”中管理。</dd></div>
       </dl>
     </details>
     <div class="batch-flow-note">
       <strong>连通性测试不会自动执行。</strong>
-      上传成功后，到对应平台页点击“测试当前页”或单条“测试”；这样不会因为一次导入而触发大量抓取。
+      上传成功后，启用来源会在未来 1–5 分钟内自动错峰抓取；也可到对应平台页点击“测试当前页”或单条“测试”。
     </div>
     <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit">上传并导入来源</button></div>
   </form>

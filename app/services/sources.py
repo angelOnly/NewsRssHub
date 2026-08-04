@@ -31,7 +31,12 @@ class SourceService:
 
         plugin = self.registry.get(draft.kind)
         locator, feed_url = plugin.prepare_source(draft.locator, self.settings)
-        return replace(draft, locator=locator), feed_url
+        # 历史字段仍写入数据库以兼容旧备份，但调度只读取全局策略。
+        return replace(
+            draft,
+            locator=locator,
+            poll_interval_minutes=self.repository.get_fetch_policy().interval_minutes,
+        ), feed_url
 
     def add_source(
         self,
@@ -53,6 +58,10 @@ class SourceService:
         result: ValidationResult | None = None
         if validate:
             result = self.validate_source(source_id)
+            source = self.repository.get_source(source_id)
+            assert source is not None
+        if source["enabled"]:
+            self.repository.schedule_initial_fetch(source_id)
             source = self.repository.get_source(source_id)
             assert source is not None
         return source, result
@@ -88,9 +97,10 @@ class SourceService:
                 "name": draft.name,
                 "is_official": int(draft.is_official),
                 "enabled": int(draft.enabled),
-                "poll_interval_minutes": draft.poll_interval_minutes,
             },
         )
+        if draft.enabled and not current["enabled"]:
+            self.repository.schedule_initial_fetch(source_id)
         source = self.repository.get_source(source_id)
         assert source is not None
         return source, None
@@ -147,6 +157,7 @@ class SourceService:
             return 0
 
         created = 0
+        global_interval = self.repository.get_fetch_policy().interval_minutes
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -157,23 +168,21 @@ class SourceService:
             locator = str(entry.get("locator") or entry.get("url") or "").strip()
             if not locator:
                 continue
-            try:
-                poll_interval = max(5, min(int(entry.get("poll_interval_minutes", 120)), 1440))
-            except (TypeError, ValueError):
-                continue
             draft = SourceDraft(
                 name=str(entry.get("name") or locator),
                 kind=kind,
                 locator=locator,
                 is_official=bool(entry.get("official", False)),
-                poll_interval_minutes=poll_interval,
+                poll_interval_minutes=global_interval,
                 enabled=bool(entry.get("enabled", True)),
                 archived=bool(entry.get("archived", False)),
             )
             normalized, feed_url = self.prepare_draft(draft)
             if self.repository.find_source(normalized.kind.value, normalized.locator):
                 continue
-            self.repository.create_source(normalized, feed_url)
+            source_id = self.repository.create_source(normalized, feed_url)
+            if normalized.enabled:
+                self.repository.schedule_initial_fetch(source_id)
             created += 1
         return created
 

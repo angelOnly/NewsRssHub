@@ -30,7 +30,7 @@ class Database:
         # 服务器数据库产生任何结构或日志模式变更。
         connection = self._open_connection(enable_wal=False)
         try:
-            # 服务启动只允许初始化空库或使用 v7；绝不自动重建历史线上数据表。
+            # 服务启动只允许初始化空库或使用 v8；绝不自动重建历史线上数据表。
             initialize_runtime_schema(connection)
             connection.execute("PRAGMA journal_mode = WAL")
         finally:

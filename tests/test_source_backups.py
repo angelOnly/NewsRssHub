@@ -124,7 +124,9 @@ class SourceBackupTests(unittest.TestCase):
             self.assertFalse(archived["enabled"])
             self.assertEqual(archived["health_status"], "archived")
             self.assertTrue(youtube["is_official"])
-            self.assertEqual(youtube["poll_interval_minutes"], 360)
+            # 来源快照不再携带逐来源频率，恢复后的调度统一遵循数据库全局策略。
+            self.assertEqual(youtube["poll_interval_minutes"], 60)
+            self.assertEqual(restore_repository.get_fetch_policy().interval_minutes, 60)
 
     def test_periodic_backup_uses_its_timestamp_and_keeps_only_five_files(self) -> None:
         with TemporaryDirectory() as directory:

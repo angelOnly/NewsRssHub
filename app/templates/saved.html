@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}收藏 · NewsRSSHub{% endblock %}
+{% block content %}
+{% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
+
+<section class="event-section">
+  <div class="section-caption">
+    <h2>收藏</h2>
+    <span>第 {{ page }} 页 · 每页最多 50 条</span>
+  </div>
+  {% if events %}
+    <div class="event-list saved-events">
+      {% for event in events %}
+      <article class="event-card{% if event.user_read %} is-read{% endif %}" data-event-id="{{ event.id }}">
+        <div class="event-card-row">
+          <a class="event-main" href="/events/{{ event.id }}?origin=saved&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
+            <div class="event-meta">
+              <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
+              <span>收藏于 {{ event.saved_at|relative_time }}</span>
+            </div>
+            <h3>{{ event.title }}</h3>
+          </a>
+          <div class="event-actions">
+            <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/unsave">
+              <input type="hidden" name="origin" value="saved"><input type="hidden" name="page" value="{{ page }}">
+              <button type="submit" aria-label="取消收藏" title="取消收藏"><span aria-hidden="true">★</span><span class="sr-only">取消收藏</span></button>
+            </form>
+            <a class="card-arrow" href="/events/{{ event.id }}?origin=saved&page={{ page }}" aria-label="查看详情" title="查看详情">→</a>
+          </div>
+        </div>
+        {% if event.summary or event.highlights or event.user_hidden %}
+        <div class="saved-event-summary">
+          {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
+          {% if event.highlights %}
+          <ul class="event-highlights compact-highlights" aria-label="重点">
+            {% for highlight in event.highlights[:2] %}<li>{{ highlight }}</li>{% endfor %}
+          </ul>
+          {% endif %}
+          {% if event.user_hidden %}<small class="tier-reason">你已在热点列表中隐藏此内容</small>{% endif %}
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% if has_more %}
+      <div class="load-more"><a class="button button-secondary" href="/saved?page={{ page + 1 }}">加载下一页</a></div>
+    {% endif %}
+  {% else %}
+    <div class="empty-state">
+      <span>☆</span><h2>还没有收藏内容</h2>
+      <p>在热点列表或详情页点按收藏，之后可以在这里继续阅读。</p>
+      <a class="button button-primary" href="/">返回热点列表</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

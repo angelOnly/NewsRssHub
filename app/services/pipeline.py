@@ -51,7 +51,9 @@ class IntelligencePipeline:
     def bootstrap(self) -> int:
         return self.sources.seed_existing_feeds()
 
-    def run_once(self, force: bool = False) -> dict[str, object]:
+    def collect_once(self, force: bool = False) -> dict[str, object]:
+        """执行来源快照与到期抓取；模型处理不会拖慢调度检查。"""
+
         try:
             source_backup = self.source_backups.ensure_periodic_backup()
         except OSError:
@@ -59,15 +61,28 @@ class IntelligencePipeline:
             logging.getLogger(__name__).exception("来源自动备份失败，本轮抓取继续执行")
             source_backup = None
         collected = self.collector.collect_due_sources(force=force)
+        return {
+            "collection": asdict(collected),
+            "source_backup": source_backup.filename if source_backup else None,
+        }
+
+    def process_once(self) -> dict[str, object]:
+        """处理积压内容，并在处理完成后执行内容保留期清理。"""
+
         summarized = self.summarizer.summarize_pending(limit=50)
         curated = self.curator.curate_available(limit=120)
         translated = self.translator.translate_visible_primary_items(limit=12)
         brief = self.briefs.generate_today()
+        cleanup = self.repository.purge_expired_content()
         return {
-            "collection": asdict(collected),
             "summary": asdict(summarized),
             "curation": asdict(curated),
             "translation": asdict(translated),
             "brief": brief,
-            "source_backup": source_backup.filename if source_backup else None,
+            "cleanup": cleanup,
         }
+
+    def run_once(self, force: bool = False) -> dict[str, object]:
+        """兼容旧命令：先抓取，再处理积压内容。"""
+
+        return {**self.collect_once(force=force), **self.process_once()}

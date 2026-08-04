@@ -4,6 +4,8 @@
 > 提交主题：`feat: simplify sqlite migration and preserve source backups`
 > 状态：已实现、已完成自动化回归验证
 > 适用部署目录：`/home/jzb/docker/rss-hub`
+>
+> 后续说明：本文记录 v6 → v7 完成后固定结构的历史状态。随后 v8 整合因新增全局抓取排期和媒体字段，按明确授权恢复了仅用于该次升级的显式迁移路径；当前部署步骤以 [v8 整合记录](INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md) 和 [SQLite 结构精简与安全迁移说明](SQLITE_SCHEMA_AND_MIGRATION.md) 为准。
 
 ## 1. 本次迭代解决什么问题
 

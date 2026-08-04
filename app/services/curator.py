@@ -25,6 +25,8 @@ class CurationRun:
 
 class CurationService:
     BATCH_SIZE = 40
+    FEEDBACK_LOOKBACK_DAYS = 5
+    FEEDBACK_CONTEXT_LIMIT = 60
 
     def __init__(
         self,
@@ -59,6 +61,22 @@ class CurationService:
         ]
 
     @staticmethod
+    def _skill_feedback(feedback: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+        """仅把可解释的显式行为和对应摘要传给 Skill。"""
+
+        allowed_actions = {"read", "not_interested"}
+        return [
+            {
+                "action": str(item.get("action") or ""),
+                "acted_at": str(item.get("acted_at") or ""),
+                "title": str(item.get("title") or "")[:300],
+                "summary": str(item.get("summary") or "")[:700],
+            }
+            for item in feedback
+            if str(item.get("action") or "") in allowed_actions
+        ]
+
+    @staticmethod
     def _validate_output(output: CurationOutput, allowed_ids: set[int]) -> list[CurationGroup]:
         assigned = [item_id for group in output.groups for item_id in group.item_ids]
         assigned_set = set(assigned)
@@ -74,6 +92,10 @@ class CurationService:
         self, client: OpenAICompatibleJsonClient, items: Sequence[dict[str, Any]]
     ) -> list[CurationGroup]:
         skill = self.skill_loader.load()
+        recent_feedback = self.repository.list_recent_explicit_feedback(
+            days=self.FEEDBACK_LOOKBACK_DAYS,
+            limit=self.FEEDBACK_CONTEXT_LIMIT,
+        )
         system = (
             f"{skill}\n\n"
             "你正在执行项目级资讯筛选。只输出 JSON，不要 Markdown。"
@@ -86,6 +108,7 @@ class CurationService:
             system=system,
             user={
                 "user_profile": self._profile_text(),
+                "recent_feedback": self._skill_feedback(recent_feedback),
                 "items": self._skill_items(items),
             },
         )

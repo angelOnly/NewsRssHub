@@ -226,3 +226,16 @@
 .source-form [data-source-submit-button][disabled]{cursor:wait;opacity:.82;transform:none}
 @keyframes source-submit-spin{to{transform:rotate(360deg)}}
 @media(max-width:600px){.form-submit-status{font-size:12px;line-height:1.45}.source-form [data-source-submit-button][disabled]{min-width:148px}}
+
+/* 抓取节奏由全局策略控制，来源表单只保留可编辑的来源信息。 */
+.source-schedule-note{margin:0;padding:10px 12px;border:1px solid #d5e2d7;border-radius:10px;background:#f3f8f3;color:#506555;font-size:13px;line-height:1.55}.source-schedule-note a{margin-left:4px;color:var(--accent);font-weight:700}
+
+/* 收藏按钮使用暖色强调，和“不感兴趣”的危险操作保持可区分。 */
+.event-save button{color:#aa7a16}
+.event-save button:hover{color:#8b6512;background:#fff7df}
+.saved-event-summary{padding:0 0 2px;color:#516258;font-size:14px}
+.saved-event-summary p{margin:8px 0 0}
+
+/* 媒体仅使用抓取到的直链或受信任平台嵌入地址，加载失败时仍可打开原链接。 */
+.media-preview{margin:15px 0;padding:14px;border:1px solid #d8e7dc;border-radius:11px;background:#f7fbf7}.media-preview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}.media-preview-head h4{margin:0;color:#176548;font-size:13px}.media-preview-head span{color:var(--muted);font-size:12px}.media-preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.media-card{min-width:0;margin:0;overflow:hidden;border:1px solid #d9e5da;border-radius:8px;background:#fff}.media-image-card a{display:block;background:#eef3ee}.media-image-card img{display:block;width:100%;min-height:142px;max-height:340px;object-fit:contain}.media-video-card video,.media-embed-card iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#19241f}.media-card figcaption{padding:7px 9px;color:var(--muted);font-size:12px}.media-card figcaption a{color:var(--accent);font-weight:700}.media-image-card:hover{border-color:#9cc5a9;box-shadow:0 2px 8px rgba(23,101,72,.1)}
+@media(max-width:600px){.media-preview{padding:11px;margin:13px 0}.media-preview-grid{grid-template-columns:1fr}.media-image-card img{min-height:0;max-height:410px}.media-video-card video,.media-embed-card iframe{min-height:190px}}

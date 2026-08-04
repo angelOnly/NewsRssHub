@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
@@ -36,6 +37,63 @@ X_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+
+
+def _safe_media_url(value: Any) -> str:
+    candidate = str(value or "").strip()
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return candidate
+
+
+def _tweet_media(legacy: dict[str, Any]) -> list[dict[str, str]]:
+    """提取 Tweet 的图片与最适合浏览器播放的视频直链。"""
+
+    entities = legacy.get("extended_entities") or legacy.get("entities") or {}
+    raw_media = entities.get("media") if isinstance(entities, dict) else []
+    if not isinstance(raw_media, list):
+        return []
+    media: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for asset in raw_media[:12]:
+        if not isinstance(asset, dict):
+            continue
+        asset_type = str(asset.get("type") or "").lower()
+        poster_url = _safe_media_url(asset.get("media_url_https") or asset.get("media_url"))
+        if asset_type == "photo" and poster_url and poster_url not in seen:
+            seen.add(poster_url)
+            media.append({"kind": "image", "url": poster_url})
+            continue
+        if asset_type not in {"video", "animated_gif"}:
+            continue
+        video_info = asset.get("video_info") or {}
+        variants = video_info.get("variants") if isinstance(video_info, dict) else []
+        candidates: list[tuple[int, int, str, str]] = []
+        for variant in variants if isinstance(variants, list) else []:
+            if not isinstance(variant, dict):
+                continue
+            url = _safe_media_url(variant.get("url"))
+            content_type = str(variant.get("content_type") or "").lower()
+            if not url or content_type not in {"video/mp4", "application/x-mpegurl"}:
+                continue
+            try:
+                bitrate = int(variant.get("bitrate") or 0)
+            except (TypeError, ValueError):
+                bitrate = 0
+            # 优先 MP4；同类格式选择码率较高的版本。
+            candidates.append((1 if content_type == "video/mp4" else 0, bitrate, url, content_type))
+        if not candidates:
+            continue
+        _, _, video_url, content_type = max(candidates)
+        if video_url in seen:
+            continue
+        seen.add(video_url)
+        payload = {"kind": "video", "url": video_url, "mime_type": content_type}
+        if poster_url:
+            payload["poster_url"] = poster_url
+        media.append(payload)
+    return media
 
 USER_FEATURES = {
     "hidden_profile_subscriptions_enabled": True,
@@ -360,7 +418,12 @@ class XSessionService:
         self._save_refreshed(refreshed)
         return self.status()
 
-    def fetch_many(self, sources: list[dict[str, Any]]) -> dict[int, SourceFetchResult]:
+    def fetch_many(
+        self,
+        sources: list[dict[str, Any]],
+        *,
+        wait_between: Callable[[], None] | None = None,
+    ) -> dict[int, SourceFetchResult]:
         client: Any | None = None
         try:
             cookies = self._load_cookies()
@@ -368,7 +431,9 @@ class XSessionService:
             refreshed = client.validate()
             self._save_refreshed(refreshed)
             results: dict[int, SourceFetchResult] = {}
-            for source in sources:
+            for index, source in enumerate(sources):
+                if index and wait_between:
+                    wait_between()
                 source_id = int(source["id"])
                 try:
                     results[source_id] = SourceFetchResult(items=self._fetch_source(client, source))
@@ -462,6 +527,7 @@ class XSessionService:
                     content=text[:20000],
                     author=handle,
                     published_at=self._parse_time(legacy.get("created_at")),
+                    media=_tweet_media(legacy),
                     raw={"tweet_id": tweet_id, "reply_count": legacy.get("reply_count", 0)},
                 )
             )

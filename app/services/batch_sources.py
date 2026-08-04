@@ -43,20 +43,13 @@ class BatchImportResult:
 class BatchSourceImportService:
     """校验批量来源并只写入规范化后的来源记录。
 
-    导入从不主动测试或抓取内容：X 账号可先导入，再由用户配置 Cookie 后
-    手动测试；其他平台也保持相同的可控流程。
+    导入不会立即测试或抓取内容：启用来源先进入 1–5 分钟的随机排期，
+    X 账号则等 Cookie 配置完成后再由下一轮调度或手动测试处理。
     """
 
     # 导出的全部来源也要能一次回传；1 MB 文件上限仍限制了异常大请求。
     MAX_ROWS = 1000
     MAX_UPLOAD_BYTES = 1_000_000
-    DEFAULT_INTERVALS = {
-        SourceKind.X_RSSHUB: 60,
-        SourceKind.REDDIT: 120,
-        SourceKind.YOUTUBE: 360,
-        SourceKind.RSS: 120,
-    }
-
     def __init__(self, sources: SourceService) -> None:
         self.sources = sources
 
@@ -79,24 +72,20 @@ class BatchSourceImportService:
               - name: "替换成 X 账号显示名称"
                 kind: x_rsshub
                 locator: "@替换成 X 账号"
-                poll_interval_minutes: 60
                 # archived: false  # 导出的备份会携带该状态；归档来源导入后仍保持归档
 
               # 需要添加 YouTube、Reddit 或 RSS 时，复制下面对应区块并取消注释。
               # - name: "替换成 YouTube 频道名称"
               #   kind: youtube
               #   locator: "@频道名、频道主页或 UC 开头的频道 ID"
-              #   poll_interval_minutes: 360
 
               # - name: "替换成 Reddit 社区名称"
               #   kind: reddit
               #   locator: "r/社区名"
-              #   poll_interval_minutes: 120
 
               # - name: "替换成 RSS 来源名称"
               #   kind: rss
               #   locator: "https://example.com/feed.xml"
-              #   poll_interval_minutes: 120
             """
         )
 
@@ -112,7 +101,8 @@ class BatchSourceImportService:
         """保留给已有调用方的文本导入入口，Web 页面改用 YAML 上传。"""
 
         source_kind = SourceKind(kind)
-        interval = max(5, min(int(poll_interval_minutes), 1440))
+        # 保留参数只兼容旧调用；实际间隔由全局抓取策略统一决定。
+        interval = self.sources.repository.get_fetch_policy().interval_minutes
         rows = [
             BatchSourceInput(
                 line_number=line_number,
@@ -213,7 +203,9 @@ class BatchSourceImportService:
                         )
                     )
                     continue
-                self.sources.repository.create_source(normalized, feed_url)
+                source_id = self.sources.repository.create_source(normalized, feed_url)
+                if normalized.enabled:
+                    self.sources.repository.schedule_initial_fetch(source_id)
                 result.added.append(row)
             except Exception as exc:
                 result.errors.append(
@@ -259,10 +251,6 @@ class BatchSourceImportService:
         )
         enabled_value = raw_source.get("enabled", defaults.get("enabled", True))
         archived_value = raw_source.get("archived", defaults.get("archived", False))
-        interval_value = raw_source.get(
-            "poll_interval_minutes",
-            defaults.get("poll_interval_minutes", self.DEFAULT_INTERVALS[kind]),
-        )
         return BatchSourceInput(
             line_number=line_number,
             draft=SourceDraft(
@@ -270,7 +258,8 @@ class BatchSourceImportService:
                 kind=kind,
                 locator=locator,
                 is_official=self._parse_bool(official_value, "official"),
-                poll_interval_minutes=self._parse_interval(interval_value),
+                # 旧导出文件中的逐来源频率可安全忽略，避免恢复后绕过全局策略。
+                poll_interval_minutes=self.sources.repository.get_fetch_policy().interval_minutes,
                 enabled=self._parse_bool(enabled_value, "enabled"),
                 archived=self._parse_bool(archived_value, "archived"),
             ),
@@ -295,16 +284,6 @@ class BatchSourceImportService:
             if normalized in {"false", "no", "0"}:
                 return False
         raise ValueError(f"{field} 必须是 true 或 false。")
-
-    @staticmethod
-    def _parse_interval(value: Any) -> int:
-        if isinstance(value, bool):
-            raise ValueError("poll_interval_minutes 必须是 5 到 1440 的整数。")
-        try:
-            interval = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("poll_interval_minutes 必须是 5 到 1440 的整数。") from exc
-        return max(5, min(interval, 1440))
 
     def _parse_rows(self, kind: SourceKind, entries: str) -> list[tuple[int, str, str]]:
         rows: list[tuple[int, str, str]] = []

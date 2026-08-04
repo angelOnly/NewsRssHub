@@ -388,11 +388,8 @@ sources:
                     self.assertIn("开发者现在可以开始使用新模型", dashboard.text)
                     self.assertNotIn("全部主题", dashboard.text)
                     self.assertNotIn("重要性排序", dashboard.text)
-
-                    marked = client.post(f"/events/{event_id}/read")
-                    self.assertEqual(marked.status_code, 204)
-                    read_dashboard = client.get("/?tier=must_read&period=all")
-                    self.assertIn('class="event-card is-read"', read_dashboard.text)
+                    # 整条卡片与右侧“查看详情”箭头都走同一个详情地址。
+                    self.assertGreaterEqual(dashboard.text.count(f'href="/events/{event_id}?'), 2)
 
                     detail = client.get(f"/events/{event_id}?tier=must_read&period=all")
                     self.assertEqual(detail.status_code, 200)
@@ -402,10 +399,103 @@ sources:
                     self.assertIn("原始标题", detail.text)
                     self.assertIn("OpenAI 发布新模型", detail.text)
                     self.assertNotIn("模型解读", detail.text)
+                    read_dashboard = client.get("/?tier=must_read&period=all")
+                    self.assertIn('class="event-card is-read"', read_dashboard.text)
+
+                    # 列表中展开摘要使用的异步接口继续保持可用。
+                    marked = client.post(f"/events/{event_id}/read")
+                    self.assertEqual(marked.status_code, 204)
 
                     form = client.get("/sources/new")
                     self.assertEqual(form.status_code, 200)
                     self.assertNotIn("优先级（1–10）", form.text)
                     self.assertNotIn("主题", form.text)
+            finally:
+                delattr(app.state, "services")
+
+    def test_saved_events_and_global_fetch_policy_work_together(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            source_id = services.repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            item_id, _ = services.repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="saved-event",
+                    title="值得稍后阅读的更新",
+                    link="https://example.test/saved-event",
+                    content="原始内容",
+                    published_at=datetime.now(timezone.utc),
+                    media=[
+                        {
+                            "kind": "image",
+                            "url": "https://cdn.example.test/preview.jpg",
+                            "alt": "预览图",
+                        }
+                    ],
+                ),
+            )
+            services.repository.save_item_summary(item_id, summary="可稍后阅读的摘要")
+            event_id = services.repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[item_id],
+                        primary_item_id=item_id,
+                        tier=EditorialTier.MUST_READ,
+                        reason="测试收藏",
+                        order=1,
+                    )
+                ]
+            )[0]
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    settings = client.get("/settings")
+                    self.assertEqual(settings.status_code, 200)
+                    self.assertIn("统一抓取策略", settings.text)
+                    self.assertIn('name="interval_minutes"', settings.text)
+
+                    policy = client.post(
+                        "/settings/fetch-policy",
+                        data={"interval_minutes": "30"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(policy.status_code, 303)
+                    self.assertIn("#fetch", policy.headers["location"])
+                    self.assertEqual(services.repository.get_fetch_policy().interval_minutes, 30)
+
+                    form = client.get("/sources/new")
+                    self.assertNotIn('name="poll_interval_minutes"', form.text)
+                    self.assertIn("抓取由全局策略管理", form.text)
+
+                    dashboard = client.get("/?tier=must_read&period=all")
+                    self.assertIn('aria-label="收藏"', dashboard.text)
+                    saved = client.post(
+                        f"/events/{event_id}/save",
+                        data={"origin": "dashboard", "tier": "must_read", "period": "all", "page": "1"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(saved.status_code, 303)
+                    self.assertEqual(urlparse(saved.headers["location"]).path, "/")
+
+                    # 收藏后即使来源暂停，也必须从收藏页进入详情。
+                    services.repository.update_source(source_id, {"enabled": 0})
+                    saved_page = client.get("/saved")
+                    self.assertIn("值得稍后阅读的更新", saved_page.text)
+                    detail = client.get(f"/events/{event_id}?origin=saved")
+                    self.assertEqual(detail.status_code, 200)
+                    self.assertIn('href="/saved?page=1"', detail.text)
+                    self.assertIn("媒体预览", detail.text)
+                    self.assertIn("https://cdn.example.test/preview.jpg", detail.text)
+
+                    unsaved = client.post(
+                        f"/events/{event_id}/unsave",
+                        data={"origin": "saved", "page": "1"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(urlparse(unsaved.headers["location"]).path, "/saved")
+                    self.assertFalse(services.repository.is_event_saved(event_id))
             finally:
                 delattr(app.state, "services")

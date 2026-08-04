@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="个人化每日情报台：从可信来源中筛选真正重要的更新。">
     <title>{% block title %}NewsRSSHub{% endblock %}</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260804-source-feedback1">
+    <link rel="stylesheet" href="/static/app.css?v=20260804-integration1">
     <link rel="stylesheet" href="/static/x-session.css?v=20260803-mobile6">
     <script src="/static/scroll-restore.js?v=20260804-2" defer></script>
     <script src="/static/read-state.js?v=20260804-1" defer></script>
@@ -21,6 +21,9 @@
           <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/">
             <span>⌁</span> 最新热点
           </a>
+          <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved">
+            <span>☆</span> 收藏
+          </a>
           <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs">
             <span>▤</span> 每日简报
           </a>
@@ -33,7 +36,7 @@
         </nav>
         <div class="sidebar-foot">
           <span class="pulse-dot"></span>
-          后台会按来源频率自动更新
+          后台会按全局策略自动更新
         </div>
         <details class="mobile-menu">
           <summary class="mobile-menu-toggle" aria-label="打开导航" title="打开导航">
@@ -41,6 +44,7 @@
           </summary>
           <nav class="nav mobile-nav" aria-label="主导航">
             <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/">最新热点</a>
+            <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved">收藏</a>
             <a class="nav-link {% if active_path.startswith('/briefs') %}active{% endif %}" href="/briefs">每日简报</a>
             <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources">来源管理</a>
             <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings">设置与连接</a>

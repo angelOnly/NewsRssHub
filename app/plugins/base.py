@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from app.config import Settings
 from app.domain.models import FeedItem, SourceKind, ValidationResult
@@ -46,7 +46,11 @@ class SourcePlugin(ABC):
         """Fetch and normalize provider data into the common FeedItem shape."""
 
     def fetch_many(
-        self, sources: list[dict[str, Any]], settings: Settings
+        self,
+        sources: list[dict[str, Any]],
+        settings: Settings,
+        *,
+        wait_between: Callable[[], None] | None = None,
     ) -> dict[int, SourceFetchResult]:
         """Fetch a connector batch.
 
@@ -56,7 +60,9 @@ class SourcePlugin(ABC):
         """
 
         results: dict[int, SourceFetchResult] = {}
-        for source in sources:
+        for index, source in enumerate(sources):
+            if index and wait_between:
+                wait_between()
             source_id = int(source["id"])
             try:
                 results[source_id] = SourceFetchResult(items=self.fetch(source, settings))

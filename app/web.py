@@ -45,7 +45,16 @@ def _fmt_time(value: str | None) -> str:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         delta = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
-        seconds = max(0, int(delta.total_seconds()))
+        seconds = int(delta.total_seconds())
+        if seconds < 0:
+            seconds = -seconds
+            if seconds < 60:
+                return "不到 1 分钟后"
+            if seconds < 3600:
+                return f"{seconds // 60} 分钟后"
+            if seconds < 86400:
+                return f"{seconds // 3600} 小时后"
+            return f"{seconds // 86400} 天后"
         if seconds < 60:
             return "刚刚"
         if seconds < 3600:
@@ -92,15 +101,6 @@ def _source_page_value(value: int | str) -> int:
         return max(1, int(value))
     except (TypeError, ValueError):
         return 1
-
-
-def _default_poll_interval(kind: str) -> int:
-    return {
-        SourceKind.X_RSSHUB.value: 60,
-        SourceKind.REDDIT.value: 120,
-        SourceKind.YOUTUBE.value: 360,
-        SourceKind.RSS.value: 120,
-    }.get(kind, 60)
 
 
 @asynccontextmanager
@@ -184,12 +184,23 @@ def dashboard_redirect(
     return RedirectResponse(f"/?{query}", status_code=303)
 
 
+def saved_redirect(*, page: int = 1, notice: str = "") -> RedirectResponse:
+    query = urlencode(
+        {
+            "page": max(1, page),
+            **({"notice": notice} if notice else {}),
+        }
+    )
+    return RedirectResponse(f"/saved?{query}", status_code=303)
+
+
 def event_detail_redirect(
     event_id: int,
     *,
     tier: str = EditorialTier.MUST_READ.value,
     period: str = "24h",
     page: int = 1,
+    origin: str = "",
     notice: str = "",
     error: str = "",
 ) -> RedirectResponse:
@@ -198,11 +209,30 @@ def event_detail_redirect(
             "tier": _safe_tier(tier).value,
             "period": period if period in {"24h", "7d", "30d", "all"} else "24h",
             "page": max(1, page),
+            **({"origin": "saved"} if origin == "saved" else {}),
             **({"notice": notice} if notice else {}),
             **({"error": error} if error else {}),
         }
     )
     return RedirectResponse(f"/events/{event_id}?{query}", status_code=303)
+
+
+def feedback_redirect(
+    event_id: int,
+    *,
+    origin: str,
+    tier: str,
+    period: str,
+    page: int,
+    notice: str,
+) -> RedirectResponse:
+    if origin == "saved":
+        return saved_redirect(page=page, notice=notice)
+    if origin == "detail":
+        return event_detail_redirect(
+            event_id, tier=tier, period=period, page=page, notice=notice
+        )
+    return dashboard_redirect(tier=tier, period=period, page=page, notice=notice)
 
 
 def settings_redirect(*, anchor: str = "", notice: str = "", error: str = "") -> RedirectResponse:
@@ -219,6 +249,10 @@ def x_session_redirect(*, notice: str = "", error: str = "") -> RedirectResponse
 
 def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return settings_redirect(anchor="model", notice=notice, error=error)
+
+
+def fetch_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="fetch", notice=notice, error=error)
 
 
 @app.get("/health")
@@ -270,6 +304,24 @@ def dashboard(
     )
 
 
+@app.get("/saved", response_class=HTMLResponse)
+def saved_events(request: Request, page: int = 1, notice: str = "") -> HTMLResponse:
+    repository = get_services(request).repository
+    page = max(1, page)
+    events = repository.list_saved_events(limit=50, offset=(page - 1) * 50)
+    total_events = repository.count_saved_events()
+    return render(
+        request,
+        "saved.html",
+        {
+            "events": events,
+            "page": page,
+            "notice": notice,
+            "has_more": page * 50 < total_events,
+        },
+    )
+
+
 @app.get("/events/{event_id}", response_class=HTMLResponse)
 def event_detail(
     request: Request,
@@ -277,21 +329,32 @@ def event_detail(
     tier: str = EditorialTier.MUST_READ.value,
     period: str = "24h",
     page: int = 1,
+    origin: str = "",
     notice: str = "",
     error: str = "",
 ) -> HTMLResponse:
-    event = get_services(request).repository.get_event(event_id)
+    repository = get_services(request).repository
+    event = repository.get_event(event_id)
+    if not event and repository.is_event_saved(event_id):
+        # 收藏是独立的保留承诺，来源后来停用或归档也必须仍可阅读。
+        event = repository.get_event(event_id, include_inactive_sources=True)
     if not event:
         raise HTTPException(status_code=404, detail="未找到该事件")
+    # 成功进入详情页是明确的主动阅读行为；列表摘要展开仍通过异步接口记录。
+    repository.mark_event_read(event_id)
     return_query = urlencode(
         {"tier": _safe_tier(tier).value, "period": period, "page": max(1, page)}
     )
+    from_saved = origin == "saved"
     return render(
         request,
         "event_detail.html",
         {
             "event": event,
             "return_query": return_query,
+            "return_url": f"/saved?page={max(1, page)}" if from_saved else f"/?{return_query}",
+            "return_label": "返回收藏" if from_saved else "返回热点列表",
+            "action_origin": "saved" if from_saved else "detail",
             "return_tier": _safe_tier(tier).value,
             "return_period": period if period in {"24h", "7d", "30d", "all"} else "24h",
             "return_page": max(1, page),
@@ -309,9 +372,12 @@ def translate_event_item(
     tier: str = Form(EditorialTier.MUST_READ.value),
     period: str = Form("24h"),
     page: int = Form(1),
+    origin: str = Form(""),
 ) -> RedirectResponse:
     services = get_services(request)
     event = services.repository.get_event(event_id)
+    if not event and services.repository.is_event_saved(event_id):
+        event = services.repository.get_event(event_id, include_inactive_sources=True)
     if not event:
         raise HTTPException(status_code=404, detail="未找到该事件")
     if item_id not in {int(item["id"]) for item in event["items"]}:
@@ -324,11 +390,11 @@ def translate_event_item(
             "model": "中文译文已生成。",
         }.get(outcome, "中文译文已生成。")
         return event_detail_redirect(
-            event_id, tier=tier, period=period, page=page, notice=notice
+            event_id, tier=tier, period=period, page=page, origin=origin, notice=notice
         )
     except LLMRequestError as exc:
         return event_detail_redirect(
-            event_id, tier=tier, period=period, page=page, error=str(exc)
+            event_id, tier=tier, period=period, page=page, origin=origin, error=str(exc)
         )
     except Exception:
         return event_detail_redirect(
@@ -336,6 +402,7 @@ def translate_event_item(
             tier=tier,
             period=period,
             page=page,
+            origin=origin,
             error="正文翻译暂时失败，请稍后重试。",
         )
 
@@ -347,12 +414,61 @@ def mark_event_not_interested(
     tier: str = Form(EditorialTier.MUST_READ.value),
     period: str = Form("24h"),
     page: int = Form(1),
+    origin: str = Form(""),
 ) -> RedirectResponse:
     repository = get_services(request).repository
-    if not repository.get_event(event_id):
+    if not repository.get_event(event_id, include_inactive_sources=origin == "saved"):
         raise HTTPException(status_code=404, detail="未找到该事件")
     repository.mark_event_not_interested(event_id)
+    if origin == "saved":
+        return saved_redirect(page=page, notice="已隐藏这条内容；收藏仍会保留。")
     return dashboard_redirect(tier=tier, period=period, page=page, notice="已隐藏这条内容。")
+
+
+@app.post("/events/{event_id}/save")
+def save_event(
+    request: Request,
+    event_id: int,
+    origin: str = Form("dashboard"),
+    tier: str = Form(EditorialTier.MUST_READ.value),
+    period: str = Form("24h"),
+    page: int = Form(1),
+) -> RedirectResponse:
+    repository = get_services(request).repository
+    if not repository.get_event(event_id, include_inactive_sources=True):
+        raise HTTPException(status_code=404, detail="未找到该事件")
+    repository.save_event(event_id)
+    return feedback_redirect(
+        event_id,
+        origin=origin,
+        tier=tier,
+        period=period,
+        page=page,
+        notice="已收藏，可在收藏页稍后阅读。",
+    )
+
+
+@app.post("/events/{event_id}/unsave")
+def unsave_event(
+    request: Request,
+    event_id: int,
+    origin: str = Form("dashboard"),
+    tier: str = Form(EditorialTier.MUST_READ.value),
+    period: str = Form("24h"),
+    page: int = Form(1),
+) -> RedirectResponse:
+    repository = get_services(request).repository
+    if not repository.get_event(event_id, include_inactive_sources=True):
+        raise HTTPException(status_code=404, detail="未找到该事件")
+    repository.unsave_event(event_id)
+    return feedback_redirect(
+        event_id,
+        origin=origin,
+        tier=tier,
+        period=period,
+        page=page,
+        notice="已取消收藏。",
+    )
 
 
 @app.post("/events/{event_id}/read", status_code=204)
@@ -360,7 +476,7 @@ def mark_event_read(request: Request, event_id: int) -> Response:
     """摘要展开后异步记录已读，不改变当前列表的位置。"""
 
     repository = get_services(request).repository
-    if not repository.get_event(event_id):
+    if not repository.get_event(event_id, include_inactive_sources=True):
         raise HTTPException(status_code=404, detail="未找到该事件")
     repository.mark_event_read(event_id)
     return Response(status_code=204)
@@ -449,6 +565,7 @@ def sources(
             "can_queue_current_page_test": can_queue_current_page_test,
             "platform_tabs": platform_tabs,
             "source_backups": services.source_backups.list_backups(),
+            "fetch_policy": services.repository.get_fetch_policy(),
             "notice": notice,
             "notice_level": notice_level if notice_level in {"success", "warning"} else "success",
             "error": error,
@@ -458,7 +575,33 @@ def sources(
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
-    return render(request, "settings.html", {"notice": notice, "error": error})
+    services = get_services(request)
+    return render(
+        request,
+        "settings.html",
+        {
+            "notice": notice,
+            "error": error,
+            "fetch_policy": services.repository.get_fetch_policy(),
+        },
+    )
+
+
+@app.post("/settings/fetch-policy")
+def save_fetch_policy(
+    request: Request,
+    interval_minutes: int = Form(...),
+) -> RedirectResponse:
+    try:
+        policy, rescheduled = get_services(request).repository.save_fetch_policy(interval_minutes)
+        return fetch_settings_redirect(
+            notice=(
+                f"已将全部来源统一设为每 {policy.interval_minutes} 分钟抓取一次；"
+                f"{rescheduled} 个启用来源已在未来 1–5 分钟内错峰重排。"
+            )
+        )
+    except Exception:
+        return fetch_settings_redirect(error="抓取策略保存失败，请输入 5 到 1440 的整数分钟数。")
 
 
 @app.get("/connections")
@@ -552,6 +695,7 @@ def new_source_form(request: Request, error: str = "", connection: str = "") -> 
             "choices": services.sources.form_choices(),
             "connections": services.connections.source_connections(),
             "required_connection": required_connection,
+            "fetch_policy": services.repository.get_fetch_policy(),
             "error": error,
             "mode": "new",
         },
@@ -626,7 +770,7 @@ async def batch_add_sources(
     request: Request,
     source_file: UploadFile = File(...),
 ) -> HTMLResponse:
-    """校验上传文件后导入；文件永不落盘，也不会触发抓取。"""
+    """校验上传文件后导入；文件永不落盘，启用来源只会进入随机排期。"""
 
     services = get_services(request)
     filename = (source_file.filename or "").strip()
@@ -665,7 +809,7 @@ def _make_draft(
     kind: str,
     locator: str,
     is_official: bool,
-    poll_interval_minutes: int,
+    global_interval_minutes: int,
     enabled: bool,
 ) -> SourceDraft:
     try:
@@ -679,7 +823,7 @@ def _make_draft(
         kind=source_kind,
         locator=locator.strip(),
         is_official=is_official,
-        poll_interval_minutes=max(5, min(int(poll_interval_minutes), 1440)),
+        poll_interval_minutes=max(5, min(int(global_interval_minutes), 1440)),
         enabled=enabled,
     )
 
@@ -691,7 +835,6 @@ def create_source(
     kind: str = Form(...),
     locator: str = Form(...),
     is_official: bool = Form(False),
-    poll_interval_minutes: int = Form(60),
     enabled: bool = Form(False),
 ) -> RedirectResponse:
     services = get_services(request)
@@ -703,7 +846,7 @@ def create_source(
             kind=kind,
             locator=locator,
             is_official=is_official,
-            poll_interval_minutes=poll_interval_minutes,
+            global_interval_minutes=services.repository.get_fetch_policy().interval_minutes,
             enabled=enabled,
         )
         source, validation = services.sources.add_source(draft, validate=True)
@@ -742,7 +885,13 @@ def edit_source_form(request: Request, source_id: int, error: str = "") -> HTMLR
     return render(
         request,
         "source_form.html",
-        {"source": source, "choices": services.sources.form_choices(), "error": error, "mode": "edit"},
+        {
+            "source": source,
+            "choices": services.sources.form_choices(),
+            "fetch_policy": services.repository.get_fetch_policy(),
+            "error": error,
+            "mode": "edit",
+        },
     )
 
 
@@ -752,7 +901,6 @@ def edit_source(
     source_id: int,
     name: str = Form(...),
     is_official: bool = Form(False),
-    poll_interval_minutes: int = Form(60),
     enabled: bool = Form(False),
 ) -> RedirectResponse:
     services = get_services(request)
@@ -765,7 +913,7 @@ def edit_source(
             kind=source["kind"],
             locator=source["locator"],
             is_official=is_official,
-            poll_interval_minutes=poll_interval_minutes,
+            global_interval_minutes=services.repository.get_fetch_policy().interval_minutes,
             enabled=enabled,
         )
         services.sources.update_source(source_id, draft)
@@ -855,15 +1003,18 @@ def toggle_source(
     source = repository.get_source(source_id)
     if not source:
         raise HTTPException(status_code=404, detail="未找到来源")
-    repository.update_source(source_id, {"enabled": int(not source["enabled"])})
+    enabling = not source["enabled"]
+    repository.update_source(source_id, {"enabled": int(enabling)})
     if source["enabled"]:
         return sources_redirect(
             notice="来源已暂停；刷新首页或简报后，会立即隐藏它已有的内容。",
             kind=source_kind,
             page=page,
         )
+    # 重新启用时不要沿用暂停前可能已过期的时间，避免多来源同时立刻抓取。
+    repository.schedule_initial_fetch(source_id)
     return sources_redirect(
-        notice="来源已启用，将按设定频率恢复抓取。", kind=source_kind, page=page
+        notice="来源已启用，已安排在未来 1–5 分钟内错峰抓取。", kind=source_kind, page=page
     )
 
 

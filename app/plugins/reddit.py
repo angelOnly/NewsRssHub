@@ -56,14 +56,21 @@ class RedditSourcePlugin(RssSourcePlugin):
         return super().fetch(source, settings)
 
     def fetch_many(
-        self, sources: list[dict[str, Any]], settings: Settings
+        self,
+        sources: list[dict[str, Any]],
+        settings: Settings,
+        *,
+        wait_between: Callable[[], None] | None = None,
     ) -> dict[int, SourceFetchResult]:
         """Fetch a Reddit batch without turning a healthy endpoint into 429s."""
 
         results: dict[int, SourceFetchResult] = {}
         for index, source in enumerate(sources):
             if index:
-                self._sleep(self.batch_delay_seconds)
+                if wait_between:
+                    wait_between()
+                else:
+                    self._sleep(self.batch_delay_seconds)
 
             source_id = int(source["id"])
             try:

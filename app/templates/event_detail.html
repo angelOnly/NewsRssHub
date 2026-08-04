@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ event.title }} · NewsRSSHub{% endblock %}
 {% block content %}
-<a class="back-link" href="/?{{ return_query }}">← 返回热点列表</a>
+<a class="back-link" href="{{ return_url }}">← {{ return_label }}</a>
 {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 <article class="detail-page">
@@ -18,9 +18,13 @@
     </section>
     {% endif %}
     {% if event.tier_reason %}<p class="tier-reason detail-reason">筛选说明：{{ event.tier_reason }}</p>{% endif %}
+    <form class="event-feedback event-feedback-detail event-save" method="post" action="/events/{{ event.id }}/{% if event.user_saved %}unsave{% else %}save{% endif %}">
+      <input type="hidden" name="origin" value="{{ action_origin }}"><input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
+      <button type="submit">{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}</button>
+    </form>
     {% if not event.user_hidden %}
     <form class="event-feedback event-feedback-detail" method="post" action="/events/{{ event.id }}/not-interested">
-      <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
+      <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}"><input type="hidden" name="origin" value="{{ action_origin }}">
       <button type="submit">不感兴趣</button>
     </form>
     {% endif %}
@@ -30,10 +34,40 @@
     <div class="section-caption"><h2>原始内容与来源</h2><span>模型没有重写原文</span></div>
     {% for item in event["items"] %}
       <article class="source-item">
-        <div class="source-item-meta"><span class="source-badge">{{ item.source_name }}</span>{% if item.is_official %}<span class="official-badge">官方</span>{% endif %}<span>{{ item.published_at|relative_time if item.published_at else item.fetched_at|relative_time }}</span></div>
+        <div class="source-item-meta"><span class="source-badge">{{ item.source_name }}</span>{% if item.is_official %}<span class="official-badge">官方</span>{% endif %}{% if item.published_at %}<span>发布 {{ item.published_at|relative_time }}</span>{% else %}<span>发布时间未知</span>{% endif %}<span>抓取 {{ item.fetched_at|relative_time }}</span></div>
         <h3>{{ item.display_title or item.title }}</h3>
         {% if item.display_title and item.display_title != item.title %}<p class="original-title">原始标题：{{ item.title }}</p>{% endif %}
         {% if item.summary %}<p class="item-summary">{{ item.summary }}</p>{% endif %}
+        {% if item.media %}
+        <section class="media-preview" aria-label="媒体预览">
+          <div class="media-preview-head"><h4>媒体预览</h4><span>{{ item.media|length }} 项</span></div>
+          <div class="media-preview-grid">
+            {% for media in item.media %}
+              {% if media.kind == 'image' %}
+              <figure class="media-card media-image-card">
+                <a href="{{ media.url }}" target="_blank" rel="noreferrer" title="在新窗口查看原图">
+                  <img src="{{ media.url }}" alt="{{ media.alt or '资讯配图' }}" loading="lazy" referrerpolicy="no-referrer">
+                </a>
+                <figcaption><a href="{{ media.url }}" target="_blank" rel="noreferrer">查看原图 ↗</a></figcaption>
+              </figure>
+              {% elif media.kind == 'video' %}
+              <figure class="media-card media-video-card">
+                <video controls playsinline preload="metadata" {% if media.poster_url %}poster="{{ media.poster_url }}"{% endif %}>
+                  <source src="{{ media.url }}"{% if media.mime_type %} type="{{ media.mime_type }}"{% endif %}>
+                  当前浏览器无法播放此视频。
+                </video>
+                <figcaption><a href="{{ media.url }}" target="_blank" rel="noreferrer">无法播放时打开视频 ↗</a></figcaption>
+              </figure>
+              {% elif media.kind == 'embed' %}
+              <figure class="media-card media-embed-card">
+                <iframe src="{{ media.url }}" title="{{ media.provider }} 视频预览" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+                <figcaption><a href="{{ media.source_url }}" target="_blank" rel="noreferrer">在 {{ media.provider }} 打开 ↗</a></figcaption>
+              </figure>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
         {% if item.translated_content %}
         <section class="translation-content">
           <h4>{% if item.translated_content == item.content %}中文正文{% else %}中文译文{% endif %}</h4>
@@ -43,7 +77,7 @@
         <div class="translation-pending">
           <span>{% if item.translation_status == 'retry' %}上次未能生成中文译文。{% else %}中文译文尚未生成。{% endif %}</span>
           <form method="post" action="/events/{{ event.id }}/items/{{ item.id }}/translate">
-            <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
+            <input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}"><input type="hidden" name="origin" value="{{ action_origin }}">
             <button type="submit">生成中文译文</button>
           </form>
         </div>

@@ -1,6 +1,6 @@
 # NewsRSSHub 产品需求与目标架构设计
 
-> 2026-08-04 更新：当前实现的数据库精简目标、六表模型、线上预检/备份/显式迁移流程以 [SQLite 结构精简与安全迁移说明](SQLITE_SCHEMA_AND_MIGRATION.md) 为准；本文中与旧 `event_items`、`fetch_runs`、`curation_runs` 或自动重建迁移冲突的描述均由该说明覆盖。
+> 2026-08-04 更新：当前实现的数据库精简目标、七表模型、线上预检/备份/显式迁移流程以 [SQLite 结构精简与安全迁移说明](SQLITE_SCHEMA_AND_MIGRATION.md) 为准；本文中与旧 `event_items`、`fetch_runs`、`curation_runs` 或自动重建迁移冲突的描述均由该说明覆盖。
 
 > 文档版本：v1.2
 > 文档状态：已进入实现与验证  
@@ -217,7 +217,7 @@ flowchart LR
 - 添加 RSS/Atom 地址。
 - 添加 X 账号。
 - 添加 Reddit 社区或用户。
-- 编辑来源名称、平台类型、账号/社区/URL、抓取间隔、备用原始链接、官方来源标记和启用状态。
+- 编辑来源名称、平台类型、账号/社区/URL、官方来源标记和启用状态；抓取间隔在应用级统一设置。
 - 保存前验证来源。
 - 单独测试、暂停、启用和归档来源。
 - 导出当前全部来源为 YAML，并允许将该文件或自动备份文件直接上传到批量添加入口恢复来源。
@@ -230,8 +230,7 @@ flowchart LR
 - 来源名称。
 - 平台类型。
 - 账号、社区或 URL。
-- 抓取间隔。
-- 备用原始链接（可选）。
+- 下次抓取时间和最近一次检查新增量。
 - 官方来源标记。
 - 启用状态。
 
@@ -244,7 +243,7 @@ flowchart LR
 - `sources.category`、`sources.priority` 数据库字段及相关排序逻辑。
 - `feeds.yml` 中的 `theme`、`category` 和 `priority` 配置项。
 
-来源负责描述“去哪里抓、多久抓一次、当前是否启用”，不负责表达用户兴趣或内容重要性。内容层级只由个人画像、帖子摘要和项目 Skill 判断；`poll_interval_minutes` 只控制抓取频率。
+来源负责描述“去哪里抓、当前是否启用”，不负责表达用户兴趣或内容重要性。内容层级只由个人画像、帖子摘要和项目 Skill 判断；所有启用来源由 `app_settings.global_fetch_interval_minutes` 统一调度，`poll_interval_minutes` 仅为旧数据兼容保留。
 
 ### FR-02 平台连接（P0）
 
@@ -263,9 +262,10 @@ flowchart LR
 抓取插件统一输出 `FeedItem`。系统按 `source_id + guid` 做第一层硬去重：
 
 - 已抓取过的相同平台条目不重复插入。
-- 新条目保存标题、原始内容、链接、作者、发布时间和原始 JSON。
+- 新条目保存标题、原始内容、链接、作者、发布时间以及经过校验的媒体预览地址。
 - 原始内容只用于摘要和详情追溯，不直接进入筛选 Skill。
-- 抓取记录应保存开始时间、结束时间、状态、新增数量和安全错误信息。
+- 来源行保存最近检查时间、最近成功时间、新增数量、下次抓取时间和安全错误信息；不再无限累积抓取运行记录。
+- 新增、导入、重新启用或修改全局间隔后，在未来 1–5 分钟内随机错峰；相邻来源请求再随机等待 2–5 秒。
 
 ### FR-04 单帖摘要（P0）
 
@@ -467,6 +467,8 @@ Skill 不包含这些页面规则。
 
 - “不感兴趣”：隐藏事件但不删除数据。
 - “恢复”：从已隐藏列表恢复。
+- “收藏”：在热点页或详情页收藏事件；即使来源随后暂停或归档，仍能从收藏页阅读。
+- 内容清理：超过 30 天的普通事件和条目可清理，但收藏事件及仍被保留日报引用的事件必须保留。
 - 后续可增加“必看”“有用”“分类错误”反馈。
 
 反馈只作为后续模型判断的校准案例，不自动生成全局关键词黑名单。例如隐藏一个相机 LoRA，只能谨慎降低语义相近的普通素材，不能降低整个 ComfyUI 领域。
@@ -845,7 +847,9 @@ flowchart LR
 | `feed_url` | 连接器规范化后的实际抓取地址 |
 | `is_official` | 是否为官方或机构来源 |
 | `enabled` | 是否参与抓取和前台可见查询 |
-| `poll_interval_minutes` | 抓取间隔 |
+| `next_fetch_at` | 持久化的下一次错峰抓取时间 |
+| `last_new_item_count` | 最近一次检查新增的条目数量 |
+| `poll_interval_minutes` | 历史兼容字段，不再参与调度 |
 | 健康检查字段 | 最近验证、最近成功、错误摘要等运行状态 |
 
 目标模型不存在 `category` 和 `priority`。来源列表默认按启用状态和名称稳定排序；不能再按人为填写的来源优先级排序。
@@ -1054,9 +1058,10 @@ Web 端口：
 ### 15.2 服务
 
 - `web`：FastAPI 页面、配置和健康检查。
-- `worker`：循环抓取、中文标题/摘要/重点、筛选、正文翻译和简报。
-- 两个容器共享 `/app/data`。
-- SQLite 使用 WAL 和 busy timeout，适配一个 Web 加一个 Worker 的单用户负载。
+- `collector`：循环检查到期来源、创建来源快照、抓取并重新排期。
+- `processor`：独立执行中文标题/摘要/重点、筛选、正文翻译、简报和过期内容清理。
+- `web`、`collector` 和 `processor` 共享 `/app/data`。
+- SQLite 使用 WAL 和 busy timeout，适配一个 Web 加两个职责分离 Worker 的单用户负载。
 
 ### 15.3 Skill 打包
 
@@ -1080,7 +1085,7 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 来源管理页面提供“导出全部来源”，生成的 YAML 与批量添加入口完全兼容。
 - Worker 在首次运行时创建首份快照，之后每 3 天最多创建一份；快照目录为容器内 `/app/data/source_backups/`，对应宿主机 `/home/jzb/docker/rss-hub/data/source_backups/`。
 - 只保留最新 5 份快照，页面列出并提供下载。
-- 导出与快照只包含 `name`、`kind`、`locator`、`official`、`enabled`、`archived` 与 `poll_interval_minutes`；不包含 Cookie、API Key、`feed_url`、抓取状态、错误信息或连接器缓存。
+- 导出与快照只包含 `name`、`kind`、`locator`、`official`、`enabled` 与 `archived`；不包含 Cookie、API Key、`feed_url`、抓取状态、错误信息、连接器缓存或全局抓取间隔。
 - 将文件重新上传时，已有来源按 `(kind, locator)` 安全跳过，不覆盖现有配置；暂停和归档状态会被保留。
 
 ---

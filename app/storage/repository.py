@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from app.domain.curation import CurationGroup, EditorialTier
-from app.domain.models import FeedItem, SourceDraft
+from app.domain.models import FetchPolicy, FeedItem, SourceDraft
 from app.storage.database import Database
 
 
@@ -30,12 +31,12 @@ def _decode_json(value: str | None, fallback: Any) -> Any:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in ("event_ids_json", "config_json", "highlights_json"):
+    for key in ("event_ids_json", "config_json", "highlights_json", "media_json"):
         if key in data:
             data[key.removesuffix("_json")] = _decode_json(
                 data[key], {} if key == "config_json" else []
             )
-    for key in ("is_official", "enabled", "archived", "user_hidden", "user_read"):
+    for key in ("is_official", "enabled", "archived", "user_hidden", "user_read", "user_saved"):
         if key in data:
             data[key] = bool(data[key])
     return data
@@ -65,6 +66,17 @@ def _user_hidden_clause(event_alias: str = "e") -> str:
     )"""
 
 
+def _event_saved_clause(event_alias: str = "e") -> str:
+    return f"""EXISTS (
+        SELECT 1 FROM feedback saved_feedback
+        WHERE saved_feedback.event_id = {event_alias}.id
+          AND saved_feedback.action = 'saved'
+    )"""
+
+
+CONTENT_RETENTION_DAYS = 30
+
+
 @dataclass(frozen=True, slots=True)
 class SourcePage:
     sources: list[dict[str, Any]]
@@ -79,6 +91,10 @@ class SourcePage:
 
 class Repository:
     """Persistence boundary for the non-scoring personal news flow."""
+
+    FETCH_INTERVAL_SETTING = "global_fetch_interval_minutes"
+    MIN_FETCH_INTERVAL_MINUTES = 5
+    MAX_FETCH_INTERVAL_MINUTES = 1440
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -95,6 +111,150 @@ class Repository:
                 f"SELECT * FROM sources {where} ORDER BY enabled DESC, name COLLATE NOCASE, id DESC"
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
+
+    # 全局抓取策略 -------------------------------------------------------------
+    @classmethod
+    def _normalize_fetch_interval(cls, value: int | str) -> int:
+        try:
+            interval = int(value)
+        except (TypeError, ValueError):
+            interval = FetchPolicy().interval_minutes
+        return max(cls.MIN_FETCH_INTERVAL_MINUTES, min(interval, cls.MAX_FETCH_INTERVAL_MINUTES))
+
+    def get_fetch_policy(self) -> FetchPolicy:
+        with self.database.read() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?", (self.FETCH_INTERVAL_SETTING,)
+            ).fetchone()
+        interval = self._normalize_fetch_interval(row["value"] if row else FetchPolicy().interval_minutes)
+        return FetchPolicy(interval_minutes=interval)
+
+    @staticmethod
+    def _jitter_seconds(
+        policy: FetchPolicy,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> int:
+        provider = jitter_provider or random.randint
+        return int(provider(policy.jitter_min_seconds, policy.jitter_max_seconds))
+
+    @classmethod
+    def _next_fetch_time(
+        cls,
+        policy: FetchPolicy,
+        *,
+        now: datetime,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> str:
+        delay = timedelta(minutes=policy.interval_minutes) + timedelta(
+            seconds=cls._jitter_seconds(policy, jitter_provider)
+        )
+        return (now + delay).isoformat()
+
+    @classmethod
+    def _initial_fetch_time(
+        cls,
+        policy: FetchPolicy,
+        *,
+        now: datetime,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> str:
+        """将首次任务分散到 1–5 分钟内，避免启用后形成请求尖峰。"""
+
+        return (now + timedelta(seconds=cls._jitter_seconds(policy, jitter_provider))).isoformat()
+
+    def schedule_unplanned_sources(
+        self,
+        policy: FetchPolicy | None = None,
+        *,
+        now: datetime | None = None,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> int:
+        """为尚未排期的启用来源写入持久化的首次抓取时间。"""
+
+        policy = policy or self.get_fetch_policy()
+        now = now or utc_now()
+        with self.database.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT id FROM sources
+                WHERE enabled = 1 AND archived = 0 AND next_fetch_at IS NULL
+                ORDER BY id
+                """
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    "UPDATE sources SET next_fetch_at = ?, updated_at = ? WHERE id = ?",
+                    (
+                        self._initial_fetch_time(policy, now=now, jitter_provider=jitter_provider),
+                        now.isoformat(),
+                        int(row["id"]),
+                    ),
+                )
+        return len(rows)
+
+    def save_fetch_policy(
+        self,
+        interval_minutes: int | str,
+        *,
+        now: datetime | None = None,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> tuple[FetchPolicy, int]:
+        """保存统一间隔，并在短随机窗口内重新排期所有启用来源。"""
+
+        now = now or utc_now()
+        policy = FetchPolicy(interval_minutes=self._normalize_fetch_interval(interval_minutes))
+        with self.database.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (self.FETCH_INTERVAL_SETTING, str(policy.interval_minutes), now.isoformat()),
+            )
+            rows = conn.execute(
+                "SELECT id FROM sources WHERE enabled = 1 AND archived = 0 ORDER BY id"
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    "UPDATE sources SET next_fetch_at = ?, updated_at = ? WHERE id = ?",
+                    (
+                        self._initial_fetch_time(policy, now=now, jitter_provider=jitter_provider),
+                        now.isoformat(),
+                        int(row["id"]),
+                    ),
+                )
+        return policy, len(rows)
+
+    def schedule_next_fetch(
+        self,
+        source_id: int,
+        policy: FetchPolicy | None = None,
+        *,
+        now: datetime | None = None,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> str:
+        policy = policy or self.get_fetch_policy()
+        now = now or utc_now()
+        next_fetch_at = self._next_fetch_time(policy, now=now, jitter_provider=jitter_provider)
+        self.update_source(source_id, {"next_fetch_at": next_fetch_at})
+        return next_fetch_at
+
+    def schedule_initial_fetch(
+        self,
+        source_id: int,
+        policy: FetchPolicy | None = None,
+        *,
+        now: datetime | None = None,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> str:
+        """为新建来源安排首次抓取，而不等待完整全局周期。"""
+
+        policy = policy or self.get_fetch_policy()
+        now = now or utc_now()
+        next_fetch_at = self._initial_fetch_time(policy, now=now, jitter_provider=jitter_provider)
+        self.update_source(source_id, {"next_fetch_at": next_fetch_at})
+        return next_fetch_at
 
     def list_sources_page(
         self,
@@ -155,10 +315,11 @@ class Repository:
             cursor = conn.execute(
                 """
                 UPDATE sources
-                SET health_status = 'unknown', last_fetch_at = NULL, last_error = ?, updated_at = ?
+                SET health_status = 'unknown', last_fetch_at = NULL, next_fetch_at = ?,
+                    last_error = ?, updated_at = ?
                 WHERE kind = ? AND enabled = 1 AND archived = 0 AND health_status = 'error'
                 """,
-                ("", iso_now(), kind),
+                (iso_now(), "", iso_now(), kind),
             )
         return int(cursor.rowcount)
 
@@ -173,10 +334,11 @@ class Repository:
             cursor = conn.execute(
                 f"""
                 UPDATE sources
-                SET health_status = 'unknown', last_fetch_at = NULL, last_error = ?, updated_at = ?
+                SET health_status = 'unknown', last_fetch_at = NULL, next_fetch_at = ?,
+                    last_error = ?, updated_at = ?
                 WHERE id IN ({placeholders}) AND enabled = 1 AND archived = 0
                 """,
-                ("", iso_now(), *ids),
+                (iso_now(), "", iso_now(), *ids),
             )
         return int(cursor.rowcount)
 
@@ -230,6 +392,8 @@ class Repository:
             "is_official",
             "enabled",
             "poll_interval_minutes",
+            "next_fetch_at",
+            "last_new_item_count",
             "feed_url",
             "health_status",
             "last_fetch_at",
@@ -259,23 +423,17 @@ class Repository:
 
     def due_sources(self, now: datetime | None = None) -> list[dict[str, Any]]:
         now = now or utc_now()
-        due: list[dict[str, Any]] = []
-        for source in self.list_sources():
-            if not source["enabled"]:
-                continue
-            last_fetch = source.get("last_fetch_at")
-            if not last_fetch:
-                due.append(source)
-                continue
-            try:
-                parsed = datetime.fromisoformat(str(last_fetch))
-                parsed = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-            except ValueError:
-                due.append(source)
-                continue
-            if now - parsed >= timedelta(minutes=int(source["poll_interval_minutes"])):
-                due.append(source)
-        return due
+        with self.database.read() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM sources
+                WHERE enabled = 1 AND archived = 0
+                  AND next_fetch_at IS NOT NULL AND next_fetch_at <= ?
+                ORDER BY next_fetch_at ASC, id ASC
+                """,
+                (now.isoformat(),),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
 
     # Connector credentials ---------------------------------------------------
     def get_connector_credential(self, connector: str) -> dict[str, Any] | None:
@@ -346,13 +504,14 @@ class Repository:
         published_at = item.published_at.isoformat() if item.published_at else None
         now = iso_now()
         content_hash = self._content_hash(item)
+        media_json = json.dumps(item.media, ensure_ascii=False)
         with self.database.transaction() as conn:
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO items (
                     source_id, guid, canonical_url, title, content, author, published_at,
-                    fetched_at, content_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    fetched_at, content_hash, media_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_id,
@@ -364,6 +523,7 @@ class Repository:
                     published_at,
                     now,
                     content_hash,
+                    media_json,
                 ),
             )
             if cursor.rowcount:
@@ -376,6 +536,15 @@ class Repository:
                 raise RuntimeError("Duplicate item lookup did not return a row")
             item_id = int(row["id"])
             if str(row["content_hash"] or "") == content_hash:
+                # 同 GUID 的重复抓取只回填媒体和抓取元数据，避免重复摘要与筛选。
+                conn.execute(
+                    """
+                    UPDATE items
+                    SET canonical_url = ?, author = ?, published_at = ?, fetched_at = ?, media_json = ?
+                    WHERE id = ?
+                    """,
+                    (item.link, item.author, published_at, now, media_json, item_id),
+                )
                 return item_id, False
 
             # Feeds sometimes revise an item while keeping the same GUID.  The
@@ -389,7 +558,7 @@ class Repository:
                     highlights_json = '[]', summary_status = 'pending', summary_error = '',
                     summary_version = 0, summarized_at = NULL, translated_content = '',
                     translation_status = 'pending', translation_error = '', translation_version = 0,
-                    translated_at = NULL
+                    translated_at = NULL, media_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -400,6 +569,7 @@ class Repository:
                     published_at,
                     now,
                     content_hash,
+                    media_json,
                     item_id,
                 ),
             )
@@ -559,6 +729,51 @@ class Repository:
                 LIMIT ?
                 """,
                 (limit,),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def list_recent_explicit_feedback(
+        self, *, days: int = 5, limit: int = 60
+    ) -> list[dict[str, Any]]:
+        """返回可供筛选 Skill 使用的近期显式用户行为。"""
+
+        days = max(1, min(int(days), 31))
+        limit = max(1, min(int(limit), 100))
+        cutoff = (utc_now() - timedelta(days=days)).isoformat()
+        with self.database.read() as conn:
+            rows = conn.execute(
+                """
+                WITH recent_actions AS (
+                    SELECT event_id, action, MAX(created_at) AS acted_at
+                    FROM feedback
+                    WHERE event_id IS NOT NULL
+                      AND action IN ('read', 'not_interested')
+                      AND created_at >= ?
+                    GROUP BY event_id, action
+                )
+                SELECT action_row.action, action_row.acted_at, e.title, e.summary
+                FROM recent_actions action_row
+                JOIN events e ON e.id = action_row.event_id
+                WHERE action_row.action = 'not_interested'
+                   OR (
+                        action_row.action = 'read'
+                    -- 新内容到达后，旧摘要的阅读行为不再代表当前事件版本。
+                    AND acted_at >= e.last_seen_at
+                    -- 同一事件有近期明确负反馈时，避免向 Skill 传递矛盾信号。
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM recent_actions negative_action
+                        WHERE negative_action.event_id = action_row.event_id
+                          AND negative_action.action = 'not_interested'
+                    )
+                   )
+                ORDER BY
+                    CASE action_row.action WHEN 'not_interested' THEN 0 ELSE 1 END,
+                    action_row.acted_at DESC,
+                    e.id DESC
+                LIMIT ?
+                """,
+                (cutoff, limit),
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 
@@ -780,6 +995,7 @@ class Repository:
                       AND f.action = 'read'
                       AND f.created_at >= e.last_seen_at
                 ) AS user_read,
+                {_event_saved_clause('e')} AS user_saved,
                 (
                     SELECT s.name
                     FROM items i
@@ -796,6 +1012,18 @@ class Repository:
                     ORDER BY COALESCE(i.published_at, i.fetched_at) DESC
                     LIMIT 1
                 ) AS primary_url,
+                (
+                    SELECT MAX(i.published_at)
+                    FROM items i
+                    JOIN sources s ON s.id = i.source_id
+                    WHERE i.event_id = e.id AND {_source_is_live_clause('s')}
+                ) AS latest_published_at,
+                (
+                    SELECT MAX(i.fetched_at)
+                    FROM items i
+                    JOIN sources s ON s.id = i.source_id
+                    WHERE i.event_id = e.id AND {_source_is_live_clause('s')}
+                ) AS latest_fetched_at,
                 (
                     SELECT i.highlights_json
                     FROM items i
@@ -836,17 +1064,76 @@ class Repository:
             result[tier.value] = self.count_events(tier=tier, period=period)
         return result
 
-    def get_event(self, event_id: int) -> dict[str, Any] | None:
+    def list_saved_events(self, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        """返回收藏事件，即使其来源后来被停用或归档也仍可阅读。"""
+
+        limit = max(1, min(int(limit), 50))
+        query = f"""
+            SELECT e.*,
+                EXISTS(SELECT 1 FROM feedback f WHERE f.event_id = e.id AND f.action = 'not_interested') AS user_hidden,
+                EXISTS(
+                    SELECT 1 FROM feedback f
+                    WHERE f.event_id = e.id
+                      AND f.action = 'read'
+                      AND f.created_at >= e.last_seen_at
+                ) AS user_read,
+                1 AS user_saved,
+                (
+                    SELECT s.name
+                    FROM items i
+                    JOIN sources s ON s.id = i.source_id
+                    WHERE i.event_id = e.id
+                    ORDER BY COALESCE(i.published_at, i.fetched_at) DESC
+                    LIMIT 1
+                ) AS primary_source_name,
+                (
+                    SELECT i.highlights_json
+                    FROM items i
+                    WHERE i.id = e.primary_item_id
+                ) AS highlights_json,
+                (
+                    SELECT MAX(f.created_at)
+                    FROM feedback f
+                    WHERE f.event_id = e.id AND f.action = 'saved'
+                ) AS saved_at
+            FROM events e
+            WHERE {_event_saved_clause('e')}
+            ORDER BY saved_at DESC, e.last_seen_at DESC, e.id DESC
+            LIMIT ? OFFSET ?
+        """
+        with self.database.read() as conn:
+            rows = conn.execute(query, (limit, max(0, int(offset)))).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def count_saved_events(self) -> int:
+        with self.database.read() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM events e WHERE {_event_saved_clause('e')}"
+            ).fetchone()
+        return int(row[0])
+
+    def is_event_saved(self, event_id: int) -> bool:
+        with self.database.read() as conn:
+            row = conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM feedback WHERE event_id = ? AND action = 'saved')",
+                (event_id,),
+            ).fetchone()
+        return bool(row[0])
+
+    def get_event(
+        self, event_id: int, *, include_inactive_sources: bool = False
+    ) -> dict[str, Any] | None:
         with self.database.read() as conn:
             event = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             if not event:
                 return None
+            source_clause = "1 = 1" if include_inactive_sources else _source_is_live_clause("s")
             items = conn.execute(
                 f"""
                 SELECT i.*, s.name AS source_name, s.kind AS source_kind, s.is_official
                 FROM items i
                 JOIN sources s ON s.id = i.source_id
-                WHERE i.event_id = ? AND {_source_is_live_clause('s')}
+                WHERE i.event_id = ? AND {source_clause}
                 ORDER BY CASE WHEN i.id = ? THEN 0 ELSE 1 END,
                          COALESCE(i.published_at, i.fetched_at) DESC
                 """,
@@ -856,11 +1143,15 @@ class Repository:
                 "SELECT EXISTS(SELECT 1 FROM feedback WHERE event_id = ? AND action = 'not_interested')",
                 (event_id,),
             ).fetchone()[0]
+            user_saved = conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM feedback WHERE event_id = ? AND action = 'saved')",
+                (event_id,),
+            ).fetchone()[0]
             visible_source_count = conn.execute(
                 f"""
                 SELECT COUNT(DISTINCT i.source_id)
                 FROM items i JOIN sources s ON s.id = i.source_id
-                WHERE i.event_id = ? AND {_source_is_live_clause('s')}
+                WHERE i.event_id = ? AND {source_clause}
                 """,
                 (event_id,),
             ).fetchone()[0]
@@ -870,6 +1161,7 @@ class Repository:
         data["items"] = [_row_to_dict(item) for item in items]
         data["highlights"] = data["items"][0].get("highlights", [])
         data["user_hidden"] = bool(user_hidden)
+        data["user_saved"] = bool(user_saved)
         data["visible_source_count"] = int(visible_source_count)
         return data
 
@@ -885,7 +1177,7 @@ class Repository:
             )
 
     def mark_event_read(self, event_id: int) -> None:
-        """记录用户已展开过该事件，并保持每个事件只有一条已读记录。"""
+        """记录用户已主动阅读过该事件，并保持每个事件只有一条已读记录。"""
 
         # 保留微秒，确保刚完成筛选的事件可在同一秒内被立即标记为已读。
         now = datetime.now(timezone.utc).isoformat()
@@ -897,6 +1189,22 @@ class Repository:
                 """,
                 (event_id, now),
             )
+
+    def save_event(self, event_id: int) -> None:
+        """以事件为单位收藏，复用复合主键保证状态只有一条。"""
+
+        with self.database.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'saved', ?)
+                ON CONFLICT(event_id, action) DO UPDATE SET created_at = excluded.created_at
+                """,
+                (event_id, iso_now()),
+            )
+
+    def unsave_event(self, event_id: int) -> None:
+        with self.database.transaction() as conn:
+            conn.execute("DELETE FROM feedback WHERE event_id = ? AND action = 'saved'", (event_id,))
 
     def restore_event(self, event_id: int) -> None:
         with self.database.transaction() as conn:
@@ -950,6 +1258,75 @@ class Repository:
             ).fetchall()
         by_id = {int(row["id"]): _row_to_dict(row) for row in rows}
         return [by_id[event_id] for event_id in ids if event_id in by_id]
+
+    def purge_expired_content(self, now: datetime | None = None) -> dict[str, int]:
+        """清理过期内容，同时保留收藏事件和仍被日报引用的事件。"""
+
+        current_time = now or utc_now()
+        event_cutoff = (current_time - timedelta(days=CONTENT_RETENTION_DAYS)).isoformat()
+        # 日报保留包含今天在内的最近 30 个自然日，再读取剩余日报的有效引用。
+        brief_cutoff = (current_time.date() - timedelta(days=CONTENT_RETENTION_DAYS)).isoformat()
+
+        with self.database.transaction() as conn:
+            deleted_briefs = conn.execute(
+                "DELETE FROM briefs WHERE brief_date <= ?", (brief_cutoff,)
+            ).rowcount
+
+            protected_event_ids: set[int] = set()
+            has_unknown_brief_references = False
+            brief_rows = conn.execute("SELECT event_ids_json FROM briefs").fetchall()
+            for brief_row in brief_rows:
+                event_ids = _decode_json(brief_row["event_ids_json"], None)
+                if not isinstance(event_ids, list):
+                    has_unknown_brief_references = True
+                    continue
+                for referenced_event_id in event_ids:
+                    try:
+                        protected_event_ids.add(int(referenced_event_id))
+                    except (TypeError, ValueError):
+                        continue
+
+            expired_rows = conn.execute(
+                f"""
+                SELECT e.id FROM events e
+                WHERE e.last_seen_at < ?
+                  AND NOT {_event_saved_clause('e')}
+                """,
+                (event_cutoff,),
+            ).fetchall()
+            # 保留期内的日报若损坏，无法可靠识别其引用；此时宁可多保留事件。
+            expired_event_ids: list[int] = []
+            if not has_unknown_brief_references:
+                expired_event_ids = [
+                    int(row["id"])
+                    for row in expired_rows
+                    if int(row["id"]) not in protected_event_ids
+                ]
+
+            deleted_event_items = 0
+            if expired_event_ids:
+                placeholders = ", ".join("?" for _ in expired_event_ids)
+                deleted_event_items = conn.execute(
+                    f"DELETE FROM items WHERE event_id IN ({placeholders})", expired_event_ids
+                ).rowcount
+                # feedback 对事件设置了级联删除；这里先删除事件即可保持状态一致。
+                conn.execute(f"DELETE FROM events WHERE id IN ({placeholders})", expired_event_ids)
+
+            # 尚未归入事件的旧帖子没有收藏入口，可在同一保留期内直接清理。
+            deleted_orphan_items = conn.execute(
+                """
+                DELETE FROM items
+                WHERE event_id IS NULL
+                  AND COALESCE(published_at, fetched_at) < ?
+                """,
+                (event_cutoff,),
+            ).rowcount
+
+        return {
+            "briefs": max(0, int(deleted_briefs)),
+            "events": len(expired_event_ids),
+            "items": max(0, int(deleted_event_items)) + max(0, int(deleted_orphan_items)),
+        }
 
     def dashboard_stats(self) -> dict[str, int]:
         now = utc_now()

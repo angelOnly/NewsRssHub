@@ -143,7 +143,6 @@ class SourceBackupService:
             "official": bool(source["is_official"]),
             "enabled": bool(source["enabled"] and not source["archived"]),
             "archived": bool(source["archived"]),
-            "poll_interval_minutes": int(source["poll_interval_minutes"]),
         }
 
     @staticmethod

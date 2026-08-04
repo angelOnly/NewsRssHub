@@ -50,7 +50,7 @@
       {% endif %}
       <small>RSS 填完整 URL；X 填 @账号；Reddit 填 r/社区名 或 u/用户名。</small>
     </label>
-    <label>抓取间隔（分钟）<input name="poll_interval_minutes" type="number" min="5" max="1440" value="{{ source.poll_interval_minutes if source else 60 }}"></label>
+    <p class="source-schedule-note">抓取由全局策略管理：每 {{ fetch_policy.interval_minutes }} 分钟一次，另加随机 1–5 分钟错峰。可在<a href="/settings#fetch">设置与连接</a>统一修改。</p>
     <div class="check-row">
       <label><input name="is_official" type="checkbox" value="true" {% if source and source.is_official %}checked{% endif %}> 官方或机构控制的来源</label>
       <label><input name="enabled" type="checkbox" value="true" {% if not source or source.enabled %}checked{% endif %}> 保存后启用抓取</label>

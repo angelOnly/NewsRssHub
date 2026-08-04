@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from app.config import Settings
 from app.domain.models import FeedItem, SourceKind, ValidationResult
@@ -52,9 +52,13 @@ class XRsshubSourcePlugin(SourcePlugin):
         )
 
     def fetch_many(
-        self, sources: list[dict[str, Any]], settings: Settings
+        self,
+        sources: list[dict[str, Any]],
+        settings: Settings,
+        *,
+        wait_between: Callable[[], None] | None = None,
     ) -> dict[int, SourceFetchResult]:
         if not self.sessions:
             error = RuntimeError("X 会话服务尚未初始化。")
             return {int(source["id"]): SourceFetchResult(error=error) for source in sources}
-        return self.sessions.fetch_many(sources)
+        return self.sessions.fetch_many(sources, wait_between=wait_between)

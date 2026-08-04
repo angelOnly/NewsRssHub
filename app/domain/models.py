@@ -13,6 +13,15 @@ class SourceKind(StrEnum):
     YOUTUBE = "youtube"
 
 
+@dataclass(frozen=True, slots=True)
+class FetchPolicy:
+    """全局抓取节奏；来源不再分别决定轮询频率。"""
+
+    interval_minutes: int = 60
+    jitter_min_seconds: int = 60
+    jitter_max_seconds: int = 300
+
+
 @dataclass(slots=True)
 class SourceDraft:
     name: str
@@ -32,6 +41,8 @@ class FeedItem:
     content: str
     author: str = ""
     published_at: datetime | None = None
+    # 仅保存已验证的远端媒体地址，抓取时不下载媒体文件。
+    media: list[dict[str, str]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
 

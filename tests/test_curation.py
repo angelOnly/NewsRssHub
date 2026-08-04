@@ -271,10 +271,102 @@ class CurationTests(unittest.TestCase):
             assert isinstance(first_items, list)
             self.assertEqual(set(first_items[0]), {"id", "title", "summary", "published_at"})
             self.assertNotIn("content", first_items[0])
+            self.assertEqual(client.calls[0]["recent_feedback"], [])
             self.assertEqual(len(repository.list_events(tier=EditorialTier.MUST_READ, period="all")), 1)
             self.assertEqual(len(repository.list_events(tier=EditorialTier.BRIEF, period="all")), 1)
             event = repository.list_events(tier=EditorialTier.MUST_READ, period="all")[0]
             self.assertEqual(event["visible_source_count"], 1)
+
+    def test_skill_receives_recent_explicit_feedback_without_raw_body(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+
+            read_id, inserted = repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="read-feedback",
+                    title="用户已阅读的模型评测",
+                    link="https://example.test/read-feedback",
+                    content="绝不能传给筛选 Skill 的已读原始正文。",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            )
+            self.assertTrue(inserted)
+            repository.save_item_summary(read_id, summary="用户已阅读的模型评测摘要。")
+            read_event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[read_id],
+                        primary_item_id=read_id,
+                        tier=EditorialTier.IMPORTANT,
+                        reason="测试近期已读反馈",
+                        order=1,
+                    )
+                ]
+            )[0]
+            repository.mark_event_read(read_event_id)
+
+            hidden_id, inserted = repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="negative-feedback",
+                    title="用户明确不感兴趣的营销消息",
+                    link="https://example.test/negative-feedback",
+                    content="绝不能传给筛选 Skill 的负反馈原始正文。",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            )
+            self.assertTrue(inserted)
+            repository.save_item_summary(hidden_id, summary="用户明确不感兴趣的营销消息摘要。")
+            hidden_event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[hidden_id],
+                        primary_item_id=hidden_id,
+                        tier=EditorialTier.BRIEF,
+                        reason="测试近期负反馈",
+                        order=1,
+                    )
+                ]
+            )[0]
+            repository.mark_event_not_interested(hidden_event_id)
+
+            pending_id, inserted = repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="pending-curation",
+                    title="待筛选的新消息",
+                    link="https://example.test/pending-curation",
+                    content="待筛选原始正文也不应传给 Skill。",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            )
+            self.assertTrue(inserted)
+            repository.save_item_summary(pending_id, summary="待筛选的新消息摘要。")
+
+            client = RecordingClient()
+            curator = CurationService(
+                repository,
+                settings,
+                llm_connections=FixedConnection(),  # type: ignore[arg-type]
+                client_factory=lambda _config: client,  # type: ignore[arg-type]
+            )
+            result = curator.curate_available(limit=10)
+
+            self.assertEqual(result.completed, 1)
+            feedback = client.calls[0]["recent_feedback"]
+            assert isinstance(feedback, list)
+            self.assertEqual([item["action"] for item in feedback], ["not_interested", "read"])
+            self.assertTrue(
+                all(set(item) == {"action", "acted_at", "title", "summary"} for item in feedback)
+            )
+            self.assertNotIn("绝不能传给筛选 Skill", str(feedback))
 
     def test_short_posts_are_summarized_without_a_fake_priority_rule(self) -> None:
         with TemporaryDirectory() as directory:

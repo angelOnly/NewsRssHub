@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">SOURCE CONTROL</p>
     <h1>来源管理</h1>
-    <p class="subhead">单个添加会立即验证；批量导入只保存，之后可按平台手动测试。</p>
+    <p class="subhead">单个添加会立即验证；批量导入后会在未来 1–5 分钟内错峰排期，也可按平台手动测试。</p>
   </div>
   <div class="source-head-actions">
     <a class="button button-secondary" href="/sources/batch">批量添加</a>
@@ -42,6 +42,10 @@
   {% else %}
   <p class="source-backup-empty">还没有自动备份；Worker 下一轮运行时会创建第一份。</p>
   {% endif %}
+</section>
+
+<section class="source-platform-tip">
+  <strong>统一抓取策略：</strong>每 {{ fetch_policy.interval_minutes }} 分钟一次，来源会额外随机延后 1–5 分钟；同一批请求之间随机等待 2–5 秒。
 </section>
 
 {% if has_x_sources and x_credential.state != 'valid' and selected_source_kind in ('all', 'x_rsshub') %}
@@ -103,6 +107,8 @@
         <td>
           <strong>{{ source.name }}</strong>
           <small>{{ source.locator }}</small>
+          <small>上次检查：{{ source.last_fetch_at|relative_time if source.last_fetch_at else '尚未抓取' }} · 新增 {{ source.last_new_item_count }} 条</small>
+          <small>下次抓取：{{ source.next_fetch_at|relative_time if source.next_fetch_at else '等待排期' }}</small>
           {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
             <small class="source-state-note">等待 X Cookie 验证</small>
           {% elif source.health_status == 'error' and source.last_error %}
@@ -151,6 +157,8 @@
       <dl class="source-mobile-details">
         <div><dt>平台</dt><dd>{{ source.kind|kind_label }}</dd></div>
         <div><dt>上次成功</dt><dd>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</dd></div>
+        <div><dt>上次检查</dt><dd>{{ source.last_fetch_at|relative_time if source.last_fetch_at else '尚未抓取' }} · 新增 {{ source.last_new_item_count }} 条</dd></div>
+        <div><dt>下次抓取</dt><dd>{{ source.next_fetch_at|relative_time if source.next_fetch_at else '等待排期' }}</dd></div>
       </dl>
       {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
         <details class="source-mobile-state-details">

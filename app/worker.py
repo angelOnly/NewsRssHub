@@ -1,4 +1,4 @@
-"""Background collector. One worker means SQLite always has a single writer."""
+"""后台任务入口：抓取调度与大模型处理可独立运行。"""
 
 from __future__ import annotations
 
@@ -19,22 +19,36 @@ def configure_logging(level: str) -> None:
 
 
 def run() -> int:
-    parser = argparse.ArgumentParser(description="NewsRSSHub background worker")
-    parser.add_argument("--once", action="store_true", help="Run one collection/analysis pass and exit")
-    parser.add_argument("--force", action="store_true", help="Fetch every enabled source, ignoring its interval")
-    parser.add_argument("--interval", type=int, default=60, help="Seconds between scheduling checks")
+    parser = argparse.ArgumentParser(description="NewsRSSHub 后台任务")
+    parser.add_argument("--once", action="store_true", help="运行一轮后退出")
+    parser.add_argument("--force", action="store_true", help="忽略排期并抓取全部启用来源")
+    parser.add_argument(
+        "--role",
+        choices=("collector", "processor", "all"),
+        default="all",
+        help="collector 仅抓取；processor 仅摘要、筛选、翻译和生成简报",
+    )
+    parser.add_argument("--interval", type=int, default=30, help="两轮检查之间的秒数")
     args = parser.parse_args()
 
     services = build_services()
     configure_logging(services.settings.log_level)
-    seeded = services.pipeline.bootstrap()
-    if seeded:
-        logging.getLogger(__name__).info("Imported %s existing RSS sources.", seeded)
+    if args.role in {"collector", "all"}:
+        seeded = services.pipeline.bootstrap()
+        if seeded:
+            logging.getLogger(__name__).info("Imported %s existing RSS sources.", seeded)
 
     while True:
         try:
-            outcome = services.pipeline.run_once(force=args.force)
-            logging.getLogger(__name__).info("Pipeline pass finished: %s", json.dumps(outcome, ensure_ascii=False))
+            if args.role == "collector":
+                outcome = services.pipeline.collect_once(force=args.force)
+            elif args.role == "processor":
+                outcome = services.pipeline.process_once()
+            else:
+                outcome = services.pipeline.run_once(force=args.force)
+            logging.getLogger(__name__).info(
+                "%s pass finished: %s", args.role, json.dumps(outcome, ensure_ascii=False)
+            )
         except Exception:
             logging.getLogger(__name__).exception("Pipeline pass failed")
             if args.once:

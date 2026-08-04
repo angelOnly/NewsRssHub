@@ -36,6 +36,31 @@ class FakeClient:
                     "full_text": "A useful X update about a new model.",
                     "created_at": "Sun Aug 03 00:00:00 +0000 2026",
                     "reply_count": 3,
+                    "extended_entities": {
+                        "media": [
+                            {
+                                "type": "photo",
+                                "media_url_https": "https://pbs.example.test/photo.jpg",
+                            },
+                            {
+                                "type": "video",
+                                "media_url_https": "https://pbs.example.test/poster.jpg",
+                                "video_info": {
+                                    "variants": [
+                                        {
+                                            "content_type": "application/x-mpegURL",
+                                            "url": "https://video.example.test/stream.m3u8",
+                                        },
+                                        {
+                                            "content_type": "video/mp4",
+                                            "bitrate": 832000,
+                                            "url": "https://video.example.test/stream.mp4",
+                                        },
+                                    ]
+                                },
+                            },
+                        ]
+                    },
                 },
             }
         ]
@@ -87,6 +112,18 @@ class XSessionTests(unittest.TestCase):
             self.assertIsNone(outcome.error)
             self.assertEqual(len(outcome.items), 1)
             self.assertEqual(outcome.items[0].guid, "x:1700000000000000001")
+            self.assertEqual(
+                outcome.items[0].media,
+                [
+                    {"kind": "image", "url": "https://pbs.example.test/photo.jpg"},
+                    {
+                        "kind": "video",
+                        "url": "https://video.example.test/stream.mp4",
+                        "mime_type": "video/mp4",
+                        "poster_url": "https://pbs.example.test/poster.jpg",
+                    },
+                ],
+            )
             self.assertEqual(repository.get_source(source_id)["config"]["x_user_id"], "42")
 
     def test_x_batch_checks_cookie_once_before_multiple_accounts(self) -> None:

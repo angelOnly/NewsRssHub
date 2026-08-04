@@ -46,12 +46,24 @@
           <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
             <div class="event-meta">
               <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
-              <span>{{ event.last_seen_at|relative_time }}</span>
+              {% if event.latest_published_at %}<span>发布 {{ event.latest_published_at|relative_time }}</span>{% else %}<span>发布时间未知</span>{% endif %}
+              {% if event.latest_fetched_at %}<span>抓取 {{ event.latest_fetched_at|relative_time }}</span>{% endif %}
               {% if event.visible_source_count > 1 %}<span class="source-badge">{{ event.visible_source_count }} 个来源</span>{% endif %}
             </div>
             <h3>{{ event.title }}</h3>
           </a>
           <div class="event-actions">
+            {% if event.user_saved %}
+            <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/unsave">
+              <input type="hidden" name="origin" value="dashboard"><input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
+              <button type="submit" aria-label="取消收藏" title="取消收藏"><span aria-hidden="true">★</span><span class="sr-only">取消收藏</span></button>
+            </form>
+            {% else %}
+            <form class="event-feedback event-save" method="post" action="/events/{{ event.id }}/save">
+              <input type="hidden" name="origin" value="dashboard"><input type="hidden" name="tier" value="{{ tier }}"><input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">
+              <button type="submit" aria-label="收藏" title="收藏，稍后阅读"><span aria-hidden="true">☆</span><span class="sr-only">收藏，稍后阅读</span></button>
+            </form>
+            {% endif %}
             {% if tier == 'hidden' and event.user_hidden %}
             <form class="event-feedback" method="post" action="/events/{{ event.id }}/restore">
               <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="page" value="{{ page }}">

@@ -222,6 +222,84 @@ class EventTests(unittest.TestCase):
             )
             updated_event = repository.list_events(tier=EditorialTier.IMPORTANT, period="all")[0]
             self.assertFalse(updated_event["user_read"])
+            self.assertEqual(repository.list_recent_explicit_feedback(), [])
+
+    def test_recent_explicit_feedback_excludes_auto_hidden_and_old_actions(self) -> None:
+        directory, repository, source_id = self._repository()
+        with directory:
+            read_id = self._item(repository, source_id, "feedback-read", "用户已阅读的资讯")
+            read_event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[read_id],
+                        primary_item_id=read_id,
+                        tier=EditorialTier.IMPORTANT,
+                        reason="测试已读反馈",
+                        order=1,
+                    )
+                ]
+            )[0]
+            repository.mark_event_read(read_event_id)
+
+            negative_id = self._item(repository, source_id, "feedback-negative", "用户不感兴趣的资讯")
+            negative_event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[negative_id],
+                        primary_item_id=negative_id,
+                        tier=EditorialTier.BRIEF,
+                        reason="测试近期负反馈",
+                        order=1,
+                    )
+                ]
+            )[0]
+            repository.mark_event_read(negative_event_id)
+            repository.mark_event_not_interested(negative_event_id)
+
+            auto_hidden_id = self._item(repository, source_id, "auto-hidden", "系统自动隐藏的资讯")
+            repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[auto_hidden_id],
+                        primary_item_id=auto_hidden_id,
+                        tier=EditorialTier.HIDDEN,
+                        reason="模型自动隐藏",
+                        order=1,
+                    )
+                ]
+            )
+
+            old_id = self._item(repository, source_id, "old-feedback", "过期的已读资讯")
+            old_event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[old_id],
+                        primary_item_id=old_id,
+                        tier=EditorialTier.IMPORTANT,
+                        reason="测试过期反馈",
+                        order=1,
+                    )
+                ]
+            )[0]
+            repository.mark_event_read(old_event_id)
+            old_time = datetime.now(timezone.utc) - timedelta(days=6)
+            with repository.database.transaction() as conn:
+                conn.execute(
+                    "UPDATE feedback SET created_at = ? WHERE event_id = ? AND action = 'read'",
+                    (old_time.isoformat(), old_event_id),
+                )
+                conn.execute(
+                    "UPDATE events SET last_seen_at = ? WHERE id = ?",
+                    ((old_time - timedelta(minutes=1)).isoformat(), old_event_id),
+                )
+
+            feedback = repository.list_recent_explicit_feedback()
+            self.assertEqual([item["action"] for item in feedback], ["not_interested", "read"])
+            titles = {str(item["title"]) for item in feedback}
+            self.assertEqual(titles, {"用户已阅读的资讯", "用户不感兴趣的资讯"})
+            self.assertNotIn("系统自动隐藏的资讯", titles)
+            self.assertNotIn("过期的已读资讯", titles)
+            self.assertTrue(all("content" not in item for item in feedback))
 
     def test_skill_grouping_merges_multiple_raw_items_into_one_event(self) -> None:
         directory, repository, source_id = self._repository()
