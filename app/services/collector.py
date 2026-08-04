@@ -6,6 +6,7 @@ from typing import Any
 
 from app.config import Settings
 from app.plugins.base import PluginRegistry, SourceFetchResult
+from app.services.connections import ConnectionCatalog
 from app.storage.repository import Repository, iso_now
 
 
@@ -25,14 +26,20 @@ class Collector:
         repository: Repository,
         registry: PluginRegistry,
         settings: Settings,
+        connections: ConnectionCatalog | None = None,
     ) -> None:
         self.repository = repository
         self.registry = registry
         self.settings = settings
+        self.connections = connections or ConnectionCatalog()
 
     def collect_due_sources(self, force: bool = False) -> CollectionSummary:
         candidates = self.repository.list_sources() if force else self.repository.due_sources()
-        sources = [source for source in candidates if source["enabled"]]
+        sources = [
+            source
+            for source in candidates
+            if source["enabled"] and self.connections.for_kind(source["kind"]).usable
+        ]
         result = CollectionSummary()
 
         # A connector can share a credential or connection across many sources.

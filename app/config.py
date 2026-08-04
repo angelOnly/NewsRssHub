@@ -58,6 +58,7 @@ class Settings:
     openai_model_name: str
     credential_encryption_key: str | None
     timezone: str
+    rsshub_base_url: str | None = None
 
     @property
     def profile_path(self) -> Path:
@@ -88,6 +89,7 @@ def build_settings() -> Settings:
     enabled_default = llm_config.get("enabled")
     if enabled_default is None:
         enabled_default = config.get("LLM_ENABLED")
+    rsshub_base_url = app_config.get("rsshub_base_url") or config.get("RSSHUB_BASE_URL") or None
 
     return Settings(
         root_dir=ROOT_DIR,
@@ -102,6 +104,7 @@ def build_settings() -> Settings:
         openai_model_name=model_name,
         credential_encryption_key=config.get("CREDENTIAL_ENCRYPTION_KEY") or None,
         timezone=str(app_config.get("timezone", "Asia/Shanghai")),
+        rsshub_base_url=str(rsshub_base_url).rstrip("/") if rsshub_base_url else None,
     )
 
 

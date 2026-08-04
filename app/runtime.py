@@ -6,6 +6,7 @@ from app.config import Settings, get_settings
 from app.plugins.registry import build_source_registry
 from app.services.pipeline import IntelligencePipeline
 from app.services.connections import ConnectionCatalog
+from app.services.batch_sources import BatchSourceImportService
 from app.services.llm_connection import LLMConnectionService
 from app.services.sources import SourceService
 from app.services.translator import TranslationService
@@ -24,6 +25,7 @@ class ApplicationServices:
     llm_connections: LLMConnectionService
     connections: ConnectionCatalog
     translator: TranslationService
+    batch_sources: BatchSourceImportService
 
 
 def build_services(settings: Settings | None = None) -> ApplicationServices:
@@ -33,10 +35,11 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     repository = Repository(database)
     x_sessions = XSessionService(repository, settings)
     llm_connections = LLMConnectionService(repository, settings)
-    connections = ConnectionCatalog(x_sessions)
+    connections = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
     registry = build_source_registry(x_sessions)
     pipeline = IntelligencePipeline(repository, registry, settings, llm_connections, connections)
     source_service = SourceService(repository, registry, settings, connections)
+    batch_source_service = BatchSourceImportService(source_service)
     return ApplicationServices(
         settings=settings,
         repository=repository,
@@ -46,4 +49,5 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         llm_connections=llm_connections,
         connections=connections,
         translator=pipeline.translator,
+        batch_sources=batch_source_service,
     )

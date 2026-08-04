@@ -26,6 +26,15 @@ TIER_TABS: tuple[tuple[str, str], ...] = (
     (EditorialTier.HIDDEN.value, "已隐藏"),
 )
 
+SOURCE_PAGE_SIZE = 20
+SOURCE_PLATFORM_TABS: tuple[tuple[str, str], ...] = (
+    ("all", "全部"),
+    (SourceKind.X_RSSHUB.value, "X"),
+    (SourceKind.REDDIT.value, "Reddit"),
+    (SourceKind.YOUTUBE.value, "YouTube"),
+    (SourceKind.RSS.value, "RSS"),
+)
+
 
 def _fmt_time(value: str | None) -> str:
     if not value:
@@ -52,6 +61,7 @@ def _kind_label(kind: str) -> str:
         "rss": "RSS",
         "x_rsshub": "X 账号（会话）",
         "reddit": "Reddit",
+        "youtube": "YouTube",
     }.get(kind, kind)
 
 
@@ -65,6 +75,31 @@ def _safe_tier(value: str) -> EditorialTier:
     except ValueError:
         return EditorialTier.MUST_READ
     return tier if tier != EditorialTier.PENDING else EditorialTier.MUST_READ
+
+
+def _safe_source_kind(value: str) -> str:
+    if value == "all":
+        return "all"
+    try:
+        return SourceKind(value).value
+    except ValueError:
+        return "all"
+
+
+def _source_page_value(value: int | str) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _default_poll_interval(kind: str) -> int:
+    return {
+        SourceKind.X_RSSHUB.value: 60,
+        SourceKind.REDDIT.value: 120,
+        SourceKind.YOUTUBE.value: 360,
+        SourceKind.RSS.value: 120,
+    }.get(kind, 60)
 
 
 @asynccontextmanager
@@ -109,8 +144,22 @@ def render(
     return templates.TemplateResponse(request=request, name=name, context=base, status_code=status_code)
 
 
-def sources_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
-    query = urlencode({key: value for key, value in {"notice": notice, "error": error}.items() if value})
+def sources_redirect(
+    *,
+    notice: str = "",
+    error: str = "",
+    kind: str = "all",
+    page: int | str = 1,
+) -> RedirectResponse:
+    selected_kind = _safe_source_kind(kind)
+    selected_page = _source_page_value(page)
+    values: dict[str, str | int] = {
+        **({"kind": selected_kind} if selected_kind != "all" else {}),
+        **({"page": selected_page} if selected_page > 1 else {}),
+        **({"notice": notice} if notice else {}),
+        **({"error": error} if error else {}),
+    }
+    query = urlencode(values)
     return RedirectResponse(f"/sources?{query}" if query else "/sources", status_code=303)
 
 
@@ -338,12 +387,47 @@ def brief_detail(request: Request, brief_date: str) -> HTMLResponse:
 
 
 @app.get("/sources", response_class=HTMLResponse)
-def sources(request: Request, notice: str = "", error: str = "") -> HTMLResponse:
+def sources(
+    request: Request,
+    kind: str = "all",
+    page: int = 1,
+    notice: str = "",
+    error: str = "",
+) -> HTMLResponse:
     services = get_services(request)
+    selected_kind = _safe_source_kind(kind)
+    source_page = services.repository.list_sources_page(
+        kind=None if selected_kind == "all" else selected_kind,
+        page=_source_page_value(page),
+        page_size=SOURCE_PAGE_SIZE,
+    )
+    kind_counts = services.repository.source_kind_counts()
+    platform_tabs = [
+        {
+            "kind": tab_kind,
+            "label": label,
+            "count": source_page.total if tab_kind == "all" else kind_counts.get(tab_kind, 0),
+        }
+        for tab_kind, label in SOURCE_PLATFORM_TABS
+    ]
     return render(
         request,
         "sources.html",
-        {"sources": services.repository.list_sources(), "notice": notice, "error": error},
+        {
+            "sources": source_page.sources,
+            "source_total": source_page.total,
+            "source_page": source_page.page,
+            "source_page_count": source_page.page_count,
+            "source_page_size": source_page.page_size,
+            "source_page_start": (source_page.page - 1) * source_page.page_size + 1
+            if source_page.total
+            else 0,
+            "source_page_end": min(source_page.page * source_page.page_size, source_page.total),
+            "selected_source_kind": selected_kind,
+            "platform_tabs": platform_tabs,
+            "notice": notice,
+            "error": error,
+        },
     )
 
 
@@ -447,6 +531,108 @@ def new_source_form(request: Request, error: str = "", connection: str = "") -> 
             "mode": "new",
         },
     )
+
+
+def _batch_source_context(
+    services: ApplicationServices,
+    *,
+    kind: str,
+    entries: str = "",
+    is_official: bool = False,
+    poll_interval_minutes: int | None = None,
+    enabled: bool = True,
+    batch_result: Any | None = None,
+    error: str = "",
+) -> dict[str, Any]:
+    selected_kind = _safe_source_kind(kind)
+    if selected_kind == "all":
+        selected_kind = SourceKind.X_RSSHUB.value
+    connection = services.connections.for_kind(selected_kind)
+    return {
+        "batch_kind_choices": [
+            (SourceKind.X_RSSHUB.value, _kind_label(SourceKind.X_RSSHUB.value)),
+            (SourceKind.REDDIT.value, _kind_label(SourceKind.REDDIT.value)),
+            (SourceKind.YOUTUBE.value, _kind_label(SourceKind.YOUTUBE.value)),
+            (SourceKind.RSS.value, _kind_label(SourceKind.RSS.value)),
+        ],
+        "batch_kind": selected_kind,
+        "batch_entries": entries,
+        "batch_is_official": is_official,
+        "batch_poll_interval": poll_interval_minutes or _default_poll_interval(selected_kind),
+        "batch_enabled": enabled,
+        "batch_connection": connection,
+        "batch_result": batch_result,
+        "error": error,
+    }
+
+
+@app.get("/sources/batch", response_class=HTMLResponse)
+def batch_source_form(request: Request, kind: str = SourceKind.X_RSSHUB.value) -> HTMLResponse:
+    services = get_services(request)
+    return render(request, "source_batch.html", _batch_source_context(services, kind=kind))
+
+
+@app.post("/sources/batch", response_class=HTMLResponse)
+def batch_add_sources(
+    request: Request,
+    kind: str = Form(...),
+    entries: str = Form(...),
+    is_official: bool = Form(False),
+    poll_interval_minutes: int = Form(60),
+    enabled: bool = Form(False),
+) -> HTMLResponse:
+    services = get_services(request)
+    selected_kind = _safe_source_kind(kind)
+    if selected_kind == "all":
+        return render(
+            request,
+            "source_batch.html",
+            _batch_source_context(
+                services,
+                kind=SourceKind.X_RSSHUB.value,
+                entries=entries,
+                is_official=is_official,
+                poll_interval_minutes=poll_interval_minutes,
+                enabled=enabled,
+                error="请选择要批量添加的平台。",
+            ),
+            status_code=422,
+        )
+    try:
+        result = services.batch_sources.import_text(
+            kind=selected_kind,
+            entries=entries,
+            is_official=is_official,
+            poll_interval_minutes=poll_interval_minutes,
+            enabled=enabled,
+        )
+        return render(
+            request,
+            "source_batch.html",
+            _batch_source_context(
+                services,
+                kind=selected_kind,
+                is_official=is_official,
+                poll_interval_minutes=poll_interval_minutes,
+                enabled=enabled,
+                batch_result=result,
+            ),
+        )
+    except Exception as exc:
+        return render(
+            request,
+            "source_batch.html",
+            _batch_source_context(
+                services,
+                kind=selected_kind,
+                entries=entries,
+                is_official=is_official,
+                poll_interval_minutes=poll_interval_minutes,
+                enabled=enabled,
+                error=str(exc),
+            ),
+            status_code=422,
+        )
 
 
 def _make_draft(
@@ -562,28 +748,51 @@ def edit_source(
 
 
 @app.post("/sources/{source_id}/test")
-def test_source(request: Request, source_id: int) -> RedirectResponse:
+def test_source(
+    request: Request,
+    source_id: int,
+    source_kind: str = Form("all"),
+    page: int = Form(1),
+) -> RedirectResponse:
     try:
         result = get_services(request).sources.validate_source(source_id)
         prefix = "连接正常：" if result.ok else "连接失败："
-        return sources_redirect(notice=f"{prefix}{result.message}")
+        return sources_redirect(notice=f"{prefix}{result.message}", kind=source_kind, page=page)
     except Exception as exc:
-        return sources_redirect(error=str(exc))
+        return sources_redirect(error=str(exc), kind=source_kind, page=page)
 
 
 @app.post("/sources/{source_id}/toggle")
-def toggle_source(request: Request, source_id: int) -> RedirectResponse:
+def toggle_source(
+    request: Request,
+    source_id: int,
+    source_kind: str = Form("all"),
+    page: int = Form(1),
+) -> RedirectResponse:
     repository = get_services(request).repository
     source = repository.get_source(source_id)
     if not source:
         raise HTTPException(status_code=404, detail="未找到来源")
     repository.update_source(source_id, {"enabled": int(not source["enabled"])})
     if source["enabled"]:
-        return sources_redirect(notice="来源已暂停；刷新首页或简报后，会立即隐藏它已有的内容。")
-    return sources_redirect(notice="来源已启用，将按设定频率恢复抓取。")
+        return sources_redirect(
+            notice="来源已暂停；刷新首页或简报后，会立即隐藏它已有的内容。",
+            kind=source_kind,
+            page=page,
+        )
+    return sources_redirect(
+        notice="来源已启用，将按设定频率恢复抓取。", kind=source_kind, page=page
+    )
 
 
 @app.post("/sources/{source_id}/archive")
-def archive_source(request: Request, source_id: int) -> RedirectResponse:
+def archive_source(
+    request: Request,
+    source_id: int,
+    source_kind: str = Form("all"),
+    page: int = Form(1),
+) -> RedirectResponse:
     get_services(request).repository.archive_source(source_id)
-    return sources_redirect(notice="来源已归档，可随时从数据库恢复。")
+    return sources_redirect(
+        notice="来源已归档，可随时从数据库恢复。", kind=source_kind, page=page
+    )

@@ -26,15 +26,26 @@ class SourceService:
         self.settings = settings
         self.connections = connections or ConnectionCatalog()
 
-    def add_source(self, draft: SourceDraft, validate: bool = True) -> tuple[dict[str, Any], ValidationResult | None]:
+    def prepare_draft(self, draft: SourceDraft) -> tuple[SourceDraft, str]:
+        """Turn user input into one normalized, durable source draft."""
+
+        plugin = self.registry.get(draft.kind)
+        locator, feed_url = plugin.prepare_source(draft.locator, self.settings)
+        return replace(draft, locator=locator), feed_url
+
+    def add_source(
+        self,
+        draft: SourceDraft,
+        validate: bool = True,
+        *,
+        require_connection: bool = True,
+    ) -> tuple[dict[str, Any], ValidationResult | None]:
         # Enforce the same platform-first rule used by the web setup flow.  It
         # runs before inserting a source, so an unconfigured X account never
         # becomes a broken row in the database.
-        self.connections.ensure_source_ready(draft.kind)
-        plugin = self.registry.get(draft.kind)
-        locator = plugin.normalize_locator(draft.locator)
-        feed_url = plugin.resolve_feed_url(locator, self.settings)
-        normalized = replace(draft, locator=locator)
+        if require_connection:
+            self.connections.ensure_source_ready(draft.kind)
+        normalized, feed_url = self.prepare_draft(draft)
         source_id = self.repository.create_source(normalized, feed_url)
         source = self.repository.get_source(source_id)
         assert source is not None
@@ -52,6 +63,8 @@ class SourceService:
         value = locator.strip().casefold()
         if "reddit.com/" in value or re.match(r"^(?:r|u|user)/", value):
             return SourceKind.REDDIT
+        if "youtube.com/" in value or "youtu.be/" in value or value.startswith("uc"):
+            return SourceKind.YOUTUBE
         if "x.com/" in value or "twitter.com/" in value or value.startswith("@"):
             return SourceKind.X_RSSHUB
         return SourceKind.RSS
@@ -153,11 +166,10 @@ class SourceService:
                 fallback_url=str(entry.get("fallback_url") or ""),
                 enabled=bool(entry.get("enabled", True)),
             )
-            plugin = self.registry.get(draft.kind)
-            locator = plugin.normalize_locator(draft.locator)
-            if self.repository.find_source(draft.kind.value, locator):
+            normalized, feed_url = self.prepare_draft(draft)
+            if self.repository.find_source(normalized.kind.value, normalized.locator):
                 continue
-            self.repository.create_source(replace(draft, locator=locator), plugin.resolve_feed_url(locator, self.settings))
+            self.repository.create_source(normalized, feed_url)
             created += 1
         return created
 

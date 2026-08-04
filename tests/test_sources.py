@@ -7,12 +7,52 @@ import unittest
 from app.config import Settings
 from app.domain.models import SourceDraft, SourceKind
 from app.plugins.registry import build_source_registry
+from app.services.collector import Collector
+from app.services.connections import ConnectionCatalog
 from app.services.sources import SourceService
 from app.storage.database import Database
 from app.storage.repository import Repository
 
 
 class SourceServiceTests(unittest.TestCase):
+    def test_unconfigured_x_sources_are_not_fetched_or_marked_failed(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = Settings(
+                root_dir=root,
+                source_dir=root / "sources",
+                data_dir=root / "data",
+                database_path=root / "data" / "test.db",
+                request_timeout=5,
+                log_level="INFO",
+                llm_enabled=False,
+                openai_api_key=None,
+                openai_base_url="https://example.test/v1",
+                openai_model_name="test",
+                credential_encryption_key=None,
+                timezone="Asia/Shanghai",
+            )
+            database = Database(settings.database_path)
+            database.initialize()
+            repository = Repository(database)
+            source_id = repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
+                "https://x.com/OpenAI",
+            )
+
+            summary = Collector(
+                repository,
+                build_source_registry(),
+                settings,
+                ConnectionCatalog(),
+            ).collect_due_sources()
+
+            self.assertEqual(summary.sources_checked, 0)
+            saved = repository.get_source(source_id)
+            assert saved is not None
+            self.assertEqual(saved["health_status"], "unknown")
+            self.assertIsNone(saved["last_error"])
+
     def test_enabled_platform_check_ignores_paused_and_archived_sources(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

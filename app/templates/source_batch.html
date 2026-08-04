@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}批量添加来源 · NewsRSSHub{% endblock %}
+{% block content %}
+<a class="back-link" href="/sources">← 返回来源管理</a>
+<section class="form-page batch-source-page">
+  <header class="page-head compact batch-source-head">
+    <div>
+      <p class="eyebrow">BATCH SOURCE SETUP</p>
+      <h1>批量添加来源</h1>
+      <p class="subhead">一行一个来源。保存只写入来源库，不会自动抓取或制造失败记录。</p>
+    </div>
+  </header>
+
+  <section class="batch-connection-note {{ 'ready' if batch_connection.usable else 'needs-setup' }}">
+    <div>
+      <strong>{{ batch_connection.platform }} · {% if batch_connection.usable %}可以测试{% else %}先完成平台连接{% endif %}</strong>
+      <p>{{ batch_connection.message }}</p>
+    </div>
+    {% if batch_connection.requires_credentials and not batch_connection.usable %}
+      <a class="button button-secondary" href="{{ batch_connection.setup_url }}">{{ batch_connection.setup_label }}</a>
+    {% endif %}
+  </section>
+
+  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+
+  <form class="source-form batch-source-form" method="post" action="/sources/batch">
+    <label>平台
+      <select name="kind">
+        {% for value, label in batch_kind_choices %}
+          <option value="{{ value }}" {% if value == batch_kind %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <small>平台切换后按对应格式粘贴；YouTube 会将 @频道名解析为稳定频道 ID，并通过 config.yml 中配置的 RSSHub 抓取。</small>
+    </label>
+    <label>账号、社区或链接
+      <textarea name="entries" required rows="10" placeholder="名称 | 地址&#10;OpenAI | @OpenAI&#10;Anthropic | @AnthropicAI">{{ batch_entries }}</textarea>
+      <small>每行可直接填地址，也可写成“显示名称 | 地址”。支持 <code># 注释</code> 和以 <code>- </code> 开头的粘贴列表。</small>
+    </label>
+    <section class="batch-format-help" aria-label="批量输入格式示例">
+      <div><strong>X</strong><code>OpenAI | @OpenAI</code></div>
+      <div><strong>Reddit</strong><code>r/GoogleGemini</code></div>
+      <div><strong>YouTube</strong><code>OpenAI | @OpenAI</code></div>
+      <div><strong>RSS</strong><code>官方博客 | https://example.com/feed.xml</code></div>
+    </section>
+    <label>抓取间隔（分钟）<input name="poll_interval_minutes" type="number" min="5" max="1440" value="{{ batch_poll_interval }}"></label>
+    <div class="check-row">
+      <label><input name="is_official" type="checkbox" value="true" {% if batch_is_official %}checked{% endif %}> 将本批标记为官方或机构来源</label>
+      <label><input name="enabled" type="checkbox" value="true" {% if batch_enabled %}checked{% endif %}> 添加后启用抓取</label>
+    </div>
+    <div class="batch-flow-note">
+      <strong>连通性测试不会自动执行。</strong>
+      {% if batch_kind == 'x_rsshub' %}先保存并验证 X Cookie，再到 X 平台页手动点击“测试”。{% else %}保存后可在对应平台页手动点击“测试”；公开来源不需要 Cookie。{% endif %}
+    </div>
+    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit">添加这批来源</button></div>
+  </form>
+
+  {% if batch_result %}
+  <section class="batch-result" aria-live="polite">
+    <header>
+      <div><p class="eyebrow">IMPORT RESULT</p><h2>已处理 {{ batch_result.received_count }} 条</h2></div>
+      <a class="button button-primary" href="/sources?kind={{ batch_kind }}">查看 {{ batch_connection.platform }} 来源</a>
+    </header>
+    {% if batch_result.added %}
+    <div class="batch-result-group success"><strong>已添加 {{ batch_result.added|length }} 条</strong>
+      <ul>{% for row in batch_result.added %}<li>第 {{ row.line_number }} 行 · {{ row.name }} <code>{{ row.locator }}</code></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if batch_result.duplicates %}
+    <div class="batch-result-group muted"><strong>已跳过 {{ batch_result.duplicates|length }} 条重复来源</strong>
+      <ul>{% for row in batch_result.duplicates %}<li>第 {{ row.line_number }} 行 · {{ row.name }}：{{ row.message }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if batch_result.errors %}
+    <div class="batch-result-group error"><strong>无法添加 {{ batch_result.errors|length }} 条</strong>
+      <ul>{% for row in batch_result.errors %}<li>第 {{ row.line_number }} 行 · {{ row.name or row.locator }}：{{ row.message }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

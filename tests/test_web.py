@@ -40,6 +40,54 @@ def build_settings(root: Path) -> Settings:
 
 
 class WebTests(unittest.TestCase):
+    def test_source_platform_paging_and_batch_add_work_without_an_x_cookie(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            services.repository.create_source(
+                SourceDraft(name="已有 X 来源", kind=SourceKind.X_RSSHUB, locator="ExistingX"),
+                "https://x.com/ExistingX",
+            )
+            for index in range(23):
+                services.repository.create_source(
+                    SourceDraft(
+                        name=f"RSS {index:02d}",
+                        kind=SourceKind.RSS,
+                        locator=f"https://example.test/{index}.xml",
+                    ),
+                    f"https://example.test/{index}.xml",
+                )
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    page = client.get("/sources?kind=rss&page=2")
+                    self.assertEqual(page.status_code, 200)
+                    self.assertIn("来源管理", page.text)
+                    self.assertIn("21–23 条，共 23 条", page.text)
+                    self.assertIn('value="rss"', page.text)
+                    self.assertIn('name="source_kind" value="rss"', page.text)
+                    self.assertNotIn("X 来源暂不测试或抓取", page.text)
+
+                    form = client.get("/sources/batch?kind=x_rsshub")
+                    self.assertEqual(form.status_code, 200)
+                    self.assertIn("批量添加来源", form.text)
+                    self.assertIn("先完成平台连接", form.text)
+
+                    added = client.post(
+                        "/sources/batch",
+                        data={
+                            "kind": "x_rsshub",
+                            "entries": "OpenAI | @OpenAI\nAnthropic | @AnthropicAI",
+                            "is_official": "true",
+                            "poll_interval_minutes": "60",
+                            "enabled": "true",
+                        },
+                    )
+                    self.assertEqual(added.status_code, 200)
+                    self.assertIn("已添加 2 条", added.text)
+                    self.assertIsNotNone(services.repository.find_source("x_rsshub", "OpenAI"))
+            finally:
+                delattr(app.state, "services")
+
     def test_four_tier_dashboard_and_source_form_drop_legacy_controls(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))
@@ -90,6 +138,7 @@ class WebTests(unittest.TestCase):
                     self.assertEqual(dashboard.status_code, 200)
                     self.assertIn('href="/static/app.css?v=', dashboard.text)
                     self.assertIn('href="/static/x-session.css?v=', dashboard.text)
+                    self.assertIn('src="/static/scroll-restore.js?v=', dashboard.text)
                     self.assertNotIn('href="http://testserver/static/', dashboard.text)
                     self.assertNotIn("今天，什么真的值得看？", dashboard.text)
                     self.assertNotIn("＋ 添加来源", dashboard.text)

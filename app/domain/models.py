@@ -10,6 +10,7 @@ class SourceKind(StrEnum):
     RSS = "rss"
     X_RSSHUB = "x_rsshub"
     REDDIT = "reddit"
+    YOUTUBE = "youtube"
 
 
 @dataclass(slots=True)

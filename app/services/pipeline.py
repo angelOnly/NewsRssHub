@@ -31,9 +31,11 @@ class IntelligencePipeline:
         self.registry = registry
         self.settings = settings
         self.llm_connections = llm_connections or LLMConnectionService(repository, settings)
-        self.source_connections = source_connections or ConnectionCatalog()
+        self.source_connections = source_connections or ConnectionCatalog(
+            rsshub_base_url=settings.rsshub_base_url
+        )
         self.sources = SourceService(repository, registry, settings, self.source_connections)
-        self.collector = Collector(repository, registry, settings)
+        self.collector = Collector(repository, registry, settings, self.source_connections)
         self.summarizer = SummaryService(repository, settings, self.llm_connections)
         self.skill_loader = SkillLoader(settings)
         self.curator = CurationService(

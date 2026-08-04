@@ -30,6 +30,17 @@ class SourcePlugin(ABC):
     def resolve_feed_url(self, locator: str, settings: Settings) -> str:
         """Turn a locator into the provider's RSS URL."""
 
+    def prepare_source(self, locator: str, settings: Settings) -> tuple[str, str]:
+        """Normalize a pasted locator and produce its durable feed address.
+
+        Most connectors can do this without a network request.  A connector
+        such as YouTube may resolve a friendly channel handle to its stable
+        channel id here, so the database never depends on a mutable handle.
+        """
+
+        normalized = self.normalize_locator(locator)
+        return normalized, self.resolve_feed_url(normalized, settings)
+
     @abstractmethod
     def fetch(self, source: dict[str, Any], settings: Settings) -> list[FeedItem]:
         """Fetch and normalize provider data into the common FeedItem shape."""

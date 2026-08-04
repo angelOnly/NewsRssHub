@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Sequence
 
@@ -65,6 +66,18 @@ def _user_hidden_clause(event_alias: str = "e") -> str:
     )"""
 
 
+@dataclass(frozen=True, slots=True)
+class SourcePage:
+    sources: list[dict[str, Any]]
+    total: int
+    page: int
+    page_size: int
+
+    @property
+    def page_count(self) -> int:
+        return max(1, (self.total + self.page_size - 1) // self.page_size)
+
+
 class Repository:
     """Persistence boundary for the non-scoring personal news flow."""
 
@@ -83,6 +96,47 @@ class Repository:
                 f"SELECT * FROM sources {where} ORDER BY enabled DESC, name COLLATE NOCASE, id DESC"
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
+
+    def list_sources_page(
+        self,
+        *,
+        kind: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> SourcePage:
+        """List a stable, bounded source-management page by platform."""
+
+        normalized_kind = str(kind or "").strip()
+        page_size = max(5, min(int(page_size), 100))
+        clauses = ["archived = 0"]
+        values: list[Any] = []
+        if normalized_kind:
+            clauses.append("kind = ?")
+            values.append(normalized_kind)
+        where = " WHERE " + " AND ".join(clauses)
+
+        with self.database.read() as conn:
+            total = int(conn.execute(f"SELECT COUNT(*) FROM sources{where}", values).fetchone()[0])
+            page_count = max(1, (total + page_size - 1) // page_size)
+            current_page = min(max(1, int(page)), page_count)
+            rows = conn.execute(
+                f"SELECT * FROM sources{where} "
+                "ORDER BY enabled DESC, name COLLATE NOCASE, id DESC LIMIT ? OFFSET ?",
+                (*values, page_size, (current_page - 1) * page_size),
+            ).fetchall()
+        return SourcePage(
+            sources=[_row_to_dict(row) for row in rows],
+            total=total,
+            page=current_page,
+            page_size=page_size,
+        )
+
+    def source_kind_counts(self) -> dict[str, int]:
+        with self.database.read() as conn:
+            rows = conn.execute(
+                "SELECT kind, COUNT(*) AS total FROM sources WHERE archived = 0 GROUP BY kind"
+            ).fetchall()
+        return {str(row["kind"]): int(row["total"]) for row in rows}
 
     def has_enabled_source_kind(self, kind: str) -> bool:
         with self.database.read() as conn:

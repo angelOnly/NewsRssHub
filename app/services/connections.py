@@ -44,13 +44,19 @@ class ConnectionCatalog:
     the UI never asks for an unnecessary Cookie.
     """
 
-    def __init__(self, x_sessions: XSessionService | None = None) -> None:
+    def __init__(
+        self,
+        x_sessions: XSessionService | None = None,
+        rsshub_base_url: str | None = None,
+    ) -> None:
         self.x_sessions = x_sessions
+        self.rsshub_base_url = rsshub_base_url
 
     def source_connections(self) -> list[PlatformConnection]:
         return [
             self.for_kind(SourceKind.X_RSSHUB),
             self.for_kind(SourceKind.REDDIT),
+            self.for_kind(SourceKind.YOUTUBE),
             self.for_kind(SourceKind.RSS),
         ]
 
@@ -68,6 +74,26 @@ class ConnectionCatalog:
                 usable=True,
                 message="当前使用公开 RSS，不需要 Cookie 或 API Key。未来启用 Reddit OAuth 时会在此单独配置。",
             )
+        if source_kind == SourceKind.YOUTUBE:
+            if not self.rsshub_base_url:
+                return PlatformConnection(
+                    key="rsshub_youtube",
+                    platform="YouTube",
+                    source_kind=source_kind,
+                    requires_credentials=False,
+                    state="missing",
+                    usable=False,
+                    message="请先在 config.yml 的 app.rsshub_base_url 填入已部署 RSSHub 的地址。",
+                )
+            return PlatformConnection(
+                key="youtube_public",
+                platform="YouTube",
+                source_kind=source_kind,
+                requires_credentials=False,
+                state="public",
+                usable=True,
+                message="通过已配置的 RSSHub 抓取 YouTube 频道，不需要 Cookie 或 API Key。",
+            )
         return PlatformConnection(
             key="rss_public",
             platform="RSS / Atom",
@@ -80,7 +106,7 @@ class ConnectionCatalog:
 
     def ensure_source_ready(self, kind: SourceKind | str) -> PlatformConnection:
         connection = self.for_kind(kind)
-        if connection.requires_credentials and not connection.usable:
+        if not connection.usable:
             raise ConnectionRequiredError(connection)
         return connection
 
