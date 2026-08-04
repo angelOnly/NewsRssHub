@@ -198,6 +198,7 @@
   .source-mobile-actions .button,.source-mobile-actions button{min-height:40px;padding:5px 2px;font-size:12px}
   .source-mobile-archive{grid-column:auto}
   .source-mobile-archive button{border:1px solid #f0dbd8;border-radius:9px;background:#fff7f6;color:var(--danger)}
+  .source-action-label-short{display:none}
   .source-mobile-state-details{margin-top:8px}
   .source-mobile-state-details summary{display:inline-flex;align-items:center;min-height:20px;color:var(--warning);font-size:12px;cursor:pointer;list-style:none}
   .source-mobile-state-details summary::-webkit-details-marker{display:none}
@@ -205,3 +206,4 @@
   .source-mobile-state-details[open] summary::before{transform:rotate(90deg)}
   .source-mobile-state-details .source-state-note{margin:5px 0 0;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
 }
+@media(max-width:350px){.source-action-label-full{display:none}.source-action-label-short{display:inline}}

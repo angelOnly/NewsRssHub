@@ -125,15 +125,21 @@
         <div><dt>上次成功</dt><dd>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</dd></div>
       </dl>
       {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
-        <p class="source-state-note">等待 X Cookie 验证</p>
+        <details class="source-mobile-state-details">
+          <summary>连接待配置</summary>
+          <p class="source-state-note">等待 X Cookie 验证</p>
+        </details>
       {% elif source.health_status == 'error' and source.last_error %}
-        <p class="source-state-note">{{ source.last_error }}</p>
+        <details class="source-mobile-state-details">
+          <summary>查看失败原因</summary>
+          <p class="source-state-note">{{ source.last_error }}</p>
+        </details>
       {% endif %}
       <div class="source-mobile-actions">
         <a class="button button-secondary" href="/sources/{{ source.id }}/edit">编辑</a>
         <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary" type="submit">测试</button></form>
         <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary" type="submit">{{ '暂停' if source.enabled else '启用' }}</button></form>
-        <form class="source-mobile-archive" method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button type="submit">归档此来源</button></form>
+        <form class="source-mobile-archive" method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button type="submit"><span class="source-action-label-full">归档此来源</span><span class="source-action-label-short">归档</span></button></form>
       </div>
     </article>
   {% endfor %}
