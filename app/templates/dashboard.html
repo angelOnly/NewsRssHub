@@ -41,7 +41,7 @@
   {% if events %}
     <div class="event-list tier-{{ tier }}">
       {% for event in events %}
-      <article class="event-card">
+      <article class="event-card{% if event.user_read %} is-read{% endif %}" data-event-id="{{ event.id }}">
         <div class="event-card-row">
           <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
             <div class="event-meta">
@@ -67,7 +67,7 @@
           </div>
         </div>
         {% if event.summary or event.highlights or event.tier_reason or event.user_hidden %}
-        <details class="event-preview">
+        <details class="event-preview" data-read-event-id="{{ event.id }}">
           <summary aria-label="展开摘要与重点" title="展开摘要与重点"><span>摘要</span><span aria-hidden="true">⌄</span></summary>
           <div class="event-preview-content">
             {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}

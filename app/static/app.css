@@ -207,3 +207,10 @@
   .source-mobile-state-details .source-state-note{margin:5px 0 0;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
 }
 @media(max-width:350px){.source-action-label-full{display:none}.source-action-label-short{display:inline}}
+
+/* 已读只弱化卡片，不隐藏内容；未读条目仍保持最强的标题对比度。 */
+.event-card.is-read{background:#f7f8f5;border-color:#e4e9e2;box-shadow:none}
+.event-card.is-read .event-meta,.event-card.is-read .event-main h3{color:#849087}
+.event-card.is-read .event-main h3{font-weight:600}
+.event-card.is-read .source-badge{background:#edf1ec;color:#718076}
+.event-card.is-read .event-preview summary,.event-card.is-read .event-actions{color:#829087}

@@ -35,7 +35,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
             data[key.removesuffix("_json")] = _decode_json(
                 data[key], {} if key == "config_json" else []
             )
-    for key in ("is_official", "enabled", "archived"):
+    for key in ("is_official", "enabled", "archived", "user_hidden", "user_read"):
         if key in data:
             data[key] = bool(data[key])
     return data
@@ -833,6 +833,12 @@ class Repository:
         query = f"""
             SELECT e.*,
                 EXISTS(SELECT 1 FROM feedback f WHERE f.event_id = e.id AND f.action = 'not_interested') AS user_hidden,
+                EXISTS(
+                    SELECT 1 FROM feedback f
+                    WHERE f.event_id = e.id
+                      AND f.action = 'read'
+                      AND f.created_at >= e.last_seen_at
+                ) AS user_read,
                 (
                     SELECT s.name
                     FROM event_items ei
@@ -929,6 +935,20 @@ class Repository:
             )
             conn.execute(
                 "INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'not_interested', ?)",
+                (event_id, now),
+            )
+
+    def mark_event_read(self, event_id: int) -> None:
+        """记录用户已展开过该事件，并保持每个事件只有一条已读记录。"""
+
+        # 保留微秒，确保刚完成筛选的事件可在同一秒内被立即标记为已读。
+        now = datetime.now(timezone.utc).isoformat()
+        with self.database.transaction() as conn:
+            conn.execute(
+                "DELETE FROM feedback WHERE event_id = ? AND action = 'read'", (event_id,)
+            )
+            conn.execute(
+                "INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'read', ?)",
                 (event_id, now),
             )
 

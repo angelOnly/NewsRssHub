@@ -164,6 +164,65 @@ class EventTests(unittest.TestCase):
             repository.restore_event(event_id)
             self.assertEqual(len(repository.list_events(tier=EditorialTier.IMPORTANT, period="all")), 1)
 
+    def test_expanded_summary_is_read_until_the_event_receives_a_newer_update(self) -> None:
+        directory, repository, source_id = self._repository()
+        with directory:
+            earlier = datetime.now(timezone.utc) - timedelta(hours=1)
+            first_id, inserted = repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="read-first",
+                    title="第一条更新",
+                    link="https://example.test/read-first",
+                    content="第一条正文",
+                    published_at=earlier,
+                ),
+            )
+            self.assertTrue(inserted)
+            repository.save_item_summary(first_id, summary="第一条摘要")
+            event_id = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[first_id],
+                        primary_item_id=first_id,
+                        tier=EditorialTier.IMPORTANT,
+                        reason="测试已读状态",
+                        order=1,
+                    )
+                ]
+            )[0]
+
+            repository.mark_event_read(event_id)
+            read_event = repository.list_events(tier=EditorialTier.IMPORTANT, period="all")[0]
+            self.assertTrue(read_event["user_read"])
+
+            later = datetime.now(timezone.utc)
+            second_id, inserted = repository.insert_item(
+                source_id,
+                FeedItem(
+                    guid="read-second",
+                    title="新增进展",
+                    link="https://example.test/read-second",
+                    content="新增进展正文",
+                    published_at=later,
+                ),
+            )
+            self.assertTrue(inserted)
+            repository.save_item_summary(second_id, summary="新增进展摘要")
+            repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[first_id, second_id],
+                        primary_item_id=second_id,
+                        tier=EditorialTier.IMPORTANT,
+                        reason="同一事件有新增进展",
+                        order=1,
+                    )
+                ]
+            )
+            updated_event = repository.list_events(tier=EditorialTier.IMPORTANT, period="all")[0]
+            self.assertFalse(updated_event["user_read"])
+
     def test_skill_grouping_merges_multiple_raw_items_into_one_event(self) -> None:
         directory, repository, source_id = self._repository()
         with directory:

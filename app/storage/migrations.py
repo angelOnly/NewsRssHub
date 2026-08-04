@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 SOURCES_TABLE = """
@@ -161,6 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_events_curation ON events(curation_status, last_s
 CREATE INDEX IF NOT EXISTS idx_fetch_runs_source ON fetch_runs(source_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_curation_runs_status ON curation_runs(status, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_connector_credentials_status ON connector_credentials(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_event_action_created ON feedback(event_id, action, created_at);
 """
 
 

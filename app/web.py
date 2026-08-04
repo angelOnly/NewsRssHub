@@ -353,6 +353,17 @@ def mark_event_not_interested(
     return dashboard_redirect(tier=tier, period=period, page=page, notice="已隐藏这条内容。")
 
 
+@app.post("/events/{event_id}/read", status_code=204)
+def mark_event_read(request: Request, event_id: int) -> Response:
+    """摘要展开后异步记录已读，不改变当前列表的位置。"""
+
+    repository = get_services(request).repository
+    if not repository.get_event(event_id):
+        raise HTTPException(status_code=404, detail="未找到该事件")
+    repository.mark_event_read(event_id)
+    return Response(status_code=204)
+
+
 @app.post("/events/{event_id}/restore")
 def restore_event(
     request: Request,
