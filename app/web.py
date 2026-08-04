@@ -401,6 +401,12 @@ def sources(
         page=_source_page_value(page),
         page_size=SOURCE_PAGE_SIZE,
     )
+    current_page_testable_count = sum(1 for source in source_page.sources if source["enabled"])
+    can_queue_current_page_test = (
+        selected_kind != "all"
+        and current_page_testable_count > 0
+        and services.connections.for_kind(selected_kind).usable
+    )
     kind_counts = services.repository.source_kind_counts()
     platform_tabs = [
         {
@@ -424,6 +430,8 @@ def sources(
             else 0,
             "source_page_end": min(source_page.page * source_page.page_size, source_page.total),
             "selected_source_kind": selected_kind,
+            "current_page_testable_count": current_page_testable_count,
+            "can_queue_current_page_test": can_queue_current_page_test,
             "platform_tabs": platform_tabs,
             "notice": notice,
             "error": error,
@@ -745,6 +753,56 @@ def edit_source(
         return RedirectResponse(
             f"/sources/{source_id}/edit?{urlencode({'error': str(exc)})}", status_code=303
         )
+
+
+@app.post("/sources/test-current-page")
+def queue_current_source_page_for_test(
+    request: Request,
+    source_kind: str = Form("all"),
+    page: int = Form(1),
+) -> RedirectResponse:
+    """安排当前平台页的启用来源由后台 Worker 统一验证。"""
+
+    selected_kind = _safe_source_kind(source_kind)
+    selected_page = _source_page_value(page)
+    if selected_kind == "all":
+        return sources_redirect(error="请先选择一个具体平台，再测试当前页来源。")
+
+    services = get_services(request)
+    try:
+        services.connections.ensure_source_ready(selected_kind)
+    except ConnectionRequiredError as exc:
+        return sources_redirect(
+            error=f"无法测试 {exc.connection.platform} 来源：{exc.connection.message}",
+            kind=selected_kind,
+            page=selected_page,
+        )
+
+    source_page = services.repository.list_sources_page(
+        kind=selected_kind,
+        page=selected_page,
+        page_size=SOURCE_PAGE_SIZE,
+    )
+    source_ids = [int(source["id"]) for source in source_page.sources if source["enabled"]]
+    if not source_ids:
+        return sources_redirect(
+            error="当前页没有启用的来源，无法安排测试。",
+            kind=selected_kind,
+            page=source_page.page,
+        )
+
+    queued = services.sources.queue_sources_for_manual_test(source_ids)
+    if not queued:
+        return sources_redirect(
+            error="当前页来源状态已变化，没有可测试的启用来源。",
+            kind=selected_kind,
+            page=source_page.page,
+        )
+    return sources_redirect(
+        notice=f"已安排当前页 {queued} 个启用来源在下一轮后台抓取中测试；通常约 1 分钟后刷新页面查看结果。",
+        kind=selected_kind,
+        page=source_page.page,
+    )
 
 
 @app.post("/sources/{source_id}/test")

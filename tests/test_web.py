@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
@@ -85,6 +86,113 @@ class WebTests(unittest.TestCase):
                     self.assertEqual(added.status_code, 200)
                     self.assertIn("已添加 2 条", added.text)
                     self.assertIsNotNone(services.repository.find_source("x_rsshub", "OpenAI"))
+            finally:
+                delattr(app.state, "services")
+
+    def test_current_platform_page_can_be_queued_for_background_test(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            source_ids: list[int] = []
+            for index in range(23):
+                source_id = services.repository.create_source(
+                    SourceDraft(
+                        name=f"RSS {index:02d}",
+                        kind=SourceKind.RSS,
+                        locator=f"https://example.test/{index}.xml",
+                    ),
+                    f"https://example.test/{index}.xml",
+                )
+                services.repository.update_source(
+                    source_id,
+                    {
+                        "health_status": "error",
+                        "last_fetch_at": "2026-08-03T00:00:00+00:00",
+                        "last_error": "fetch failed",
+                    },
+                )
+                source_ids.append(source_id)
+
+            expected_page = services.repository.list_sources_page(
+                kind=SourceKind.RSS.value,
+                page=2,
+                page_size=20,
+            )
+            expected_ids = {int(source["id"]) for source in expected_page.sources}
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    page = client.get("/sources?kind=rss&page=2")
+                    self.assertEqual(page.status_code, 200)
+                    self.assertIn('action="/sources/test-current-page"', page.text)
+                    self.assertIn("测试当前页（3）", page.text)
+
+                    queued = client.post(
+                        "/sources/test-current-page",
+                        data={"source_kind": "rss", "page": "2"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(queued.status_code, 303)
+                    query = parse_qs(urlparse(queued.headers["location"]).query)
+                    self.assertEqual(query["kind"], ["rss"])
+                    self.assertEqual(query["page"], ["2"])
+                    self.assertIn("notice", query)
+
+                for source_id in source_ids:
+                    source = services.repository.get_source(source_id)
+                    assert source is not None
+                    if source_id in expected_ids:
+                        self.assertEqual(source["health_status"], "unknown")
+                        self.assertEqual(source["last_error"], "")
+                        self.assertIsNone(source["last_fetch_at"])
+                    else:
+                        self.assertEqual(source["health_status"], "error")
+                        self.assertEqual(source["last_error"], "fetch failed")
+            finally:
+                delattr(app.state, "services")
+
+    def test_current_page_test_is_blocked_without_an_x_cookie_or_platform_tab(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            source_id = services.repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
+                "https://x.com/OpenAI",
+            )
+            services.repository.update_source(
+                source_id,
+                {
+                    "health_status": "error",
+                    "last_fetch_at": "2026-08-03T00:00:00+00:00",
+                    "last_error": "previous failure",
+                },
+            )
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    x_page = client.get("/sources?kind=x_rsshub")
+                    self.assertNotIn('action="/sources/test-current-page"', x_page.text)
+
+                    blocked = client.post(
+                        "/sources/test-current-page",
+                        data={"source_kind": "x_rsshub", "page": "1"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(blocked.status_code, 303)
+                    blocked_query = parse_qs(urlparse(blocked.headers["location"]).query)
+                    self.assertEqual(blocked_query["kind"], ["x_rsshub"])
+                    self.assertIn("error", blocked_query)
+
+                    rejected = client.post(
+                        "/sources/test-current-page",
+                        data={"source_kind": "all", "page": "1"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(rejected.status_code, 303)
+                    self.assertIn("error", parse_qs(urlparse(rejected.headers["location"]).query))
+
+                source = services.repository.get_source(source_id)
+                assert source is not None
+                self.assertEqual(source["health_status"], "error")
+                self.assertEqual(source["last_error"], "previous failure")
             finally:
                 delattr(app.state, "services")
 

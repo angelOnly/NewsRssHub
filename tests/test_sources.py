@@ -100,6 +100,45 @@ class SourceServiceTests(unittest.TestCase):
             self.assertEqual(source["last_error"], "")
             self.assertIsNone(source["last_fetch_at"])
 
+    def test_manual_test_queue_only_resets_live_sources(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = Database(root / "data" / "test.db")
+            database.initialize()
+            repository = Repository(database)
+            source_ids = [
+                repository.create_source(
+                    SourceDraft(name=name, kind=SourceKind.RSS, locator=f"https://example.test/{name}"),
+                    f"https://example.test/{name}",
+                )
+                for name in ("live", "paused", "archived")
+            ]
+            for source_id in source_ids:
+                repository.update_source(
+                    source_id,
+                    {
+                        "health_status": "error",
+                        "last_fetch_at": "2026-08-03T00:00:00+00:00",
+                        "last_error": "fetch failed",
+                    },
+                )
+            repository.update_source(source_ids[1], {"enabled": 0})
+            repository.archive_source(source_ids[2])
+
+            self.assertEqual(repository.requeue_sources_for_fetch(source_ids), 1)
+
+            live = repository.get_source(source_ids[0])
+            paused = repository.get_source(source_ids[1])
+            archived = repository.get_source(source_ids[2])
+            assert live is not None and paused is not None and archived is not None
+            self.assertEqual(live["health_status"], "unknown")
+            self.assertEqual(live["last_error"], "")
+            self.assertIsNone(live["last_fetch_at"])
+            self.assertEqual(paused["health_status"], "error")
+            self.assertEqual(paused["last_error"], "fetch failed")
+            self.assertEqual(archived["health_status"], "archived")
+            self.assertEqual(archived["last_error"], "fetch failed")
+
     def test_auto_detection_and_configurable_source(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import re
-from typing import Any
+from typing import Any, Sequence
 
 import yaml
 
@@ -126,6 +126,11 @@ class SourceService:
         """Request a fresh worker check after a shared platform login succeeds."""
 
         return self.repository.requeue_failed_sources_for_kind(SourceKind(kind).value)
+
+    def queue_sources_for_manual_test(self, source_ids: Sequence[int]) -> int:
+        """将当前页仍启用的来源交给下一轮后台抓取验证。"""
+
+        return self.repository.requeue_sources_for_fetch(source_ids)
 
     def seed_existing_feeds(self) -> int:
         """Import YAML-declared sources without overwriting UI-managed records.

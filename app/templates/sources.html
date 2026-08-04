@@ -48,13 +48,22 @@
 {% if sources %}
 <section class="source-list-toolbar" aria-label="来源分页信息">
   <p>显示 {{ source_page_start }}–{{ source_page_end }} 条，共 {{ source_total }} 条</p>
-  {% if source_page_count > 1 %}
-  <nav class="source-pagination" aria-label="来源分页">
-    {% if source_page > 1 %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page - 1 }}">上一页</a>{% endif %}
-    <span>{{ source_page }} / {{ source_page_count }}</span>
-    {% if source_page < source_page_count %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page + 1 }}">下一页</a>{% endif %}
-  </nav>
-  {% endif %}
+  <div class="source-toolbar-actions">
+    {% if can_queue_current_page_test %}
+    <form class="source-current-page-test" method="post" action="/sources/test-current-page">
+      <input type="hidden" name="source_kind" value="{{ selected_source_kind }}">
+      <input type="hidden" name="page" value="{{ source_page }}">
+      <button class="button button-secondary" type="submit">测试当前页（{{ current_page_testable_count }}）</button>
+    </form>
+    {% endif %}
+    {% if source_page_count > 1 %}
+    <nav class="source-pagination" aria-label="来源分页">
+      {% if source_page > 1 %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page - 1 }}">上一页</a>{% endif %}
+      <span>{{ source_page }} / {{ source_page_count }}</span>
+      {% if source_page < source_page_count %}<a href="/sources?{% if selected_source_kind != 'all' %}kind={{ selected_source_kind }}&amp;{% endif %}page={{ source_page + 1 }}">下一页</a>{% endif %}
+    </nav>
+    {% endif %}
+  </div>
 </section>
 
 <section class="sources-table-wrap">

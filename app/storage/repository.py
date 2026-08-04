@@ -163,6 +163,24 @@ class Repository:
             )
         return int(cursor.rowcount)
 
+    def requeue_sources_for_fetch(self, source_ids: Sequence[int]) -> int:
+        """将指定且仍启用的来源标记为下一轮后台抓取。"""
+
+        ids = sorted({int(source_id) for source_id in source_ids if int(source_id) > 0})
+        if not ids:
+            return 0
+        placeholders = ", ".join("?" for _ in ids)
+        with self.database.transaction() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE sources
+                SET health_status = 'unknown', last_fetch_at = NULL, last_error = ?, updated_at = ?
+                WHERE id IN ({placeholders}) AND enabled = 1 AND archived = 0
+                """,
+                ("", iso_now(), *ids),
+            )
+        return int(cursor.rowcount)
+
     def get_source(self, source_id: int) -> dict[str, Any] | None:
         with self.database.read() as conn:
             row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
