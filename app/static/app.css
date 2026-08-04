@@ -163,3 +163,45 @@
 .source-toolbar-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.source-current-page-test{margin:0}.source-current-page-test .button{min-height:35px;padding:7px 11px;font-size:13px}
 @media(max-width:800px){.source-toolbar-actions{width:100%;justify-content:space-between}}
 @media(max-width:600px){.source-toolbar-actions{display:grid;grid-template-columns:1fr;gap:8px}.source-current-page-test,.source-current-page-test .button{width:100%}.source-current-page-test .button{min-height:42px}.source-toolbar-actions .source-pagination{justify-content:flex-start}}
+
+/* YAML 文件把批量录入的格式约束带到页面之外，上传区只保留必要操作。 */
+.batch-template-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 12px;padding:14px 16px;border:1px solid #d4e3d7;border-radius:13px;background:#f4faf5}.batch-template-panel strong{display:block;color:#27543d}.batch-template-panel p{margin:3px 0 0;color:#627066;font-size:13px}.batch-template-actions{display:flex;align-items:center;gap:8px;flex:none}.batch-template-panel .button,.batch-connection-note .button{flex:none;white-space:nowrap}.batch-upload-label{gap:9px}.batch-upload-input{cursor:pointer}.batch-yaml-help{padding:12px 13px;border:1px solid #e0e7df;border-radius:10px;background:#f6f8f5}.batch-yaml-help summary{cursor:pointer;color:#28553f;font-size:13px;font-weight:700}.batch-yaml-help dl{display:grid;gap:8px;margin:12px 0 0}.batch-yaml-help dl div{display:grid;grid-template-columns:minmax(136px,max-content) minmax(0,1fr);gap:10px;align-items:start}.batch-yaml-help dt{font-weight:700}.batch-yaml-help dd{margin:0;color:#506555;font-size:13px;line-height:1.5}.batch-yaml-help code{font-size:12px}
+@media(max-width:800px){.batch-template-panel{align-items:flex-start;flex-direction:column}}
+@media(max-width:600px){.batch-template-panel{padding:12px 13px}.batch-template-actions{display:grid;width:100%;grid-template-columns:1fr}.batch-template-panel .button{width:100%}.batch-yaml-help dl div{grid-template-columns:1fr;gap:2px}.batch-yaml-help dd{font-size:12px}}
+
+/* 手机来源页以快速识别和单行操作为主，诊断信息按需展开，避免列表被重复操作撑高。 */
+@media(max-width:600px){
+  .source-page-head{gap:7px;margin-bottom:12px}
+  .source-page-head .eyebrow{display:none}
+  .source-page-head h1{font-size:27px}
+  .source-page-head .subhead{margin-top:4px;font-size:13px;line-height:1.45}
+  .source-head-actions .button{min-height:38px;padding:7px 8px;font-size:13px}
+  .source-list-toolbar{align-items:center;flex-direction:row;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .source-list-toolbar p{font-size:12px;line-height:1.35;white-space:nowrap}
+  .source-toolbar-actions{display:flex;width:auto;align-items:center;justify-content:flex-end;gap:6px}
+  .source-current-page-test,.source-current-page-test .button{width:auto}
+  .source-current-page-test .button{min-height:36px;padding:6px 8px;font-size:12px}
+  .source-toolbar-actions .source-pagination{width:auto;justify-content:flex-end}
+  .source-pagination{gap:5px}
+  .source-pagination a{padding:4px 7px}
+
+  .source-mobile-list{gap:8px}
+  .source-mobile-card{padding:12px 13px;border-radius:12px}
+  .source-mobile-head{gap:8px}
+  .source-mobile-head strong{font-size:16px;line-height:1.3}
+  .source-mobile-head small{margin-top:2px;line-height:1.35}
+  .source-mobile-details{display:flex;flex-wrap:wrap;gap:4px 13px;margin:8px 0 0}
+  .source-mobile-details div{display:flex;align-items:baseline;gap:4px;padding:0;border-radius:0;background:transparent}
+  .source-mobile-details dt{font-size:11px;white-space:nowrap}
+  .source-mobile-details dd{margin:0;font-size:12px;line-height:1.35;white-space:nowrap}
+  .source-mobile-actions{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px}
+  .source-mobile-actions .button,.source-mobile-actions button{min-height:40px;padding:5px 2px;font-size:12px}
+  .source-mobile-archive{grid-column:auto}
+  .source-mobile-archive button{border:1px solid #f0dbd8;border-radius:9px;background:#fff7f6;color:var(--danger)}
+  .source-mobile-state-details{margin-top:8px}
+  .source-mobile-state-details summary{display:inline-flex;align-items:center;min-height:20px;color:var(--warning);font-size:12px;cursor:pointer;list-style:none}
+  .source-mobile-state-details summary::-webkit-details-marker{display:none}
+  .source-mobile-state-details summary::before{content:'›';margin-right:4px;font-size:16px;line-height:1;transition:transform .15s}
+  .source-mobile-state-details[open] summary::before{transform:rotate(90deg)}
+  .source-mobile-state-details .source-state-note{margin:5px 0 0;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+}

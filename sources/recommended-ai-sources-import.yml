@@ -1,0 +1,160 @@
+# 个人 AI / 开发资讯推荐来源包
+#
+# 用法：在“来源管理 → 批量添加”页面上传本文件。
+# 同一平台、同一 locator 已存在时会自动跳过，不会覆盖网页中已有的来源配置。
+# 导入不会自动抓取；之后在各平台页手动点击“测试当前页”。
+
+defaults:
+  enabled: true
+
+sources:
+  # 头部模型、AI 产品与创作工具的官方 X 账号
+  - name: "OpenAI"
+    kind: x_rsshub
+    locator: "@OpenAI"
+    official: true
+    poll_interval_minutes: 60
+  - name: "OpenAI Developers"
+    kind: x_rsshub
+    locator: "@OpenAIDevs"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Codex Changelog"
+    kind: x_rsshub
+    locator: "@Codex_Changelog"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Anthropic"
+    kind: x_rsshub
+    locator: "@AnthropicAI"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Claude"
+    kind: x_rsshub
+    locator: "@claudeai"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Google Gemini"
+    kind: x_rsshub
+    locator: "@GeminiApp"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Google DeepMind"
+    kind: x_rsshub
+    locator: "@GoogleDeepMind"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Hugging Face"
+    kind: x_rsshub
+    locator: "@huggingface"
+    official: true
+    poll_interval_minutes: 60
+  - name: "ComfyUI"
+    kind: x_rsshub
+    locator: "@ComfyUI"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Runway"
+    kind: x_rsshub
+    locator: "@runwayml"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Luma"
+    kind: x_rsshub
+    locator: "@LumaLabsAI"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Stability AI"
+    kind: x_rsshub
+    locator: "@StabilityAI"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Civitai"
+    kind: x_rsshub
+    locator: "@HelloCivitai"
+    official: true
+    poll_interval_minutes: 60
+  - name: "Blender"
+    kind: x_rsshub
+    locator: "@Blender"
+    official: true
+    poll_interval_minutes: 120
+  - name: "Unity"
+    kind: x_rsshub
+    locator: "@unity"
+    official: true
+    poll_interval_minutes: 120
+
+  # 大型 AI / 开发者社区。社区内容不标记为官方事实。
+  - name: "Reddit · r/OpenAI"
+    kind: reddit
+    locator: "r/OpenAI"
+    official: false
+    poll_interval_minutes: 120
+  - name: "Reddit · r/Anthropic"
+    kind: reddit
+    locator: "r/Anthropic"
+    official: false
+    poll_interval_minutes: 120
+  - name: "Reddit · r/LocalLLaMA"
+    kind: reddit
+    locator: "r/LocalLLaMA"
+    official: false
+    poll_interval_minutes: 120
+  - name: "Reddit · r/MachineLearning"
+    kind: reddit
+    locator: "r/MachineLearning"
+    official: false
+    poll_interval_minutes: 120
+  - name: "Reddit · r/comfyui"
+    kind: reddit
+    locator: "r/comfyui"
+    official: false
+    poll_interval_minutes: 120
+  - name: "Reddit · r/StableDiffusion"
+    kind: reddit
+    locator: "r/StableDiffusion"
+    official: false
+    poll_interval_minutes: 120
+  - name: "Reddit · r/Unity3D"
+    kind: reddit
+    locator: "r/Unity3D"
+    official: false
+    poll_interval_minutes: 180
+  - name: "Reddit · r/gamedev"
+    kind: reddit
+    locator: "r/gamedev"
+    official: false
+    poll_interval_minutes: 180
+
+  # 已逐个通过当前 RSSHub 的 YouTube 频道路由验证。
+  - name: "OpenAI · YouTube"
+    kind: youtube
+    locator: "UCXZCJLdBC09xxGZ6gcdrc6A"
+    official: true
+    poll_interval_minutes: 360
+  - name: "Google DeepMind · YouTube"
+    kind: youtube
+    locator: "UCP7jMXSY2xbc3KCAE0MHQ-A"
+    official: true
+    poll_interval_minutes: 360
+  - name: "Hugging Face · YouTube"
+    kind: youtube
+    locator: "UCHlNU7kIZhRgSbhHvFoy72w"
+    official: true
+    poll_interval_minutes: 360
+  - name: "Two Minute Papers"
+    kind: youtube
+    locator: "UCbfYPyITQ-7l4upoX8nvctg"
+    official: false
+    poll_interval_minutes: 360
+  - name: "Fireship"
+    kind: youtube
+    locator: "UCsBjURrPoezykLs9EqgamOA"
+    official: false
+    poll_interval_minutes: 360
+  - name: "Matt Wolfe"
+    kind: youtube
+    locator: "UChpleBmo18P08aKCIgti38g"
+    official: false
+    poll_interval_minutes: 360

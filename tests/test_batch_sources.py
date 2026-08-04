@@ -35,6 +35,49 @@ def build_settings(root: Path) -> Settings:
 
 
 class BatchSourceImportTests(unittest.TestCase):
+    def test_yaml_import_supports_mixed_platforms_and_row_errors(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = replace(
+                build_settings(Path(directory)), rsshub_base_url="https://rsshub.example.test"
+            )
+            database = Database(settings.database_path)
+            database.initialize()
+            repository = Repository(database)
+            importer = BatchSourceImportService(
+                SourceService(repository, build_source_registry(), settings)
+            )
+
+            result = importer.import_yaml(
+                """
+                defaults:
+                  official: true
+                  enabled: true
+                sources:
+                  - name: OpenAI X
+                    kind: x_rsshub
+                    locator: "@OpenAI"
+                    poll_interval_minutes: 60
+                  - name: OpenAI YouTube
+                    kind: youtube
+                    locator: "UCXZCJLdBC09xxGZ6gcdrc6A"
+                    poll_interval_minutes: 360
+                  - name: Invalid source
+                    kind: unsupported
+                    locator: "https://example.test/feed.xml"
+                """
+            )
+
+            self.assertEqual([row.name for row in result.added], ["OpenAI X", "OpenAI YouTube"])
+            self.assertEqual(len(result.errors), 1)
+            self.assertIn("kind", result.errors[0].message)
+            x_source = repository.find_source(SourceKind.X_RSSHUB.value, "OpenAI")
+            youtube_source = repository.find_source(
+                SourceKind.YOUTUBE.value, "UCXZCJLdBC09xxGZ6gcdrc6A"
+            )
+            assert x_source is not None and youtube_source is not None
+            self.assertTrue(x_source["is_official"])
+            self.assertTrue(youtube_source["enabled"])
+
     def test_x_accounts_can_be_saved_before_a_cookie_is_configured(self) -> None:
         with TemporaryDirectory() as directory:
             settings = replace(

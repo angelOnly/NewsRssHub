@@ -5,74 +5,73 @@
 <section class="form-page batch-source-page">
   <header class="page-head compact batch-source-head">
     <div>
-      <p class="eyebrow">BATCH SOURCE SETUP</p>
+      <p class="eyebrow">BATCH SOURCE FILE</p>
       <h1>批量添加来源</h1>
-      <p class="subhead">一行一个来源。保存只写入来源库，不会自动抓取或制造失败记录。</p>
+      <p class="subhead">下载示例文件，填写账号后上传；导入只保存来源，不会自动抓取或测试。</p>
     </div>
   </header>
 
-  <section class="batch-connection-note {{ 'ready' if batch_connection.usable else 'needs-setup' }}">
+  <section class="batch-template-panel" aria-label="YAML 示例文件">
     <div>
-      <strong>{{ batch_connection.platform }} · {% if batch_connection.usable %}可以测试{% else %}先完成平台连接{% endif %}</strong>
-      <p>{{ batch_connection.message }}</p>
+      <strong>先下载 YAML 示例文件</strong>
+      <p>一个文件可以混合 X、Reddit、YouTube 和 RSS；保留需要的条目，改好名称和地址后再上传。</p>
     </div>
-    {% if batch_connection.requires_credentials and not batch_connection.usable %}
-      <a class="button button-secondary" href="{{ batch_connection.setup_url }}">{{ batch_connection.setup_label }}</a>
-    {% endif %}
+    <div class="batch-template-actions">
+      <a class="button button-secondary" href="/sources/batch/template.yml" download>下载 YAML 示例</a>
+      <a class="button button-primary" href="/sources/batch/recommended.yml" download>下载推荐来源包</a>
+    </div>
+  </section>
+
+  <section class="batch-connection-note">
+    <div>
+      <strong>平台连接与导入分开处理</strong>
+      <p>X 账号可先导入，测试前再验证 X Cookie；YouTube 通过已配置的 RSSHub 抓取；Reddit 和 RSS 不需要 Cookie。</p>
+    </div>
+    <a class="button button-secondary" href="/settings#platforms">查看连接配置</a>
   </section>
 
   {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 
-  <form class="source-form batch-source-form" method="post" action="/sources/batch">
-    <label>平台
-      <select name="kind">
-        {% for value, label in batch_kind_choices %}
-          <option value="{{ value }}" {% if value == batch_kind %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-      <small>平台切换后按对应格式粘贴；YouTube 会将 @频道名解析为稳定频道 ID，并通过 config.yml 中配置的 RSSHub 抓取。</small>
+  <form class="source-form batch-source-form" method="post" action="/sources/batch" enctype="multipart/form-data">
+    <label class="batch-upload-label">选择填写好的 YAML 文件
+      <input class="batch-upload-input" name="source_file" type="file" accept=".yml,.yaml,application/x-yaml,text/yaml" required>
+      <small>仅支持 UTF-8 编码的 <code>.yml</code> 或 <code>.yaml</code> 文件，单次最多 100 条、文件不超过 1 MB。</small>
     </label>
-    <label>账号、社区或链接
-      <textarea name="entries" required rows="10" placeholder="名称 | 地址&#10;OpenAI | @OpenAI&#10;Anthropic | @AnthropicAI">{{ batch_entries }}</textarea>
-      <small>每行可直接填地址，也可写成“显示名称 | 地址”。支持 <code># 注释</code> 和以 <code>- </code> 开头的粘贴列表。</small>
-    </label>
-    <section class="batch-format-help" aria-label="批量输入格式示例">
-      <div><strong>X</strong><code>OpenAI | @OpenAI</code></div>
-      <div><strong>Reddit</strong><code>r/GoogleGemini</code></div>
-      <div><strong>YouTube</strong><code>OpenAI | @OpenAI</code></div>
-      <div><strong>RSS</strong><code>官方博客 | https://example.com/feed.xml</code></div>
-    </section>
-    <label>抓取间隔（分钟）<input name="poll_interval_minutes" type="number" min="5" max="1440" value="{{ batch_poll_interval }}"></label>
-    <div class="check-row">
-      <label><input name="is_official" type="checkbox" value="true" {% if batch_is_official %}checked{% endif %}> 将本批标记为官方或机构来源</label>
-      <label><input name="enabled" type="checkbox" value="true" {% if batch_enabled %}checked{% endif %}> 添加后启用抓取</label>
-    </div>
+    <details class="batch-yaml-help">
+      <summary>查看 YAML 字段说明</summary>
+      <dl>
+        <div><dt><code>name</code></dt><dd>页面显示名称。</dd></div>
+        <div><dt><code>kind</code></dt><dd><code>x_rsshub</code>、<code>reddit</code>、<code>youtube</code> 或 <code>rss</code>。</dd></div>
+        <div><dt><code>locator</code></dt><dd>X 填 <code>@账号</code>，Reddit 填 <code>r/社区</code>，YouTube 填 <code>@频道</code> 或频道地址，RSS 填订阅地址。</dd></div>
+        <div><dt><code>official</code> / <code>enabled</code> / <code>poll_interval_minutes</code></dt><dd>可在 <code>defaults</code> 中统一设置，也可在单条来源中覆盖。</dd></div>
+      </dl>
+    </details>
     <div class="batch-flow-note">
       <strong>连通性测试不会自动执行。</strong>
-      {% if batch_kind == 'x_rsshub' %}先保存并验证 X Cookie，再到 X 平台页手动点击“测试”。{% else %}保存后可在对应平台页手动点击“测试”；公开来源不需要 Cookie。{% endif %}
+      上传成功后，到对应平台页点击“测试当前页”或单条“测试”；这样不会因为一次导入而触发大量抓取。
     </div>
-    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit">添加这批来源</button></div>
+    <div class="form-actions"><a class="button button-secondary" href="/sources">取消</a><button class="button button-primary" type="submit">上传并导入来源</button></div>
   </form>
 
   {% if batch_result %}
   <section class="batch-result" aria-live="polite">
     <header>
       <div><p class="eyebrow">IMPORT RESULT</p><h2>已处理 {{ batch_result.received_count }} 条</h2></div>
-      <a class="button button-primary" href="/sources?kind={{ batch_kind }}">查看 {{ batch_connection.platform }} 来源</a>
+      <a class="button button-primary" href="/sources">查看来源管理</a>
     </header>
     {% if batch_result.added %}
     <div class="batch-result-group success"><strong>已添加 {{ batch_result.added|length }} 条</strong>
-      <ul>{% for row in batch_result.added %}<li>第 {{ row.line_number }} 行 · {{ row.name }} <code>{{ row.locator }}</code></li>{% endfor %}</ul>
+      <ul>{% for row in batch_result.added %}<li>第 {{ row.line_number }} 条 · {{ row.name }} <code>{{ row.locator }}</code></li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if batch_result.duplicates %}
     <div class="batch-result-group muted"><strong>已跳过 {{ batch_result.duplicates|length }} 条重复来源</strong>
-      <ul>{% for row in batch_result.duplicates %}<li>第 {{ row.line_number }} 行 · {{ row.name }}：{{ row.message }}</li>{% endfor %}</ul>
+      <ul>{% for row in batch_result.duplicates %}<li>第 {{ row.line_number }} 条 · {{ row.name }}：{{ row.message }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if batch_result.errors %}
     <div class="batch-result-group error"><strong>无法添加 {{ batch_result.errors|length }} 条</strong>
-      <ul>{% for row in batch_result.errors %}<li>第 {{ row.line_number }} 行 · {{ row.name or row.locator }}：{{ row.message }}</li>{% endfor %}</ul>
+      <ul>{% for row in batch_result.errors %}<li>第 {{ row.line_number }} 条 · {{ row.name or row.locator }}：{{ row.message }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
   </section>

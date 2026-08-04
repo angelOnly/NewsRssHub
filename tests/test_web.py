@@ -68,19 +68,45 @@ class WebTests(unittest.TestCase):
                     self.assertIn('name="source_kind" value="rss"', page.text)
                     self.assertNotIn("X 来源暂不测试或抓取", page.text)
 
-                    form = client.get("/sources/batch?kind=x_rsshub")
+                    form = client.get("/sources/batch")
                     self.assertEqual(form.status_code, 200)
                     self.assertIn("批量添加来源", form.text)
-                    self.assertIn("先完成平台连接", form.text)
+                    self.assertIn("下载 YAML 示例", form.text)
+                    self.assertIn("下载推荐来源包", form.text)
+                    self.assertNotIn("<textarea", form.text)
+
+                    template = client.get("/sources/batch/template.yml")
+                    self.assertEqual(template.status_code, 200)
+                    self.assertIn("attachment", template.headers["content-disposition"])
+                    self.assertIn("sources:", template.text)
+                    self.assertIn("x_rsshub", template.text)
+
+                    recommended = client.get("/sources/batch/recommended.yml")
+                    self.assertEqual(recommended.status_code, 200)
+                    self.assertIn("attachment", recommended.headers["content-disposition"])
+                    self.assertIn("Google DeepMind", recommended.text)
+                    self.assertIn("Two Minute Papers", recommended.text)
 
                     added = client.post(
                         "/sources/batch",
-                        data={
-                            "kind": "x_rsshub",
-                            "entries": "OpenAI | @OpenAI\nAnthropic | @AnthropicAI",
-                            "is_official": "true",
-                            "poll_interval_minutes": "60",
-                            "enabled": "true",
+                        files={
+                            "source_file": (
+                                "new-sources.yml",
+                                b"""defaults:
+  official: true
+  enabled: true
+sources:
+  - name: OpenAI
+    kind: x_rsshub
+    locator: \"@OpenAI\"
+    poll_interval_minutes: 60
+  - name: Anthropic
+    kind: x_rsshub
+    locator: \"@AnthropicAI\"
+    poll_interval_minutes: 60
+""",
+                                "application/x-yaml",
+                            )
                         },
                     )
                     self.assertEqual(added.status_code, 200)

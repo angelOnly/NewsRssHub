@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -542,105 +543,79 @@ def new_source_form(request: Request, error: str = "", connection: str = "") -> 
 
 
 def _batch_source_context(
-    services: ApplicationServices,
     *,
-    kind: str,
-    entries: str = "",
-    is_official: bool = False,
-    poll_interval_minutes: int | None = None,
-    enabled: bool = True,
     batch_result: Any | None = None,
     error: str = "",
 ) -> dict[str, Any]:
-    selected_kind = _safe_source_kind(kind)
-    if selected_kind == "all":
-        selected_kind = SourceKind.X_RSSHUB.value
-    connection = services.connections.for_kind(selected_kind)
     return {
-        "batch_kind_choices": [
-            (SourceKind.X_RSSHUB.value, _kind_label(SourceKind.X_RSSHUB.value)),
-            (SourceKind.REDDIT.value, _kind_label(SourceKind.REDDIT.value)),
-            (SourceKind.YOUTUBE.value, _kind_label(SourceKind.YOUTUBE.value)),
-            (SourceKind.RSS.value, _kind_label(SourceKind.RSS.value)),
-        ],
-        "batch_kind": selected_kind,
-        "batch_entries": entries,
-        "batch_is_official": is_official,
-        "batch_poll_interval": poll_interval_minutes or _default_poll_interval(selected_kind),
-        "batch_enabled": enabled,
-        "batch_connection": connection,
         "batch_result": batch_result,
         "error": error,
     }
 
 
 @app.get("/sources/batch", response_class=HTMLResponse)
-def batch_source_form(request: Request, kind: str = SourceKind.X_RSSHUB.value) -> HTMLResponse:
-    services = get_services(request)
-    return render(request, "source_batch.html", _batch_source_context(services, kind=kind))
+def batch_source_form(request: Request) -> HTMLResponse:
+    return render(request, "source_batch.html", _batch_source_context())
+
+
+@app.get("/sources/batch/template.yml")
+def download_batch_source_template(request: Request) -> Response:
+    content = get_services(request).batch_sources.yaml_template()
+    return Response(
+        content=content,
+        media_type="application/x-yaml; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="newsrsshub-sources-template.yml"'},
+    )
+
+
+@app.get("/sources/batch/recommended.yml")
+def download_recommended_source_import(request: Request) -> FileResponse:
+    """提供已经核验过格式的个人推荐来源包，供用户下载后再上传。"""
+
+    path = Path(__file__).resolve().parents[1] / "sources" / "recommended-ai-sources-import.yml"
+    return FileResponse(
+        path,
+        media_type="application/x-yaml",
+        filename="recommended-ai-sources-import.yml",
+    )
 
 
 @app.post("/sources/batch", response_class=HTMLResponse)
-def batch_add_sources(
+async def batch_add_sources(
     request: Request,
-    kind: str = Form(...),
-    entries: str = Form(...),
-    is_official: bool = Form(False),
-    poll_interval_minutes: int = Form(60),
-    enabled: bool = Form(False),
+    source_file: UploadFile = File(...),
 ) -> HTMLResponse:
+    """校验上传文件后导入；文件永不落盘，也不会触发抓取。"""
+
     services = get_services(request)
-    selected_kind = _safe_source_kind(kind)
-    if selected_kind == "all":
-        return render(
-            request,
-            "source_batch.html",
-            _batch_source_context(
-                services,
-                kind=SourceKind.X_RSSHUB.value,
-                entries=entries,
-                is_official=is_official,
-                poll_interval_minutes=poll_interval_minutes,
-                enabled=enabled,
-                error="请选择要批量添加的平台。",
-            ),
-            status_code=422,
-        )
+    filename = (source_file.filename or "").strip()
     try:
-        result = services.batch_sources.import_text(
-            kind=selected_kind,
-            entries=entries,
-            is_official=is_official,
-            poll_interval_minutes=poll_interval_minutes,
-            enabled=enabled,
-        )
+        if not filename.lower().endswith((".yml", ".yaml")):
+            raise ValueError("请上传 .yml 或 .yaml 文件。")
+        payload = await source_file.read()
+        if not payload:
+            raise ValueError("上传的 YAML 文件为空。")
+        if len(payload) > services.batch_sources.MAX_UPLOAD_BYTES:
+            raise ValueError("YAML 文件不能超过 1 MB。")
+        try:
+            content = payload.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("YAML 文件必须使用 UTF-8 编码。") from exc
+        result = services.batch_sources.import_yaml(content)
         return render(
             request,
             "source_batch.html",
-            _batch_source_context(
-                services,
-                kind=selected_kind,
-                is_official=is_official,
-                poll_interval_minutes=poll_interval_minutes,
-                enabled=enabled,
-                batch_result=result,
-            ),
+            _batch_source_context(batch_result=result),
         )
     except Exception as exc:
         return render(
             request,
             "source_batch.html",
-            _batch_source_context(
-                services,
-                kind=selected_kind,
-                entries=entries,
-                is_official=is_official,
-                poll_interval_minutes=poll_interval_minutes,
-                enabled=enabled,
-                error=str(exc),
-            ),
+            _batch_source_context(error=str(exc)),
             status_code=422,
         )
+    finally:
+        await source_file.close()
 
 
 def _make_draft(
