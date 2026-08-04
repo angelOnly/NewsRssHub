@@ -1,4 +1,4 @@
-"""SQLite v8 结构，以及显式迁移的安全校验。
+"""SQLite v9 结构，以及显式迁移的安全校验。
 
 普通应用启动只初始化空数据库或接受已经是目标版本的数据库。已有数据库的
 重建只能由 ``python -m app.migrate`` 执行，避免部署服务启动时悄悄删列。
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 TARGET_TABLES = (
     "sources",
@@ -42,6 +42,7 @@ SOURCES_TABLE = """
 CREATE TABLE sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL,
     locator TEXT NOT NULL,
     feed_url TEXT NOT NULL,
@@ -202,6 +203,7 @@ TARGET_COLUMNS = {
     "sources": {
         "id",
         "name",
+        "description",
         "kind",
         "locator",
         "feed_url",
@@ -271,6 +273,12 @@ TARGET_COLUMNS = {
         "updated_at",
     },
     "app_settings": {"key", "value", "updated_at"},
+}
+
+# v8 到 v9 只有 sources.description 一个带默认值的新字段，可在运行时安全补齐。
+V8_TARGET_COLUMNS = {
+    **TARGET_COLUMNS,
+    "sources": TARGET_COLUMNS["sources"] - {"description"},
 }
 
 
@@ -390,7 +398,12 @@ def _brief_missing_event_reference_count(conn: sqlite3.Connection) -> int:
     )
 
 
-def _schema_issues(conn: sqlite3.Connection) -> list[str]:
+def _schema_issues(
+    conn: sqlite3.Connection,
+    *,
+    target_columns: dict[str, set[str]] = TARGET_COLUMNS,
+    schema_label: str = f"v{SCHEMA_VERSION}",
+) -> list[str]:
     issues: list[str] = []
     tables = _table_names(conn)
     expected = set(TARGET_TABLES)
@@ -399,8 +412,8 @@ def _schema_issues(conn: sqlite3.Connection) -> list[str]:
     if missing:
         issues.append(f"缺少目标表：{', '.join(missing)}")
     if unknown:
-        issues.append(f"存在非 v8 表：{', '.join(unknown)}")
-    for table, expected_columns in TARGET_COLUMNS.items():
+        issues.append(f"存在非 {schema_label} 表：{', '.join(unknown)}")
+    for table, expected_columns in target_columns.items():
         actual = _columns(conn, table)
         if actual and actual != expected_columns:
             missing_columns = sorted(expected_columns - actual)
@@ -588,7 +601,7 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
         if brief_missing_event_references:
             issues.append(
                 f"日报引用了 {brief_missing_event_references} 个不存在的事件；"
-                "当前 v8 数据库不自动修改数据"
+                f"当前 v{SCHEMA_VERSION} 数据库不自动修改数据"
             )
         return MigrationReport(
             current_version=current_version,
@@ -666,8 +679,24 @@ def _ensure_default_fetch_policy(conn: sqlite3.Connection) -> None:
     )
 
 
+def _upgrade_v8_source_description(conn: sqlite3.Connection) -> bool:
+    """仅对完整 v8 库追加简介列，避免常规 Compose 部署被无损改表阻断。"""
+
+    if _schema_issues(conn, target_columns=V8_TARGET_COLUMNS, schema_label="v8"):
+        return False
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("ALTER TABLE sources ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return True
+
+
 def initialize_runtime_schema(conn: sqlite3.Connection) -> None:
-    """初始化新的 v8 数据库，但绝不重建已有数据库。"""
+    """初始化新的 v9 数据库；仅自动追加 v8 的无损简介字段。"""
 
     tables = _table_names(conn)
     if not tables:
@@ -676,6 +705,8 @@ def initialize_runtime_schema(conn: sqlite3.Connection) -> None:
         return
 
     current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if current_version == 8 and _upgrade_v8_source_description(conn):
+        current_version = SCHEMA_VERSION
     if current_version != SCHEMA_VERSION:
         raise MigrationRequiredError(
             "检测到旧版 SQLite 结构；请停止 web 和 worker 后运行 "
@@ -684,7 +715,7 @@ def initialize_runtime_schema(conn: sqlite3.Connection) -> None:
         )
     issues = _schema_issues(conn)
     if issues:
-        raise MigrationRequiredError("当前数据库不是完整的 v8 结构：" + "；".join(issues))
+        raise MigrationRequiredError(f"当前数据库不是完整的 v{SCHEMA_VERSION} 结构：" + "；".join(issues))
 
 
 def apply_migrations(conn: sqlite3.Connection) -> None:
@@ -731,6 +762,7 @@ def _copy_columns(
 SOURCE_COPY_FIELDS = (
     ("id", "NULL", False),
     ("name", "''", True),
+    ("description", "''", True),
     ("kind", "'rss'", True),
     ("locator", "''", True),
     ("feed_url", "''", True),
@@ -873,8 +905,8 @@ def _repair_brief_missing_event_references(conn: sqlite3.Connection) -> int:
     return missing_count
 
 
-def apply_v8_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
-    """将已通过预检的旧结构重建为精简后的 v8。
+def apply_v9_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """将已通过预检的旧结构重建为精简后的 v9。
 
     调用方必须在停掉 web/worker 后执行。这里使用单个显式事务；任何校验
     或复制失败都会回滚，不会留下半完成的表结构。
@@ -903,7 +935,7 @@ def apply_v8_migration(conn: sqlite3.Connection, report: MigrationReport | None 
                 )
 
         # 旧的命名索引在遗留表真正删除前仍占用名称，先只建表；旧表删除
-        # 后再创建 v8 索引，避免发生同名索引冲突。
+        # 后再创建 v9 索引，避免发生同名索引冲突。
         _create_target_schema(conn, include_indexes=False)
         _copy_columns(
             conn,
@@ -989,7 +1021,13 @@ def apply_v8_migration(conn: sqlite3.Connection, report: MigrationReport | None 
     return verified
 
 
-def apply_v7_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
-    """兼容旧导入名；当前维护命令会执行目标 v8 迁移。"""
+def apply_v8_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """兼容旧导入名；当前维护命令会执行目标 v9 迁移。"""
 
-    return apply_v8_migration(conn, report)
+    return apply_v9_migration(conn, report)
+
+
+def apply_v7_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """兼容更早的导入名；当前维护命令会执行目标 v9 迁移。"""
+
+    return apply_v9_migration(conn, report)

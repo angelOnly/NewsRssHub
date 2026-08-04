@@ -366,12 +366,13 @@ class Repository:
             cursor = conn.execute(
                 """
                 INSERT INTO sources (
-                    name, kind, locator, feed_url, is_official, enabled, archived,
+                    name, description, kind, locator, feed_url, is_official, enabled, archived,
                     poll_interval_minutes, health_status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     draft.name,
+                    draft.description,
                     draft.kind.value,
                     draft.locator,
                     feed_url,
@@ -389,6 +390,7 @@ class Repository:
     def update_source(self, source_id: int, values: dict[str, Any]) -> None:
         allowed = {
             "name",
+            "description",
             "is_official",
             "enabled",
             "poll_interval_minutes",

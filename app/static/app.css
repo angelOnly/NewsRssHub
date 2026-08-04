@@ -170,6 +170,7 @@
 @media(max-width:600px){.batch-template-panel{padding:12px 13px}.batch-template-actions{display:grid;width:100%;grid-template-columns:1fr}.batch-template-panel .button{width:100%}.batch-yaml-help dl div{grid-template-columns:1fr;gap:2px}.batch-yaml-help dd{font-size:12px}}
 
 /* 手机来源页以快速识别和单行操作为主，诊断信息按需展开，避免列表被重复操作撑高。 */
+.source-mobile-field-hint{display:none}
 @media(max-width:600px){
   .source-page-head{gap:7px;margin-bottom:12px}
   .source-page-head .eyebrow{display:none}
@@ -185,13 +186,21 @@
   .source-pagination{gap:5px}
   .source-pagination a{padding:4px 7px}
 
+  .source-mobile-field-hint{display:flex;flex-wrap:wrap;gap:2px 8px;margin:0 0 7px;color:var(--muted);font-size:11px;line-height:1.35}
+  .source-mobile-field-hint strong{color:#506555}
   .source-mobile-list{gap:8px}
   .source-mobile-card{padding:12px 13px;border-radius:12px}
-  .source-mobile-head{gap:8px}
-  .source-mobile-head strong{font-size:16px;line-height:1.3}
-  .source-mobile-head small{margin-top:2px;line-height:1.35}
-  .source-mobile-details{display:flex;flex-wrap:wrap;gap:4px 13px;margin:8px 0 0}
+  .source-mobile-head{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:start;gap:8px}
+  .source-mobile-head>.source-mobile-identity{min-width:0}
+  .source-mobile-identity>strong{display:block;font-size:16px;line-height:1.3}
+  .source-mobile-identity>small{display:block;margin-top:2px;line-height:1.35}
+  .source-mobile-head>.source-mobile-last-check{display:grid;min-width:48px;gap:0;padding-top:1px;justify-items:end;color:var(--muted);line-height:1.15;white-space:nowrap}
+  .source-mobile-last-check span{font-size:10px}
+  .source-mobile-head .source-mobile-last-check strong{font-size:12px;line-height:1.25}
+  .source-mobile-head .status{align-self:start}
+  .source-mobile-details{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 13px;margin:7px 0 0}
   .source-mobile-details div{display:flex;align-items:baseline;gap:4px;padding:0;border-radius:0;background:transparent}
+  .source-mobile-details div:first-child{flex:1 1 auto;min-width:0}
   .source-mobile-details dt{font-size:11px;white-space:nowrap}
   .source-mobile-details dd{margin:0;font-size:12px;line-height:1.35;white-space:nowrap}
   .source-mobile-actions{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px}
@@ -215,9 +224,9 @@
 .event-card.is-read .source-badge{background:#edf1ec;color:#718076}
 .event-card.is-read .event-preview summary,.event-card.is-read .event-actions{color:#829087}
 
-/* 来源快照是文件级恢复入口：保持紧凑，且在手机上优先展示下载操作。 */
-.source-backup-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 8px;padding:13px 15px;border:1px solid #d4e3d7;border-radius:13px;background:#f4faf5}.source-backup-intro strong{display:block;color:#27543d}.source-backup-intro p{margin:3px 0 0;color:#627066;font-size:13px;line-height:1.45}.source-backup-panel .button{flex:none;white-space:nowrap}.source-backup-history{margin:0 0 15px;padding:0 2px}.source-backup-history-head p,.source-backup-empty{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.source-backup-list{display:grid;gap:6px;margin:8px 0 0;padding:0;list-style:none}.source-backup-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid #e0e7df;border-radius:9px;background:var(--panel)}.source-backup-list strong{display:block;overflow-wrap:anywhere;color:#3d5b48;font:600 12px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace}.source-backup-list small{display:block;margin-top:2px;color:var(--muted);font-size:11px}.source-backup-list a{flex:none;padding:4px 7px;border:1px solid var(--line);border-radius:7px;color:var(--accent);font-size:12px;font-weight:700}.source-backup-list a:hover{border-color:#9bc5a9;background:#f2f8f3}
-@media(max-width:600px){.source-backup-panel{align-items:flex-start;flex-direction:column;gap:9px;padding:12px 13px}.source-backup-panel .button{width:100%;min-height:38px}.source-backup-history{margin-bottom:12px}.source-backup-list li{padding:8px 9px}.source-backup-list strong{font-size:11px}.source-backup-list a{padding:5px 7px}}
+/* 来源快照是低频维护功能，默认折叠，展开后将导出和恢复入口放在一起。 */
+.source-backup-details{margin:0 0 14px;border:1px solid #d4e3d7;border-radius:13px;background:#f4faf5}.source-backup-details>summary{display:flex;align-items:center;gap:12px;padding:12px 15px;cursor:pointer;list-style:none}.source-backup-details>summary::-webkit-details-marker{display:none}.source-backup-summary-copy{min-width:0;flex:1}.source-backup-summary-copy strong{display:block;color:#27543d}.source-backup-summary-copy small{display:block;margin-top:2px;color:#627066;font-size:12px;line-height:1.4}.source-backup-summary-meta{flex:none;color:var(--muted);font-size:12px;white-space:nowrap}.source-backup-details>summary::after{content:'›';flex:none;color:var(--accent);font-size:20px;line-height:1;transition:transform .15s}.source-backup-details[open]>summary::after{transform:rotate(90deg)}.source-backup-content{padding:0 15px 14px;border-top:1px solid #dce7de}.source-backup-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 0 9px}.source-backup-intro strong{display:block;color:#27543d}.source-backup-intro p{margin:3px 0 0;color:#627066;font-size:13px;line-height:1.45}.source-backup-panel .button{flex:none;white-space:nowrap}.source-backup-history{margin:0;padding:0}.source-backup-history-head p,.source-backup-empty{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.source-backup-list{display:grid;gap:6px;margin:8px 0 0;padding:0;list-style:none}.source-backup-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid #e0e7df;border-radius:9px;background:var(--panel)}.source-backup-list strong{display:block;overflow-wrap:anywhere;color:#3d5b48;font:600 12px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace}.source-backup-list small{display:block;margin-top:2px;color:var(--muted);font-size:11px}.source-backup-list a{flex:none;padding:4px 7px;border:1px solid var(--line);border-radius:7px;color:var(--accent);font-size:12px;font-weight:700}.source-backup-list a:hover{border-color:#9bc5a9;background:#f2f8f3}
+@media(max-width:600px){.source-backup-details{margin-bottom:12px}.source-backup-details>summary{gap:8px;padding:11px 12px}.source-backup-summary-copy small{font-size:11px}.source-backup-summary-meta{font-size:11px}.source-backup-content{padding:0 12px 12px}.source-backup-panel{align-items:flex-start;flex-direction:column;gap:9px;margin-top:11px}.source-backup-panel .button{width:100%;min-height:38px}.source-backup-list li{padding:8px 9px}.source-backup-list strong{font-size:11px}.source-backup-list a{padding:5px 7px}}
 
 /* 来源添加的远端验证可能稍慢，明确显示处理中并防止重复提交。 */
 .notice.warning{color:#825326;background:#fff3e5;border:1px solid #efd5b8}
@@ -239,3 +248,8 @@
 /* 媒体仅使用抓取到的直链或受信任平台嵌入地址，加载失败时仍可打开原链接。 */
 .media-preview{margin:15px 0;padding:14px;border:1px solid #d8e7dc;border-radius:11px;background:#f7fbf7}.media-preview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}.media-preview-head h4{margin:0;color:#176548;font-size:13px}.media-preview-head span{color:var(--muted);font-size:12px}.media-preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}.media-card{min-width:0;margin:0;overflow:hidden;border:1px solid #d9e5da;border-radius:8px;background:#fff}.media-image-card a{display:block;background:#eef3ee}.media-image-card img{display:block;width:100%;min-height:142px;max-height:340px;object-fit:contain}.media-video-card video,.media-embed-card iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#19241f}.media-card figcaption{padding:7px 9px;color:var(--muted);font-size:12px}.media-card figcaption a{color:var(--accent);font-weight:700}.media-image-card:hover{border-color:#9cc5a9;box-shadow:0 2px 8px rgba(23,101,72,.1)}
 @media(max-width:600px){.media-preview{padding:11px;margin:13px 0}.media-preview-grid{grid-template-columns:1fr}.media-image-card img{min-height:0;max-height:410px}.media-video-card video,.media-embed-card iframe{min-height:190px}}
+
+/* 账号简介是来源的静态识别信息，桌面表格和手机卡片都优先保证可读性。 */
+.sources-platform-table th:nth-child(1){width:27%}.sources-platform-table th:nth-child(2){width:24%;min-width:220px}.sources-platform-table th:nth-child(3){width:12%}.sources-platform-table th:nth-child(4){width:11%}.sources-platform-table th:nth-child(5){width:12%}.sources-platform-table th:nth-child(6){width:14%}.source-description{color:#526158;font-size:13px;line-height:1.5;overflow-wrap:anywhere}.source-form textarea[name="description"]{min-height:86px;font-family:inherit}
+.source-mobile-description{margin:8px 0 0;color:#526158;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+@media(max-width:600px){.source-form textarea[name="description"]{min-height:78px;font-size:13px}.source-mobile-description{margin-top:6px}}

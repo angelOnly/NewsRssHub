@@ -138,6 +138,7 @@ class SourceBackupService:
     def _export_source(source: dict[str, Any]) -> dict[str, Any]:
         return {
             "name": str(source["name"]),
+            "description": str(source.get("description") or ""),
             "kind": str(source["kind"]),
             "locator": str(source["locator"]),
             "official": bool(source["is_official"]),

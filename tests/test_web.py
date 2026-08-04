@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -13,7 +13,7 @@ from app.config import Settings
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FeedItem, SourceDraft, SourceKind, ValidationResult
 from app.runtime import build_services
-from app.web import app
+from app.web import _compact_relative_time, app
 
 
 def build_settings(root: Path) -> Settings:
@@ -42,6 +42,13 @@ def build_settings(root: Path) -> Settings:
 
 
 class WebTests(unittest.TestCase):
+    def test_compact_relative_time_is_suited_to_source_cards(self) -> None:
+        now = datetime.now(timezone.utc)
+
+        self.assertEqual(_compact_relative_time((now - timedelta(minutes=47)).isoformat()), "47 min")
+        self.assertEqual(_compact_relative_time((now + timedelta(minutes=2)).isoformat()), "2 min")
+        self.assertEqual(_compact_relative_time((now - timedelta(hours=3)).isoformat()), "3 h")
+
     def test_single_source_add_shows_a_clear_result_and_prevents_repeat_submit(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))
@@ -129,6 +136,8 @@ class WebTests(unittest.TestCase):
                     self.assertIn("21–23 条，共 23 条", page.text)
                     self.assertIn('value="rss"', page.text)
                     self.assertIn('name="source_kind" value="rss"', page.text)
+                    self.assertIn("字段说明：", page.text)
+                    self.assertIn('class="source-mobile-last-check"', page.text)
                     self.assertNotIn("X 来源暂不测试或抓取", page.text)
 
                     form = client.get("/sources/batch")
@@ -191,6 +200,7 @@ sources:
                     page = client.get("/sources")
                     self.assertEqual(page.status_code, 200)
                     self.assertIn("来源导出与备份", page.text)
+                    self.assertIn('<details class="source-backup-details">', page.text)
                     self.assertIn('href="/sources/export.yml"', page.text)
                     self.assertIn("还没有自动备份", page.text)
 

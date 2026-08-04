@@ -31,6 +31,7 @@ class SourceDraft:
     poll_interval_minutes: int = 60
     enabled: bool = True
     archived: bool = False
+    description: str = ""
 
 
 @dataclass(slots=True)

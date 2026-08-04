@@ -50,6 +50,10 @@
       {% endif %}
       <small>RSS 填完整 URL；X 填 @账号；Reddit 填 r/社区名 或 u/用户名。</small>
     </label>
+    <label>账号简介
+      <textarea name="description" maxlength="300" rows="3" placeholder="例如：发布开放模型、产品与开发者更新。">{{ source.description if source else '' }}</textarea>
+      <small>用于来源管理页识别账号定位，最多 300 个字符。</small>
+    </label>
     <p class="source-schedule-note">抓取由全局策略管理：每 {{ fetch_policy.interval_minutes }} 分钟一次，另加随机 1–5 分钟错峰。可在<a href="/settings#fetch">设置与连接</a>统一修改。</p>
     <div class="check-row">
       <label><input name="is_official" type="checkbox" value="true" {% if source and source.is_official %}checked{% endif %}> 官方或机构控制的来源</label>

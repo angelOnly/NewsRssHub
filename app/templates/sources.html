@@ -16,33 +16,44 @@
 {% if notice %}<div class="notice {{ notice_level }}" role="status" aria-live="polite">{{ notice }}</div>{% endif %}
 {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
 
-<section class="source-backup-panel" aria-label="来源导出与备份">
-  <div class="source-backup-intro">
-    <strong>来源导出与备份</strong>
-    <p>下载的 YAML 可直接上传到“批量添加”恢复来源；不包含 Cookie、API Key 或抓取记录。</p>
-  </div>
-  <a class="button button-secondary" href="/sources/export.yml" download>导出全部来源</a>
-</section>
-<section class="source-backup-history" aria-label="来源备份列表">
-  <div class="source-backup-history-head">
-    <p>Worker 每 3 天自动备份一次到持久化 <code>data/source_backups/</code>，仅保留最新 5 份。</p>
-  </div>
-  {% if source_backups %}
-  <ul class="source-backup-list">
-    {% for backup in source_backups %}
-    <li>
-      <div>
-        <strong>{{ backup.filename }}</strong>
-        <small>{{ backup.created_at|relative_time }} · {{ backup.source_count }} 个来源</small>
+<details class="source-backup-details">
+  <summary>
+    <span class="source-backup-summary-copy">
+      <strong>来源导出与备份</strong>
+      <small>导出当前来源或下载最近自动备份</small>
+    </span>
+    <span class="source-backup-summary-meta">{% if source_backups %}{{ source_backups|length }} 份备份{% else %}暂无备份{% endif %}</span>
+  </summary>
+  <div class="source-backup-content">
+    <section class="source-backup-panel" aria-label="来源导出">
+      <div class="source-backup-intro">
+        <strong>导出全部来源</strong>
+        <p>下载的 YAML 可直接上传到“批量添加”恢复来源；不包含 Cookie、API Key 或抓取记录。</p>
       </div>
-      <a href="/sources/backups/{{ backup.filename }}" download>下载</a>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="source-backup-empty">还没有自动备份；Worker 下一轮运行时会创建第一份。</p>
-  {% endif %}
-</section>
+      <a class="button button-secondary" href="/sources/export.yml" download>导出全部来源</a>
+    </section>
+    <section class="source-backup-history" aria-label="来源备份列表">
+      <div class="source-backup-history-head">
+        <p>Worker 每 3 天自动备份一次到持久化 <code>data/source_backups/</code>，仅保留最新 5 份。</p>
+      </div>
+      {% if source_backups %}
+      <ul class="source-backup-list">
+        {% for backup in source_backups %}
+        <li>
+          <div>
+            <strong>{{ backup.filename }}</strong>
+            <small>{{ backup.created_at|relative_time }} · {{ backup.source_count }} 个来源</small>
+          </div>
+          <a href="/sources/backups/{{ backup.filename }}" download>下载</a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="source-backup-empty">还没有自动备份；Worker 下一轮运行时会创建第一份。</p>
+      {% endif %}
+    </section>
+  </div>
+</details>
 
 <section class="source-platform-tip">
   <strong>统一抓取策略：</strong>每 {{ fetch_policy.interval_minutes }} 分钟一次，来源会额外随机延后 1–5 分钟；同一批请求之间随机等待 2–5 秒。
@@ -100,7 +111,7 @@
 
 <section class="sources-table-wrap">
   <table class="sources-table sources-platform-table">
-    <thead><tr><th>来源</th><th>平台</th><th>状态</th><th>上次成功</th><th>操作</th></tr></thead>
+    <thead><tr><th>来源</th><th>账号简介</th><th>平台</th><th>状态</th><th>上次成功</th><th>操作</th></tr></thead>
     <tbody>
     {% for source in sources %}
       <tr>
@@ -115,6 +126,7 @@
             <small class="source-state-note">{{ source.last_error }}</small>
           {% endif %}
         </td>
+        <td class="source-description">{{ source.description or '—' }}</td>
         <td>{{ source.kind|kind_label }}</td>
         <td>
           {% if not source.enabled %}
@@ -138,13 +150,18 @@
   </table>
 </section>
 
-<section class="source-mobile-list" aria-label="来源列表">
+<p class="source-mobile-field-hint" id="source-mobile-field-hint"><strong>字段说明：</strong><span>上次＝最近检查</span><span>+N＝本次新增</span><span>下次＝计划抓取</span><span>min＝分钟</span></p>
+<section class="source-mobile-list" aria-label="来源列表" aria-describedby="source-mobile-field-hint">
   {% for source in sources %}
     <article class="source-mobile-card">
       <header class="source-mobile-head">
-        <div>
+        <div class="source-mobile-identity">
           <strong>{{ source.name }}</strong>
           <small>{{ source.locator }}</small>
+        </div>
+        <div class="source-mobile-last-check" title="上次：最近一次检查">
+          <span>上次</span>
+          <strong>{{ source.last_fetch_at|compact_relative_time }}</strong>
         </div>
         {% if not source.enabled %}
           <span class="status paused">已暂停</span>
@@ -155,11 +172,11 @@
         {% endif %}
       </header>
       <dl class="source-mobile-details">
-        <div><dt>平台</dt><dd>{{ source.kind|kind_label }}</dd></div>
-        <div><dt>上次成功</dt><dd>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</dd></div>
-        <div><dt>上次检查</dt><dd>{{ source.last_fetch_at|relative_time if source.last_fetch_at else '尚未抓取' }} · 新增 {{ source.last_new_item_count }} 条</dd></div>
-        <div><dt>下次抓取</dt><dd>{{ source.next_fetch_at|relative_time if source.next_fetch_at else '等待排期' }}</dd></div>
+        <div><dt class="sr-only">平台</dt><dd>{{ source.kind|kind_label }}</dd></div>
+        <div><dt class="sr-only">本次新增</dt><dd>+{{ source.last_new_item_count }}</dd></div>
+        <div><dt>下次</dt><dd>{{ source.next_fetch_at|compact_relative_time if source.next_fetch_at else '待排期' }}</dd></div>
       </dl>
+      {% if source.description %}<p class="source-mobile-description">{{ source.description }}</p>{% endif %}
       {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
         <details class="source-mobile-state-details">
           <summary>连接待配置</summary>

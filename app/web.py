@@ -66,6 +66,30 @@ def _fmt_time(value: str | None) -> str:
         return value[:16]
 
 
+def _compact_relative_time(value: str | None) -> str:
+    """返回来源移动端使用的紧凑时间，前后关系由字段名表达。"""
+    if not value:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delta_seconds = int((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds())
+        seconds = abs(delta_seconds)
+        if seconds < 60:
+            return "<1 min"
+        if seconds < 3600:
+            minutes = (seconds + 59) // 60 if delta_seconds < 0 else seconds // 60
+            return f"{minutes} min"
+        if seconds < 86400:
+            hours = (seconds + 3599) // 3600 if delta_seconds < 0 else seconds // 3600
+            return f"{hours} h"
+        days = (seconds + 86399) // 86400 if delta_seconds < 0 else seconds // 86400
+        return f"{days} d"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _kind_label(kind: str) -> str:
     return {
         "rss": "RSS",
@@ -116,6 +140,7 @@ app = FastAPI(title="NewsRSSHub", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["relative_time"] = _fmt_time
+templates.env.filters["compact_relative_time"] = _compact_relative_time
 templates.env.filters["kind_label"] = _kind_label
 templates.env.filters["tier_label"] = _tier_label
 
@@ -808,6 +833,7 @@ def _make_draft(
     name: str,
     kind: str,
     locator: str,
+    description: str,
     is_official: bool,
     global_interval_minutes: int,
     enabled: bool,
@@ -822,6 +848,7 @@ def _make_draft(
         name=name.strip()[:120],
         kind=source_kind,
         locator=locator.strip(),
+        description=description.strip()[:300],
         is_official=is_official,
         poll_interval_minutes=max(5, min(int(global_interval_minutes), 1440)),
         enabled=enabled,
@@ -834,6 +861,7 @@ def create_source(
     name: str = Form(...),
     kind: str = Form(...),
     locator: str = Form(...),
+    description: str = Form(""),
     is_official: bool = Form(False),
     enabled: bool = Form(False),
 ) -> RedirectResponse:
@@ -845,6 +873,7 @@ def create_source(
             name=name,
             kind=kind,
             locator=locator,
+            description=description,
             is_official=is_official,
             global_interval_minutes=services.repository.get_fetch_policy().interval_minutes,
             enabled=enabled,
@@ -900,6 +929,7 @@ def edit_source(
     request: Request,
     source_id: int,
     name: str = Form(...),
+    description: str = Form(""),
     is_official: bool = Form(False),
     enabled: bool = Form(False),
 ) -> RedirectResponse:
@@ -912,6 +942,7 @@ def edit_source(
             name=name,
             kind=source["kind"],
             locator=source["locator"],
+            description=description,
             is_official=is_official,
             global_interval_minutes=services.repository.get_fetch_policy().interval_minutes,
             enabled=enabled,

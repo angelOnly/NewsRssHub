@@ -1,8 +1,12 @@
 # SQLite 结构精简与安全迁移说明
 
+> 当前实现补充（以本段为准）：数据库目标结构已升级至 v9。v8 → v9 仅向 `sources` 追加带默认值的 `description` 字段，应用启动时会自动以单个 SQLite 事务完成；常规 `docker compose up -d --build` 或 Portainer Git Stack 部署不需要单独构建或运行迁移镜像。
+>
+> 下文记录的是此前 v7 及更早结构收敛为 v8 的历史安全迁移机制。只有仍停留在 v7 或更早版本的数据库，才需要使用同一份 Compose 配置的 `maintenance` profile 执行显式预检和迁移。
+>
 > 状态：已批准实施
 >
-> 适用版本：数据库结构 v8
+> 适用版本：数据库结构 v9（v8 结构收敛说明保留为历史背景）
 >
 > 适用场景：单用户、Docker 部署、宿主机持久化 SQLite 的 NewsRSSHub
 
@@ -39,7 +43,7 @@ flowchart LR
 
 | 表 | 职责 | 关键约束 |
 | --- | --- | --- |
-| `sources` | 来源身份、全局调度下的下次抓取时间、启停、归档与当前健康状态 | `UNIQUE(kind, locator)`；`next_fetch_at` 用于持久化错峰排期；`config_json` 只存非敏感连接器缓存，例如 X 的 `x_user_id` |
+| `sources` | 来源身份、账号简介、全局调度下的下次抓取时间、启停、归档与当前健康状态 | `UNIQUE(kind, locator)`；`next_fetch_at` 用于持久化错峰排期；`config_json` 只存非敏感连接器缓存，例如 X 的 `x_user_id` |
 | `app_settings` | 应用级设置 | 当前保存 `global_fetch_interval_minutes`，所有启用来源共用该间隔 |
 | `connector_credentials` | 每个平台一份加密 Cookie、API Key 或模型连接配置 | 凭证按 `connector` 主键保存，不绑定单个来源 |
 | `items` | 原文、链接、作者、摘要、高亮、翻译、媒体预览及重试状态 | `UNIQUE(source_id, guid)`；`media_json` 只保存已验证的媒体地址；通过 `event_id` 归入零或一个事件 |
@@ -50,6 +54,7 @@ flowchart LR
 ### 3.1 保留的关键字段
 
 - `sources.feed_url`：YouTube 等连接器会将可变的 Handle 规范化为稳定抓取地址。
+- `sources.description`：来源页显示的一句话账号简介，可随来源 YAML 导入同步更新；不参与抓取、筛选或调度。
 - `sources.next_fetch_at` 与 `sources.last_new_item_count`：分别保存下一次错峰抓取时间和最近一次检查新增量；逐来源 `poll_interval_minutes` 只保留为旧数据兼容字段，不再参与调度。
 - `app_settings.global_fetch_interval_minutes`：唯一的抓取间隔设置，修改后会为所有启用来源重排 1–5 分钟随机窗口。
 - `sources.config_json`：当前用于缓存 X 用户 ID，未来可承载少量非敏感连接器状态；Cookie 和 API Key 不得存入此字段。

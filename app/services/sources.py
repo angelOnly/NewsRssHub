@@ -35,6 +35,7 @@ class SourceService:
         return replace(
             draft,
             locator=locator,
+            description=draft.description.strip()[:300],
             poll_interval_minutes=self.repository.get_fetch_policy().interval_minutes,
         ), feed_url
 
@@ -95,6 +96,7 @@ class SourceService:
             source_id,
             {
                 "name": draft.name,
+                "description": draft.description.strip()[:300],
                 "is_official": int(draft.is_official),
                 "enabled": int(draft.enabled),
             },
@@ -172,6 +174,7 @@ class SourceService:
                 name=str(entry.get("name") or locator),
                 kind=kind,
                 locator=locator,
+                description=str(entry.get("description") or ""),
                 is_official=bool(entry.get("official", False)),
                 poll_interval_minutes=global_interval,
                 enabled=bool(entry.get("enabled", True)),

@@ -27,17 +27,19 @@ class BatchSourceInput:
 
     line_number: int
     draft: SourceDraft
+    has_description: bool = False
 
 
 @dataclass(slots=True)
 class BatchImportResult:
     added: list[BatchSourceRow] = field(default_factory=list)
+    updated: list[BatchSourceRow] = field(default_factory=list)
     duplicates: list[BatchSourceRow] = field(default_factory=list)
     errors: list[BatchSourceRow] = field(default_factory=list)
 
     @property
     def received_count(self) -> int:
-        return len(self.added) + len(self.duplicates) + len(self.errors)
+        return len(self.added) + len(self.updated) + len(self.duplicates) + len(self.errors)
 
 
 class BatchSourceImportService:
@@ -72,6 +74,7 @@ class BatchSourceImportService:
               - name: "替换成 X 账号显示名称"
                 kind: x_rsshub
                 locator: "@替换成 X 账号"
+                description: "一句话说明这个账号主要发布什么（可选）"
                 # archived: false  # 导出的备份会携带该状态；归档来源导入后仍保持归档
 
               # 需要添加 YouTube、Reddit 或 RSS 时，复制下面对应区块并取消注释。
@@ -193,7 +196,24 @@ class BatchSourceImportService:
                     )
                     continue
                 seen.add(key)
-                if self.sources.repository.find_source(*key):
+                existing = self.sources.repository.find_source(*key)
+                if existing:
+                    # 导出的来源文件可用于补齐账号简介，但不覆盖当前实例的启停和抓取状态。
+                    if item.has_description and normalized.description and (
+                        normalized.description != str(existing.get("description") or "")
+                    ):
+                        self.sources.repository.update_source(
+                            int(existing["id"]), {"description": normalized.description}
+                        )
+                        result.updated.append(
+                            BatchSourceRow(
+                                line_number=row.line_number,
+                                name=row.name,
+                                locator=row.locator,
+                                message="已更新账号简介",
+                            )
+                        )
+                        continue
                     result.duplicates.append(
                         BatchSourceRow(
                             line_number=row.line_number,
@@ -245,6 +265,11 @@ class BatchSourceImportService:
         if not name:
             raise ValueError("name 不能为空。")
 
+        has_description = "description" in raw_source
+        raw_description = raw_source.get("description", "")
+        if not isinstance(raw_description, str):
+            raise ValueError("description 必须是字符串。")
+
         official_value = raw_source.get(
             "official",
             raw_source.get("is_official", defaults.get("official", defaults.get("is_official", False))),
@@ -257,12 +282,14 @@ class BatchSourceImportService:
                 name=name[:120],
                 kind=kind,
                 locator=locator,
+                description=raw_description.strip()[:300],
                 is_official=self._parse_bool(official_value, "official"),
                 # 旧导出文件中的逐来源频率可安全忽略，避免恢复后绕过全局策略。
                 poll_interval_minutes=self.sources.repository.get_fetch_policy().interval_minutes,
                 enabled=self._parse_bool(enabled_value, "enabled"),
                 archived=self._parse_bool(archived_value, "archived"),
             ),
+            has_description=has_description,
         )
 
     @staticmethod

@@ -5,6 +5,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+import yaml
+
 from app.config import Settings
 from app.domain.models import SourceDraft, SourceKind
 from app.plugins.registry import build_source_registry
@@ -35,6 +37,27 @@ def build_settings(root: Path) -> Settings:
 
 
 class BatchSourceImportTests(unittest.TestCase):
+    def test_project_export_file_can_restore_every_source_with_a_description(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = replace(
+                build_settings(Path(directory)), rsshub_base_url="https://rsshub.example.test"
+            )
+            database = Database(settings.database_path)
+            database.initialize()
+            repository = Repository(database)
+            importer = BatchSourceImportService(
+                SourceService(repository, build_source_registry(), settings)
+            )
+            export_path = Path(__file__).resolve().parents[1] / "sources" / "newsrsshub-sources-export.yml"
+            document = yaml.safe_load(export_path.read_text(encoding="utf-8"))
+
+            result = importer.import_yaml(export_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.duplicates, [])
+            self.assertEqual(len(result.added), len(document["sources"]))
+            self.assertTrue(all(source.get("description", "").strip() for source in document["sources"]))
+
     def test_yaml_import_supports_mixed_platforms_and_row_errors(self) -> None:
         with TemporaryDirectory() as directory:
             settings = replace(
@@ -109,6 +132,50 @@ class BatchSourceImportTests(unittest.TestCase):
             assert saved is not None
             self.assertTrue(saved["enabled"])
             self.assertEqual(saved["health_status"], "unknown")
+
+    def test_yaml_description_updates_existing_source_without_overwriting_runtime_settings(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = replace(
+                build_settings(Path(directory)), rsshub_base_url="https://rsshub.example.test"
+            )
+            database = Database(settings.database_path)
+            database.initialize()
+            repository = Repository(database)
+            source_id = repository.create_source(
+                SourceDraft(
+                    name="OpenAI",
+                    kind=SourceKind.X_RSSHUB,
+                    locator="OpenAI",
+                    enabled=False,
+                ),
+                "https://x.com/OpenAI",
+            )
+            repository.update_source(source_id, {"health_status": "error", "last_error": "保留现状"})
+            importer = BatchSourceImportService(
+                SourceService(repository, build_source_registry(), settings)
+            )
+
+            result = importer.import_yaml(
+                """
+                sources:
+                  - name: OpenAI 官方账号
+                    kind: x_rsshub
+                    locator: "@OpenAI"
+                    description: "发布 OpenAI 研究、产品与公司动态。"
+                    enabled: true
+                """
+            )
+
+            self.assertEqual(result.added, [])
+            self.assertEqual(len(result.updated), 1)
+            self.assertEqual(result.duplicates, [])
+            self.assertEqual(result.received_count, 1)
+            saved = repository.get_source(source_id)
+            assert saved is not None
+            self.assertEqual(saved["description"], "发布 OpenAI 研究、产品与公司动态。")
+            self.assertFalse(saved["enabled"])
+            self.assertEqual(saved["health_status"], "error")
+            self.assertEqual(saved["last_error"], "保留现状")
 
     def test_platform_paging_filters_and_counts_sources(self) -> None:
         with TemporaryDirectory() as directory:

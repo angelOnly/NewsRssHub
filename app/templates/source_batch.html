@@ -43,6 +43,7 @@
         <div><dt><code>name</code></dt><dd>页面显示名称。</dd></div>
         <div><dt><code>kind</code></dt><dd><code>x_rsshub</code>、<code>reddit</code>、<code>youtube</code> 或 <code>rss</code>。</dd></div>
         <div><dt><code>locator</code></dt><dd>X 填 <code>@账号</code>，Reddit 填 <code>r/社区</code>，YouTube 填 <code>@频道</code> 或频道地址，RSS 填订阅地址。</dd></div>
+        <div><dt><code>description</code></dt><dd>可选的一句话账号简介；当同平台、同地址的来源已存在时，非空简介会更新到该来源，其余配置不变。</dd></div>
         <div><dt><code>official</code> / <code>enabled</code> / <code>archived</code></dt><dd>可在 <code>defaults</code> 中统一设置，也可在单条来源中覆盖；来源导出文件会保留暂停和归档状态，抓取间隔统一在“设置与连接”中管理。</dd></div>
       </dl>
     </details>
@@ -62,6 +63,11 @@
     {% if batch_result.added %}
     <div class="batch-result-group success"><strong>已添加 {{ batch_result.added|length }} 条</strong>
       <ul>{% for row in batch_result.added %}<li>第 {{ row.line_number }} 条 · {{ row.name }} <code>{{ row.locator }}</code></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if batch_result.updated %}
+    <div class="batch-result-group success"><strong>已更新 {{ batch_result.updated|length }} 条账号简介</strong>
+      <ul>{% for row in batch_result.updated %}<li>第 {{ row.line_number }} 条 · {{ row.name }} <code>{{ row.locator }}</code></li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if batch_result.duplicates %}

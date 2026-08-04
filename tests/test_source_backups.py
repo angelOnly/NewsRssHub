@@ -47,7 +47,12 @@ class SourceBackupTests(unittest.TestCase):
             repository = Repository(database)
 
             x_source_id = repository.create_source(
-                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
+                SourceDraft(
+                    name="OpenAI",
+                    kind=SourceKind.X_RSSHUB,
+                    locator="OpenAI",
+                    description="发布 OpenAI 研究、产品与公司动态。",
+                ),
                 "https://x.com/OpenAI?not_for_export=true",
             )
             repository.update_source_config(
@@ -91,6 +96,10 @@ class SourceBackupTests(unittest.TestCase):
             document = yaml.safe_load(exported)
             self.assertEqual(document["version"], 1)
             self.assertEqual(len(document["sources"]), 4)
+            exported_openai = next(
+                source for source in document["sources"] if source["locator"] == "OpenAI"
+            )
+            self.assertEqual(exported_openai["description"], "发布 OpenAI 研究、产品与公司动态。")
             self.assertNotIn("private-connector-cache-value", exported)
             self.assertNotIn("not_for_export", exported)
             self.assertNotIn("private=true", exported)
@@ -118,6 +127,9 @@ class SourceBackupTests(unittest.TestCase):
                 SourceKind.YOUTUBE.value, "UCXZCJLdBC09xxGZ6gcdrc6A"
             )
             assert paused is not None and archived is not None and youtube is not None
+            restored_openai = restore_repository.find_source(SourceKind.X_RSSHUB.value, "OpenAI")
+            assert restored_openai is not None
+            self.assertEqual(restored_openai["description"], "发布 OpenAI 研究、产品与公司动态。")
             self.assertFalse(paused["enabled"])
             self.assertFalse(paused["archived"])
             self.assertTrue(archived["archived"])

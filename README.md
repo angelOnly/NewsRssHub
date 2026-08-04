@@ -11,7 +11,7 @@
 - 同一事件的多条内容会合并，避免信息流重复轰炸。
 - 所有启用来源共用一套抓取策略；首次、新增、重新启用和策略变更都会在 1–5 分钟内随机错峰，单批请求之间再等待 2–5 秒。
 - 资讯详情可预览已验证的图片、直链视频和受信任平台嵌入；收藏可在来源暂停或归档后继续阅读。
-- 来源只保存名称、平台、地址、官方标记和启用状态；历史的单来源抓取间隔仅为旧数据兼容保留，不再参与调度。
+- 来源保存名称、账号简介、平台、地址、官方标记和启用状态；历史的单来源抓取间隔仅为旧数据兼容保留，不再参与调度。
 
 ## Docker 启动
 
@@ -30,32 +30,9 @@
 
 ### SQLite 结构升级
 
-本次更新会将已部署的 SQLite v7 升级为 v8，以加入全局抓取排期、全局抓取设置和媒体预览字段。普通启动只会初始化空数据库，不会静默执行删表或重建表；已有 v7 数据库必须先执行内置迁移命令。
+当前数据库结构为 v9。v8 升级到 v9 仅新增 `sources.description` 且有默认空值，Web 服务启动时会在单个 SQLite 事务中自动完成；常规 Git Stack 或 `docker compose up -d --build` 部署不需要单独构建或运行迁移镜像。
 
-若使用 Portainer Git Stack，`/home/jzb/docker/rss-hub` 只有持久化数据，并没有 Git 源码，不能在这里执行 `git pull`。先在 Portainer 部署最新提交以构建新镜像，再在服务器终端以本次构建出的镜像执行；例如：
-
-```bash
-docker run --rm -v /home/jzb/docker/rss-hub/data:/app/data newsrsshub-migrate:20260804 python -m app.migrate --check
-docker run --rm -v /home/jzb/docker/rss-hub/data:/app/data newsrsshub-migrate:20260804 python -m app.migrate --apply
-```
-
-迁移成功后，在 Portainer 再次部署 Stack。若服务器上确实有源码和 `docker-compose.yml`，才使用：
-
-```bash
-cd /home/jzb/docker/rss-hub
-git pull
-docker compose down
-docker compose --profile maintenance build migrate
-docker compose --profile maintenance run --rm migrate --check
-docker compose --profile maintenance run --rm migrate --apply
-docker compose up -d --build
-```
-
-迁移命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理与回滚步骤见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
-
-如果预检显示“日报将自动移除 N 个不存在的事件引用”，这是旧日报指向已删除事件的可修复数据，不需要手工修改 SQLite：`--apply` 会保留日报和其余有效事件引用。若显示日报 JSON 无法解析，迁移仍会停止，避免猜测或丢失数据。
-
-首次升级到 v8 时，请先执行上面的维护命令，再恢复平时的 GitHub/Docker 自动部署；如果你的面板只会直接执行 `docker compose up -d`，需要先通过服务器终端完成这一次迁移。
+更早的历史结构仍不会在运行服务中重建。只有部署前遗留在 v7 或更早版本的数据库，才需要停掉服务后使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check` 和 `--apply`。维护命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理与回滚步骤见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
 
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统先验证，成功后才加密保存。
 
@@ -73,13 +50,13 @@ uvicorn app.web:app --reload
 
 ## 来源导出与自动备份
 
-在“来源管理”点击“导出全部来源”，即可下载当前来源的 YAML。这个文件和页面中的任一自动备份文件都可以直接上传到“批量添加”入口：名称、平台、地址、官方标记和暂停/归档状态都会恢复；已存在的来源会被安全跳过，不会覆盖当前记录。
+在“来源管理”点击“导出全部来源”，即可下载当前来源的 YAML。这个文件和页面中的任一自动备份文件都可以直接上传到“批量添加”入口：名称、账号简介、平台、地址、官方标记和暂停/归档状态都会恢复；已存在的来源默认安全跳过，但 YAML 中的非空 `description` 会同步更新该来源的账号简介，不会覆盖当前启停和抓取状态。
 
 来源快照刻意不覆盖运行中实例的全局抓取间隔；恢复到新环境后，如需沿用原有节奏，请在“设置与连接 → 统一抓取策略”中重新设置。这避免导入来源时意外改变现有实例的调度负载。
 
 Worker 首次运行会创建一份来源快照，之后每 3 天最多创建一份。快照保存到容器的 `/app/data/source_backups/`，因 Compose 已挂载数据目录，服务器实际位置为 `/home/jzb/docker/rss-hub/data/source_backups/`。系统仅保留最新 5 份；Cookie、API Key、抓取状态、错误记录和连接器缓存都不会写入这些 YAML 文件。
 
-本次 SQLite v8、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)；此前 SQLite v7、来源备份恢复和筛选合并规则调整的背景见 [2026-08-04 迭代记录](docs/ITERATION_2026-08-04_SQLITE_AND_SOURCE_BACKUP.md)。
+本次 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)；此前 SQLite v7、来源备份恢复和筛选合并规则调整的背景见 [2026-08-04 迭代记录](docs/ITERATION_2026-08-04_SQLITE_AND_SOURCE_BACKUP.md)。
 
 ## 内容处理顺序
 

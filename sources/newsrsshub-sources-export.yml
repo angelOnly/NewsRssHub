@@ -2,6 +2,7 @@ version: 1
 exported_at: '2026-08-04T08:30:57.180032+00:00'
 sources:
 - name: 3DxDEV
+  description: "面向游戏开发者与 3D 创作者，分享编程、UI、建模、动画与 VFX 内容。"
   kind: x_rsshub
   locator: 3DxDEV7
   official: false
@@ -9,6 +10,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: Alexandra Aisling
+  description: "AI 艺术创作者，探索生成图像、写作与未来世界；Adobe Firefly 大使。"
   kind: x_rsshub
   locator: AllaAisling
   official: false
@@ -16,6 +18,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: Anthropic
+  description: "Anthropic 官方账号，发布 AI 安全研究、Claude 与模型产品动态。"
   kind: x_rsshub
   locator: AnthropicAI
   official: true
@@ -23,6 +26,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Ashraff Hathibelagal
+  description: "程序员，关注有效加速主义、历史语言与超人类主义。"
   kind: x_rsshub
   locator: Hathibel
   official: false
@@ -30,6 +34,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: BBC News World
+  description: "BBC 国际新闻账号，提供全球突发新闻、专题报道与分析。"
   kind: x_rsshub
   locator: BBCWorld
   official: false
@@ -37,6 +42,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Black Forest Labs
+  description: "Black Forest Labs 账号，FLUX 系列模型开发者，关注视觉智能。"
   kind: x_rsshub
   locator: bfl_ai
   official: false
@@ -44,6 +50,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Blender
+  description: "Blender 官方账号，自由开源 3D 创作套件，覆盖建模、动画与渲染。"
   kind: x_rsshub
   locator: Blender
   official: true
@@ -51,6 +58,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: BLVCKLIGHT
+  description: "创意技术人士，制作生成式体验与 AI 叙事内容。"
   kind: x_rsshub
   locator: BLVCKLIGHTai
   official: false
@@ -58,6 +66,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: ChatGPT
+  description: "ChatGPT 官方账号，面向大众发布产品能力与使用动态。"
   kind: x_rsshub
   locator: ChatGPT
   official: true
@@ -65,6 +74,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Civitai
+  description: "生成式 AI 社区平台，供用户发现、创作与分享模型、资源和作品。"
   kind: x_rsshub
   locator: HelloCivitai
   official: true
@@ -72,6 +82,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Claude
+  description: "Claude 官方账号，Anthropic 的安全、准确、可靠 AI 助手。"
   kind: x_rsshub
   locator: claudeai
   official: true
@@ -79,6 +90,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Codex Changelog
+  description: "非官方 OpenAI Codex CLI 更新日志，跟踪版本与功能变化。"
   kind: x_rsshub
   locator: Codex_Changelog
   official: true
@@ -86,6 +98,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: ComfyUI
+  description: "ComfyUI 官方账号，开源的视觉 AI 节点式工作流引擎。"
   kind: x_rsshub
   locator: ComfyUI
   official: true
@@ -93,6 +106,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Elon Musk
+  description: "企业家个人账号，发布科技产品、商业动态与个人观点。"
   kind: x_rsshub
   locator: elonmusk
   official: false
@@ -100,6 +114,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Fireship
+  description: "面向开发者的高密度编程教程与技术新闻频道。"
   kind: youtube
   locator: UCsBjURrPoezykLs9EqgamOA
   official: false
@@ -107,6 +122,7 @@ sources:
   archived: false
   poll_interval_minutes: 360
 - name: Framer
+  description: "独立 AI 动画创作者，分享 AI 动画制作方法与案例。"
   kind: x_rsshub
   locator: Framer_X
   official: false
@@ -114,6 +130,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: gimu
+  description: "游戏领域的 Vibe Coding 创作者，关注用 AI 进行游戏开发。"
   kind: x_rsshub
   locator: gimu_ai
   official: false
@@ -121,6 +138,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: Google
+  description: "Google 官方账号，发布公司产品、服务与品牌动态。"
   kind: x_rsshub
   locator: Google
   official: true
@@ -128,6 +146,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Google DeepMind
+  description: "Google DeepMind 官方账号，发布负责任 AI 研究和前沿技术进展。"
   kind: x_rsshub
   locator: GoogleDeepMind
   official: true
@@ -135,6 +154,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Google DeepMind · YouTube
+  description: "Google DeepMind 官方频道，介绍 AI 研究、科学突破与团队观点。"
   kind: youtube
   locator: UCP7jMXSY2xbc3KCAE0MHQ-A
   official: true
@@ -142,6 +162,7 @@ sources:
   archived: false
   poll_interval_minutes: 360
 - name: Google Gemini
+  description: "Gemini 官方账号，发布面向用户的前沿 AI 功能与产品更新。"
   kind: x_rsshub
   locator: GeminiApp
   official: true
@@ -149,6 +170,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Hailuo AI
+  description: "海螺 AI 创作社区账号，提供产品、Discord 社群与创作者合作信息。"
   kind: x_rsshub
   locator: Hailuo_AI
   official: false
@@ -156,6 +178,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Higgsfield AI
+  description: "Higgsfield AI 账号，提供 AI 原生创意套件与视频创作工具。"
   kind: x_rsshub
   locator: higgsfield_ai
   official: false
@@ -163,6 +186,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Hugging Face
+  description: "Hugging Face 官方账号，开源 AI 社区，聚合模型、数据集、论文和应用。"
   kind: x_rsshub
   locator: huggingface
   official: true
@@ -170,6 +194,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Hugging Face · YouTube
+  description: "Hugging Face 官方频道，介绍开源模型、数据集、研究与 AI 应用。"
   kind: youtube
   locator: UCHlNU7kIZhRgSbhHvFoy72w
   official: true
@@ -177,6 +202,7 @@ sources:
   archived: false
   poll_interval_minutes: 360
 - name: Jake Fitzgerald
+  description: "机器人实践者，记录全栈机器人学习与项目开发。"
   kind: x_rsshub
   locator: earthtojake
   official: false
@@ -184,6 +210,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: karminski-牙医
+  description: "程序员与 KCORES 联合创始人，关注开发、服务器与数码硬件。"
   kind: x_rsshub
   locator: karminski3
   official: false
@@ -191,6 +218,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Kling AI
+  description: "可灵 AI 官方社区账号，发布 AI 视频创作产品和社群动态。"
   kind: x_rsshub
   locator: Kling_ai
   official: true
@@ -198,6 +226,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Larus Canus
+  description: "AI 创作者与提示词工程师，分享视觉案例、工作流和商业自动化。"
   kind: x_rsshub
   locator: MrLarus
   official: false
@@ -205,6 +234,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Luma
+  description: "Luma 官方账号，提供 AI 创意代理与视频、图像生成工具。"
   kind: x_rsshub
   locator: LumaLabsAI
   official: true
@@ -212,6 +242,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Matt Wolfe
+  description: "AI 资讯与工具评测创作者，筛选值得关注的 AI 更新。"
   kind: youtube
   locator: UChpleBmo18P08aKCIgti38g
   official: false
@@ -219,6 +250,7 @@ sources:
   archived: false
   poll_interval_minutes: 360
 - name: Meta
+  description: "Meta 官方账号，发布社交产品、技术与公司动态。"
   kind: x_rsshub
   locator: Meta
   official: true
@@ -226,6 +258,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Midjourney
+  description: "Midjourney 官方账号，探索新型思维媒介并扩展人类想象力。"
   kind: x_rsshub
   locator: midjourney
   official: true
@@ -233,6 +266,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: OpenAI
+  description: "OpenAI 官方账号，发布研究、产品和让 AGI 惠及全人类的进展。"
   kind: x_rsshub
   locator: OpenAI
   official: true
@@ -240,6 +274,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: OpenAI Developers
+  description: "OpenAI Developers 官方账号，面向 Codex 与 OpenAI Platform 开发者发布更新。"
   kind: x_rsshub
   locator: OpenAIDevs
   official: true
@@ -247,6 +282,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: OpenAI · YouTube
+  description: "OpenAI 官方频道，介绍研究、产品与开发者生态。"
   kind: youtube
   locator: UCXZCJLdBC09xxGZ6gcdrc6A
   official: true
@@ -254,6 +290,7 @@ sources:
   archived: false
   poll_interval_minutes: 360
 - name: PixVerse
+  description: "PixVerse 官方账号，AI 视频创作产品，提供应用、API 与社区入口。"
   kind: x_rsshub
   locator: PixVerse_
   official: true
@@ -261,6 +298,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Reddit · r/Anthropic
+  description: "讨论 Anthropic、Claude、模型能力与 AI 安全相关话题的 Reddit 社区。"
   kind: reddit
   locator: r/anthropic
   official: false
@@ -268,6 +306,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Reddit · r/comfyui
+  description: "ComfyUI 用户社区，交流节点工作流、模型、插件与创作案例。"
   kind: reddit
   locator: r/comfyui
   official: false
@@ -275,6 +314,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Reddit · r/gamedev
+  description: "游戏开发者社区，讨论设计、编程、美术、发行与行业经验。"
   kind: reddit
   locator: r/gamedev
   official: false
@@ -282,6 +322,7 @@ sources:
   archived: false
   poll_interval_minutes: 180
 - name: Reddit · r/LocalLLaMA
+  description: "本地大语言模型社区，关注开源模型、推理、微调与私有部署。"
   kind: reddit
   locator: r/localllama
   official: false
@@ -289,6 +330,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Reddit · r/OpenAI
+  description: "讨论 OpenAI 产品、研究、API 与社区使用经验的 Reddit 社区。"
   kind: reddit
   locator: r/openai
   official: false
@@ -296,6 +338,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Reddit · r/StableDiffusion
+  description: "Stable Diffusion 用户社区，交流模型、工作流、提示词和生成作品。"
   kind: reddit
   locator: r/stablediffusion
   official: false
@@ -303,6 +346,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Reddit · r/Unity3D
+  description: "Unity 开发者社区，讨论引擎、制作流程、技术问题和项目发布。"
   kind: reddit
   locator: r/unity3d
   official: false
@@ -310,6 +354,7 @@ sources:
   archived: false
   poll_interval_minutes: 180
 - name: Runway
+  description: "Runway 官方账号，开发用于模拟世界的生成式 AI 创作工具。"
   kind: x_rsshub
   locator: runwayml
   official: true
@@ -317,6 +362,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Selphea
+  description: "独立游戏开发者，分享游戏开发过程与作品。"
   kind: x_rsshub
   locator: Selphea_
   official: false
@@ -324,6 +370,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: SpaceX
+  description: "SpaceX 官方账号，发布先进火箭、航天器设计、制造与发射进展。"
   kind: x_rsshub
   locator: SpaceX
   official: true
@@ -331,6 +378,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Stability AI
+  description: "Stability AI 官方账号，提供多模态媒体生成与编辑工具。"
   kind: x_rsshub
   locator: StabilityAI
   official: true
@@ -338,6 +386,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: tamrat
+  description: "Mint 的创始开发者，构建用于 3D 创作的 AI Agent。"
   kind: x_rsshub
   locator: tamrrat
   official: false
@@ -345,6 +394,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: Tibo
+  description: "OpenAI 的 Codex 与 ChatGPT 团队成员，分享相关产品和开发动态。"
   kind: x_rsshub
   locator: thsottiaux
   official: false
@@ -352,6 +402,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Tripo
+  description: "Tripo 官方账号，提供 AI 驱动的 3D 生成与创作平台。"
   kind: x_rsshub
   locator: tripoai
   official: true
@@ -359,6 +410,7 @@ sources:
   archived: false
   poll_interval_minutes: 30
 - name: Two Minute Papers
+  description: "用简短解读介绍前沿 AI 与机器学习论文的科普频道。"
   kind: youtube
   locator: UCbfYPyITQ-7l4upoX8nvctg
   official: false
@@ -366,6 +418,7 @@ sources:
   archived: false
   poll_interval_minutes: 360
 - name: Unity
+  description: "Unity 官方账号，面向 2D、3D、VR 等互动体验开发的平台。"
   kind: x_rsshub
   locator: unity
   official: true
@@ -373,6 +426,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: Vincent AI Notes
+  description: "AI 主题内容账号，分享人工智能相关资讯与笔记。"
   kind: x_rsshub
   locator: Vincent_AINotes
   official: false
@@ -380,6 +434,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: X Platform
+  description: "X 平台官方账号，发布平台功能、产品与社区动态。"
   kind: x_rsshub
   locator: X
   official: true
@@ -387,6 +442,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: 無名先生
+  description: "关注空投与金融分析的信息整理账号。"
   kind: x_rsshub
   locator: Wuming_Mr_
   official: false
@@ -394,6 +450,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: 自己修行的才谷
+  description: "个人创作者，关注 AI、投资与自媒体内容。"
   kind: x_rsshub
   locator: realCaigu
   official: false
@@ -401,6 +458,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: 舒琴分析
+  description: "链上数据研究者，分享加密资产市场分析。"
   kind: x_rsshub
   locator: Bitebishuqin
   official: false
@@ -408,6 +466,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: 逸尘
+  description: "连续创业者，关注法律科技、企业 AI 服务与 AI 自媒体商业化。"
   kind: x_rsshub
   locator: gengdaJ
   official: false
@@ -415,6 +474,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: 高军
+  description: "挖掘优质 GitHub 开源项目和 AI 生产力工具。"
   kind: x_rsshub
   locator: GoJun315
   official: false
@@ -422,6 +482,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: 36Kr_AI资讯
+  description: "36氪综合科技与商业资讯 RSS，涵盖人工智能等领域。"
   kind: rss
   locator: https://36kr.com/feed
   official: false
@@ -429,6 +490,7 @@ sources:
   archived: false
   poll_interval_minutes: 120
 - name: Reddit · r/MachineLearning
+  description: "机器学习研究与工程社区，讨论论文、项目、职业与技术问题。"
   kind: reddit
   locator: r/machinelearning
   official: false
@@ -436,6 +498,7 @@ sources:
   archived: false
   poll_interval_minutes: 60
 - name: reddit-comfyui（旧 rss.app）
+  description: "由 rss.app 转发的 r/comfyui 社区订阅（旧来源，已归档）。"
   kind: rss
   locator: https://rss.app/feeds/ADU2v00mvRQhCyFn.xml
   official: false
@@ -443,6 +506,7 @@ sources:
   archived: true
   poll_interval_minutes: 120
 - name: reddit-stable diffusion（旧 rss.app）
+  description: "由 rss.app 转发的 Stable Diffusion 社区订阅（旧来源，已归档）。"
   kind: rss
   locator: https://rss.app/feeds/6E0PVUhx279TAbME.xml
   official: false
@@ -450,6 +514,7 @@ sources:
   archived: true
   poll_interval_minutes: 120
 - name: 澎湃新闻-首页
+  description: "澎湃新闻首页综合新闻 RSS，提供国内外时事与社会资讯。"
   kind: rss
   locator: https://rsshub.app/thepaper/featured
   official: false

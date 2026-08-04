@@ -16,6 +16,7 @@ from app.storage.migrations import (
     MigrationPreflightError,
     MigrationRequiredError,
     apply_v7_migration,
+    initialize_runtime_schema,
     inspect_migration,
 )
 
@@ -300,7 +301,7 @@ class MigrationTests(unittest.TestCase):
             finally:
                 check.close()
 
-    def test_current_v8_database_reports_dangling_brief_references_without_rewriting_data(self) -> None:
+    def test_current_v9_database_reports_dangling_brief_references_without_rewriting_data(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "current.db"
             create_v6_database(path)
@@ -313,7 +314,29 @@ class MigrationTests(unittest.TestCase):
                 self.assertFalse(report.is_current)
                 self.assertFalse(report.can_apply)
                 self.assertEqual(report.brief_missing_event_references, 1)
-                self.assertTrue(any("当前 v8 数据库不自动修改数据" in issue for issue in report.issues))
+                self.assertTrue(any("当前 v9 数据库不自动修改数据" in issue for issue in report.issues))
+            finally:
+                connection.close()
+
+    def test_runtime_safely_adds_description_to_a_complete_v8_database(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.db"
+            create_v6_database(path)
+            connection = sqlite3.connect(path)
+            try:
+                apply_v7_migration(connection)
+                connection.execute("ALTER TABLE sources DROP COLUMN description")
+                connection.execute("PRAGMA user_version = 8")
+                connection.commit()
+
+                initialize_runtime_schema(connection)
+
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
+                self.assertIn(
+                    "description",
+                    {row[1] for row in connection.execute("PRAGMA table_info(sources)")},
+                )
+                self.assertEqual(connection.execute("SELECT description FROM sources WHERE id = 1").fetchone()[0], "")
             finally:
                 connection.close()
 
