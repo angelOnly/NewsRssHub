@@ -291,3 +291,11 @@
   .source-page-head h1{font-size:24px}
 }
 @media(max-width:350px){.mobile-primary-nav .nav-link{font-size:11px}}
+
+/* 顶部标签已标明当前页面，手机端移除所有重复页头；来源页仅保留新增入口。 */
+@media(max-width:600px){
+  .page-head:not(.source-page-head){display:none}
+  .source-page-head{display:block;margin:0 0 12px}
+  .source-page-head>div:first-child{display:none}
+  .source-page-head .source-head-actions{width:100%}
+}

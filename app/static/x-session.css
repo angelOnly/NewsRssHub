@@ -72,6 +72,19 @@
 .push-actions .button { margin: 0; }
 .push-actions .button[hidden] { display: none; }
 
+/* 低频维护项收进可展开面板，首屏只保留状态和必要入口。 */
+.settings-fold { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.settings-fold > summary { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; list-style: none; }
+.settings-fold > summary::-webkit-details-marker { display: none; }
+.settings-fold > summary::after { content: '›'; flex: none; color: var(--accent); font-size: 20px; line-height: 1; transition: transform .15s; }
+.settings-fold[open] > summary::after { transform: rotate(90deg); }
+.settings-fold-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.settings-fold-copy strong { color: var(--ink); font-size: 17px; }
+.settings-fold-copy small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-fold-content { padding: 0 16px 16px; border-top: 1px solid var(--line); }
+.settings-fold-intro { margin: 12px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.platform-mobile-overview { display: none; }
+
 @media (max-width: 800px) {
   .credential-alert { align-items: flex-start; flex-direction: column; }
   .credential-status-row { align-items: flex-start; flex-direction: column; gap: 8px; }
@@ -81,4 +94,50 @@
   .connection-card-top, .connection-card-foot, .source-connection-guide-head, .settings-section-head { align-items: flex-start; flex-direction: column; }
   .source-connection-item { grid-template-columns: auto minmax(0, 1fr); }
   .source-connection-item > a { grid-column: 2; }
+}
+
+/* 设置页在手机上以分区内容为主，避免标题压缩首屏空间。 */
+@media (max-width: 600px) {
+  .settings-section-head h2 { font-size: 20px; line-height: 1.25; }
+  .settings-page .settings-section.settings-section-folded { margin-top: 18px; padding-top: 18px; }
+  .settings-fold { border-radius:12px; }
+  .settings-fold > summary { gap: 8px; padding: 10px 12px; }
+  .settings-fold > summary::after { font-size: 18px; }
+  .settings-fold-copy strong { font-size: 16px; }
+  .settings-fold-copy small { max-width: 205px; font-size: 11px; }
+  .settings-fold .status { padding: 2px 7px; font-size: 11px; }
+  .settings-fold-content { padding: 0 12px 12px; }
+  .settings-fold-intro { margin: 10px 0; font-size: 12px; }
+
+  .model-settings-fold .credential-card { margin: 0 0 10px; padding: 12px; border-radius: 11px; }
+  .model-settings-fold .credential-status-row { gap: 5px; }
+  .model-settings-fold .credential-status-row h3 { margin-top: 6px; font-size: 15px; line-height: 1.4; }
+  .model-settings-fold .connection-details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+  .model-settings-fold .connection-details div { padding: 6px 8px; }
+  .model-settings-fold .connection-details div:first-child { grid-column: 1 / -1; }
+  .model-settings-fold .connection-details dt { font-size: 9px; }
+  .model-settings-fold .connection-details dd { font-size: 11px; }
+  .model-settings-fold .credential-meta { margin-top: 6px; font-size: 11px; }
+  .model-settings-fold .credential-form { margin-top: 10px; }
+  .model-settings-fold .inline-test-form { gap: 4px; margin-top: 9px; font-size: 12px; }
+
+  #platforms .settings-section-head { align-items: center; flex-direction: row; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+  #platforms .settings-section-head .eyebrow,
+  #platforms .settings-section-head p:not(.eyebrow) { display: none; }
+  #platforms .settings-section-head .button { flex: none; min-height: 34px; padding: 6px 10px; font-size: 12px; }
+  .platform-mobile-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0 0 9px; }
+  .platform-mobile-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .platform-mobile-item strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .platform-mobile-item span { flex: none; color: #317653; font-size: 11px; font-weight: 700; }
+  .platform-mobile-item.needs-setup span { color: #9d4e22; }
+  .platform-settings-fold .connection-card { gap: 10px; padding: 12px; border-radius: 11px; }
+  .platform-settings-fold .connection-card-top { align-items: center; flex-direction: row; }
+  .platform-settings-fold .connection-card-top .eyebrow { display: none; }
+  .platform-settings-fold .connection-card h3 { margin: 0; font-size: 17px; }
+  .platform-settings-fold .connection-card > p { min-height: 0; font-size: 12px; line-height: 1.45; }
+  .platform-settings-fold .credential-meta { margin-top: 4px; font-size: 11px; }
+  .platform-settings-fold .credential-form { margin-top: 10px; }
+  .platform-settings-fold .inline-test-form { gap: 4px; margin-top: 9px; font-size: 12px; }
+  .platform-settings-fold .connection-grid-public,
+  .platform-settings-fold .connection-flow { display: none; }
 }

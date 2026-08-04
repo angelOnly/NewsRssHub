@@ -56,78 +56,92 @@
     </form>
   </section>
 
-  <section class="settings-section" id="model">
-    <header class="settings-section-head">
-      <div>
-        <p class="eyebrow">ANALYSIS MODEL</p>
-        <h2>大模型</h2>
-        <p>用于生成单帖摘要，并依据项目 Skill 合并重复消息、划分四个内容层级。</p>
+  <section class="settings-section settings-section-folded" id="model">
+    <details class="settings-fold model-settings-fold">
+      <summary>
+        <span class="settings-fold-copy">
+          <strong>大模型</strong>
+          <small>{{ llm_credential.model_name or '未配置模型' }} · {{ '已开启' if llm_credential.enabled else '已关闭' }}</small>
+        </span>
+        <span class="status {{ 'healthy' if llm_credential.state in ('valid', 'config') else 'error' }}">
+          {{ {
+            'valid': '可用',
+            'config': '配置文件',
+            'missing': '未配置',
+            'invalid': '已失效',
+            'error': '需重试',
+            'needs_key': '需要安全密钥'
+          }.get(llm_credential.state, '待验证') }}
+        </span>
+      </summary>
+      <div class="settings-fold-content">
+        <p class="settings-fold-intro">用于生成单帖摘要，并依据项目 Skill 合并重复消息、划分内容层级。</p>
+
+        <section class="credential-card {{ llm_credential.state }}">
+          <div class="credential-status-row">
+            <div>
+              <span class="status {{ 'healthy' if llm_credential.state in ('valid', 'config') else 'error' }}">
+                {{ {
+                  'valid': '可用',
+                  'config': '配置文件',
+                  'missing': '未配置',
+                  'invalid': '已失效',
+                  'error': '需重试',
+                  'needs_key': '需要安全密钥'
+                }.get(llm_credential.state, '待验证') }}
+              </span>
+              <h3>{{ llm_credential.message }}</h3>
+            </div>
+            {% if llm_credential.fingerprint %}<code class="credential-fingerprint">指纹 · {{ llm_credential.fingerprint }}</code>{% endif %}
+          </div>
+          <dl class="connection-details">
+            <div><dt>Base URL</dt><dd>{{ llm_credential.base_url }}</dd></div>
+            <div><dt>模型</dt><dd>{{ llm_credential.model_name }}</dd></div>
+            <div><dt>分析开关</dt><dd>{{ '已开启' if llm_credential.enabled else '已关闭' }}</dd></div>
+          </dl>
+          {% if llm_credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ llm_credential.last_validated_at|relative_time }}</p>{% endif %}
+          {% if llm_credential.updated_at %}<p class="credential-meta">最近更新：{{ llm_credential.updated_at|relative_time }}</p>{% endif %}
+        </section>
+
+        {% if llm_credential.state == 'needs_key' %}
+          <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是加密保存 API Key 的主密钥，不是模型 API Key 本身。</div>
+        {% else %}
+          <form class="source-form credential-form" method="post" action="/settings/llm" autocomplete="off">
+            <label>
+              API Key
+              <input name="api_key_value" type="password" {% if not llm_credential.configured %}required{% endif %} autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="{{ '留空即可保留当前 Key' if llm_credential.configured else '粘贴模型 API Key' }}">
+              <small>密钥不会显示在网页中，会以加密形式保存到 SQLite。已配置后留空，即保留当前 Key。</small>
+            </label>
+            <div class="two-col">
+              <label>
+                Base URL
+                <input name="base_url" type="url" required value="{{ llm_credential.base_url }}" autocomplete="url" spellcheck="false" placeholder="https://api.openai.com/v1">
+                <small>填写服务商提供的 OpenAI 兼容 API 根地址。</small>
+              </label>
+              <label>
+                模型名称
+                <input name="model_name" required value="{{ llm_credential.model_name }}" autocomplete="off" spellcheck="false" placeholder="gpt-4.1-mini">
+                <small>会用该模型做连接测试、单帖摘要和资讯语义筛选。</small>
+              </label>
+            </div>
+            <label class="setting-check">
+              <input name="enabled" type="checkbox" value="true" {% if llm_credential.enabled %}checked{% endif %}>
+              <span>启用大模型摘要与语义筛选；关闭时长内容会保持待处理，不会使用旧关键词规则。</span>
+            </label>
+            <div class="form-actions">
+              <button class="button button-primary" type="submit">测试并保存模型</button>
+            </div>
+          </form>
+
+          {% if llm_credential.configured %}
+            <form class="inline-test-form" method="post" action="/settings/llm/test">
+              <span>不改配置，只确认当前模型是否可用？</span>
+              <button type="submit">测试当前模型连接</button>
+            </form>
+          {% endif %}
+        {% endif %}
       </div>
-    </header>
-
-    <section class="credential-card {{ llm_credential.state }}">
-      <div class="credential-status-row">
-        <div>
-          <span class="status {{ 'healthy' if llm_credential.state in ('valid', 'config') else 'error' }}">
-            {{ {
-              'valid': '可用',
-              'config': '配置文件',
-              'missing': '未配置',
-              'invalid': '已失效',
-              'error': '需重试',
-              'needs_key': '需要安全密钥'
-            }.get(llm_credential.state, '待验证') }}
-          </span>
-          <h3>{{ llm_credential.message }}</h3>
-        </div>
-        {% if llm_credential.fingerprint %}<code class="credential-fingerprint">指纹 · {{ llm_credential.fingerprint }}</code>{% endif %}
-      </div>
-      <dl class="connection-details">
-        <div><dt>Base URL</dt><dd>{{ llm_credential.base_url }}</dd></div>
-        <div><dt>模型</dt><dd>{{ llm_credential.model_name }}</dd></div>
-        <div><dt>分析开关</dt><dd>{{ '已开启' if llm_credential.enabled else '已关闭' }}</dd></div>
-      </dl>
-      {% if llm_credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ llm_credential.last_validated_at|relative_time }}</p>{% endif %}
-      {% if llm_credential.updated_at %}<p class="credential-meta">最近更新：{{ llm_credential.updated_at|relative_time }}</p>{% endif %}
-    </section>
-
-    {% if llm_credential.state == 'needs_key' %}
-      <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是加密保存 API Key 的主密钥，不是模型 API Key 本身。</div>
-    {% else %}
-      <form class="source-form credential-form" method="post" action="/settings/llm" autocomplete="off">
-        <label>
-          API Key
-          <input name="api_key_value" type="password" {% if not llm_credential.configured %}required{% endif %} autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="{{ '留空即可保留当前 Key' if llm_credential.configured else '粘贴模型 API Key' }}">
-          <small>密钥不会显示在网页中，会以加密形式保存到 SQLite。已配置后留空，即保留当前 Key。</small>
-        </label>
-        <div class="two-col">
-          <label>
-            Base URL
-            <input name="base_url" type="url" required value="{{ llm_credential.base_url }}" autocomplete="url" spellcheck="false" placeholder="https://api.openai.com/v1">
-            <small>填写服务商提供的 OpenAI 兼容 API 根地址。</small>
-          </label>
-          <label>
-            模型名称
-            <input name="model_name" required value="{{ llm_credential.model_name }}" autocomplete="off" spellcheck="false" placeholder="gpt-4.1-mini">
-            <small>会用该模型做连接测试、单帖摘要和资讯语义筛选。</small>
-          </label>
-        </div>
-        <label class="setting-check">
-          <input name="enabled" type="checkbox" value="true" {% if llm_credential.enabled %}checked{% endif %}>
-          <span>启用大模型摘要与语义筛选；关闭时长内容会保持待处理，不会使用旧关键词规则。</span>
-        </label>
-        <div class="form-actions">
-          <button class="button button-primary" type="submit">测试并保存模型</button>
-        </div>
-      </form>
-
-      {% if llm_credential.configured %}
-        <form class="inline-test-form" method="post" action="/settings/llm/test">
-          <span>不改配置，只确认当前模型是否可用？</span>
-          <button type="submit">测试当前模型连接</button>
-        </form>
-      {% endif %}
-    {% endif %}
+    </details>
   </section>
 
   <section class="settings-section" id="platforms">
@@ -140,68 +154,92 @@
       <a class="button button-secondary" href="/sources/new">添加来源</a>
     </header>
 
-    {% for connection in platform_connections if connection.key == 'x_session' %}
-      <article class="connection-card connection-card-wide {{ connection.state }}" id="x">
-        <div class="connection-card-top">
-          <div>
-            <p class="eyebrow">X CONNECTION</p>
-            <h3>X</h3>
-          </div>
-          <span class="status {{ 'healthy' if connection.usable else 'error' }}">
-            {{ '已连接' if connection.usable else '需要登录' }}
-          </span>
-        </div>
-        <p>{{ connection.message }}</p>
-        {% if x_credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ x_credential.last_validated_at|relative_time }}</p>{% endif %}
-        {% if x_credential.updated_at %}<p class="credential-meta">最近更新：{{ x_credential.updated_at|relative_time }}</p>{% endif %}
-
-        {% if x_credential.state == 'needs_key' %}
-          <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是用于加密保存 Cookie 的主密钥，不是 X Cookie；Cookie 更新后无需重启服务。</div>
-        {% else %}
-          <form class="source-form credential-form" method="post" action="/settings/x-session" autocomplete="off">
-            <label>
-              X Cookie
-              <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 auth_token 值，或完整 Cookie 字符串">
-              <small>支持单独的 <code>auth_token</code> 值，也支持包含 <code>auth_token</code> 和 <code>ct0</code> 的 Cookie 片段。提交后先验证；失败时不会覆盖当前已保存的 Cookie。</small>
-            </label>
-            <div class="form-actions">
-              <button class="button button-primary" type="submit">验证并更新 X Cookie</button>
-            </div>
-          </form>
-
-          {% if x_credential.configured %}
-            <form class="inline-test-form" method="post" action="/settings/x-session/test">
-              <span>验证当前 Cookie，并让此前失败的 X 来源在下一轮重新检查。</span>
-              <button type="submit">验证并刷新 X 来源</button>
-            </form>
+    <div class="platform-mobile-overview" aria-label="平台连接概览">
+      {% for connection in platform_connections %}
+        <div class="platform-mobile-item {{ 'is-ready' if connection.usable else 'needs-setup' }}">
+          <strong>{{ 'RSS' if connection.key == 'rss_public' else connection.platform }}</strong>
+          {% if connection.requires_credentials %}
+            <span>{{ '已连接' if connection.usable else '需配置' }}</span>
+          {% else %}
+            <span>公开可用</span>
           {% endif %}
-        {% endif %}
-      </article>
-    {% endfor %}
-
-    <div class="connection-grid connection-grid-public">
-      {% for connection in platform_connections if connection.key != 'x_session' %}
-        <article class="connection-card {{ connection.state }}">
-          <div class="connection-card-top">
-            <div>
-              <p class="eyebrow">{{ connection.platform|upper }}</p>
-              <h3>{{ connection.platform }}</h3>
-            </div>
-            <span class="status healthy">公开可用</span>
-          </div>
-          <p>{{ connection.message }}</p>
-          <div class="connection-card-foot">
-            <span class="connection-mode">无需账号凭据</span>
-            <a class="button button-secondary" href="/sources/new">添加来源</a>
-          </div>
-        </article>
+        </div>
       {% endfor %}
     </div>
 
-    <aside class="security-note connection-flow">
-      <strong>添加来源的顺序</strong>
-      <p>选择平台 → 若平台需要凭据则先在本页保存并测试 → 添加账号、社区或 RSS 地址 → 系统验证来源后开始抓取。一个 X Cookie 可供多个 X 账号共用，绝不会写入单个来源配置。</p>
-    </aside>
+    <details class="settings-fold platform-settings-fold" id="x">
+      <summary>
+        <span class="settings-fold-copy">
+          <strong>平台连接设置</strong>
+          <small>配置或更新 X Cookie</small>
+        </span>
+        <span class="status {{ 'healthy' if x_credential.state == 'valid' else 'error' }}">{{ '已连接' if x_credential.state == 'valid' else '需配置' }}</span>
+      </summary>
+      <div class="settings-fold-content">
+        {% for connection in platform_connections if connection.key == 'x_session' %}
+          <article class="connection-card connection-card-wide {{ connection.state }}">
+            <div class="connection-card-top">
+              <div>
+                <p class="eyebrow">X CONNECTION</p>
+                <h3>X</h3>
+              </div>
+              <span class="status {{ 'healthy' if connection.usable else 'error' }}">
+                {{ '已连接' if connection.usable else '需要登录' }}
+              </span>
+            </div>
+            <p>{{ connection.message }}</p>
+            {% if x_credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ x_credential.last_validated_at|relative_time }}</p>{% endif %}
+            {% if x_credential.updated_at %}<p class="credential-meta">最近更新：{{ x_credential.updated_at|relative_time }}</p>{% endif %}
+
+            {% if x_credential.state == 'needs_key' %}
+              <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是用于加密保存 Cookie 的主密钥，不是 X Cookie；Cookie 更新后无需重启服务。</div>
+            {% else %}
+              <form class="source-form credential-form" method="post" action="/settings/x-session" autocomplete="off">
+                <label>
+                  X Cookie
+                  <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 auth_token 值，或完整 Cookie 字符串">
+                  <small>支持单独的 <code>auth_token</code> 值，也支持包含 <code>auth_token</code> 和 <code>ct0</code> 的 Cookie 片段。提交后先验证；失败时不会覆盖当前已保存的 Cookie。</small>
+                </label>
+                <div class="form-actions">
+                  <button class="button button-primary" type="submit">验证并更新 X Cookie</button>
+                </div>
+              </form>
+
+              {% if x_credential.configured %}
+                <form class="inline-test-form" method="post" action="/settings/x-session/test">
+                  <span>验证当前 Cookie，并让此前失败的 X 来源在下一轮重新检查。</span>
+                  <button type="submit">验证并刷新 X 来源</button>
+                </form>
+              {% endif %}
+            {% endif %}
+          </article>
+        {% endfor %}
+
+        <div class="connection-grid connection-grid-public">
+          {% for connection in platform_connections if connection.key != 'x_session' %}
+            <article class="connection-card {{ connection.state }}">
+              <div class="connection-card-top">
+                <div>
+                  <p class="eyebrow">{{ connection.platform|upper }}</p>
+                  <h3>{{ connection.platform }}</h3>
+                </div>
+                <span class="status healthy">公开可用</span>
+              </div>
+              <p>{{ connection.message }}</p>
+              <div class="connection-card-foot">
+                <span class="connection-mode">无需账号凭据</span>
+                <a class="button button-secondary" href="/sources/new">添加来源</a>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+
+        <aside class="security-note connection-flow">
+          <strong>添加来源的顺序</strong>
+          <p>选择平台 → 若平台需要凭据则先在本页保存并测试 → 添加账号、社区或 RSS 地址 → 系统验证来源后开始抓取。一个 X Cookie 可供多个 X 账号共用，绝不会写入单个来源配置。</p>
+        </aside>
+      </div>
+    </details>
   </section>
 </section>
 {% endblock %}
