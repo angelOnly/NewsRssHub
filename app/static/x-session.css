@@ -72,6 +72,15 @@
 .push-actions .button { margin: 0; }
 .push-actions .button[hidden] { display: none; }
 
+/* 手机通知和抓取策略平时只显示两行摘要，具体操作按需展开。 */
+.settings-section.settings-section-compact { padding-top: 0; border-top: 0; }
+.settings-section.settings-section-compact + .settings-section.settings-section-compact { margin-top: 10px; }
+#fetch.settings-section-compact { margin-top: 10px; }
+.compact-settings-fold > summary { min-height: 62px; }
+.settings-fold-value { flex: none; color: var(--accent-dark); font-size: 13px; font-weight: 800; white-space: nowrap; }
+.compact-settings-fold .settings-fold-content > .source-form { margin: 0; padding: 0; border: 0; background: transparent; }
+.compact-settings-fold .credential-form { margin-top: 0; }
+
 /* 低频维护项收进可展开面板，首屏只保留状态和必要入口。 */
 .settings-fold { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
 .settings-fold > summary { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; list-style: none; }
@@ -106,6 +115,8 @@
   .settings-fold-copy strong { font-size: 16px; }
   .settings-fold-copy small { max-width: 205px; font-size: 11px; }
   .settings-fold .status { padding: 2px 7px; font-size: 11px; }
+  .compact-settings-fold > summary { min-height: 54px; }
+  .settings-fold-value { font-size: 12px; }
   .settings-fold-content { padding: 0 12px 12px; }
   .settings-fold-intro { margin: 10px 0; font-size: 12px; }
 

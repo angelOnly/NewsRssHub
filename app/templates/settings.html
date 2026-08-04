@@ -13,47 +13,48 @@
   {% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
   {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 
-  <section class="settings-section" id="push">
-    <header class="settings-section-head">
-      <div>
-        <p class="eyebrow">MOBILE NOTIFICATIONS</p>
-        <h2>手机通知</h2>
-        <p>每个抓取周期最多发送一条提醒：<strong>“本轮抓取发现 X 条新内容，点此查看”</strong>。点击通知会打开首页，不会逐条推送资讯。</p>
-      </div>
-    </header>
-    <div class="credential-card push-card" data-push-controls>
-      <div class="credential-status-row">
-        <div>
-          <span class="status pending" data-push-state>检查中</span>
-          <p class="credential-meta" data-push-status>正在检查手机通知状态…</p>
+  <section class="settings-section settings-section-compact" id="push">
+    <details class="settings-fold compact-settings-fold push-settings-fold" data-push-controls>
+      <summary>
+        <span class="settings-fold-copy">
+          <strong>手机通知</strong>
+          <small data-push-status>正在检查手机通知状态…</small>
+        </span>
+        <span class="status pending" data-push-state>检查中</span>
+      </summary>
+      <div class="settings-fold-content">
+        <p class="settings-fold-intro">本轮新增内容会合并为一条提醒；点击通知始终打开首页，不会逐条推送资讯。</p>
+        <p class="push-help">iPhone 请先将网站添加到主屏幕，并从主屏幕图标打开后再开启通知。</p>
+        <p class="push-message" data-push-message role="status"></p>
+        <div class="form-actions push-actions">
+          <button class="button button-primary" type="button" data-push-enable>开启手机通知</button>
+          <button class="button button-secondary" type="button" data-push-test hidden>发送测试通知</button>
+          <button class="button button-secondary" type="button" data-push-disable hidden>关闭此设备通知</button>
         </div>
       </div>
-      <p class="push-help">iPhone 请先用 Safari 将网站添加到主屏幕，并从主屏幕图标打开后再开启通知。</p>
-      <p class="push-message" data-push-message role="status"></p>
-      <div class="form-actions push-actions">
-        <button class="button button-primary" type="button" data-push-enable>开启手机通知</button>
-        <button class="button button-secondary" type="button" data-push-test hidden>发送测试通知</button>
-        <button class="button button-secondary" type="button" data-push-disable hidden>关闭此设备通知</button>
-      </div>
-    </div>
+    </details>
   </section>
 
-  <section class="settings-section" id="fetch">
-    <header class="settings-section-head">
-      <div>
-        <p class="eyebrow">FETCH POLICY</p>
-        <h2>统一抓取策略</h2>
-        <p>所有启用来源共用同一个抓取间隔。每次抓取完成后，系统会额外随机延后 1–5 分钟；同一批请求之间也会随机等待 2–5 秒，避免集中请求平台。</p>
+  <section class="settings-section settings-section-compact" id="fetch">
+    <details class="settings-fold compact-settings-fold fetch-settings-fold">
+      <summary>
+        <span class="settings-fold-copy">
+          <strong>统一抓取策略</strong>
+          <small>所有启用来源共用间隔，并自动错峰抓取</small>
+        </span>
+        <span class="settings-fold-value">{{ fetch_policy.interval_minutes }} 分钟</span>
+      </summary>
+      <div class="settings-fold-content">
+        <p class="settings-fold-intro">保存后会在未来 1–5 分钟内为全部启用来源重新错峰排期，不会立即同时抓取。</p>
+        <form class="source-form credential-form" method="post" action="/settings/fetch-policy">
+          <label>
+            抓取间隔（分钟）
+            <input name="interval_minutes" type="number" min="5" max="1440" required value="{{ fetch_policy.interval_minutes }}">
+          </label>
+          <div class="form-actions"><button class="button button-primary" type="submit">保存抓取策略</button></div>
+        </form>
       </div>
-    </header>
-    <form class="source-form credential-form" method="post" action="/settings/fetch-policy">
-      <label>
-        抓取间隔（分钟）
-        <input name="interval_minutes" type="number" min="5" max="1440" required value="{{ fetch_policy.interval_minutes }}">
-        <small>保存后会在未来 1–5 分钟内为全部启用来源重新错峰排期，不会立即同时抓取。</small>
-      </label>
-      <div class="form-actions"><button class="button button-primary" type="submit">保存抓取策略</button></div>
-    </form>
+    </details>
   </section>
 
   <section class="settings-section settings-section-folded" id="model">
