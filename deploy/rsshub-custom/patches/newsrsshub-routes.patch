@@ -1,0 +1,521 @@
+diff --git a/lib/routes/twitter/api/index.ts b/lib/routes/twitter/api/index.ts
+index 58200fa..f786017 100644
+--- a/lib/routes/twitter/api/index.ts
++++ b/lib/routes/twitter/api/index.ts
+@@ -4,10 +4,11 @@ import ConfigNotFoundError from '@/errors/types/config-not-found';
+ import devApi from './developer-api/api';
+ // import mobileApi from './mobile-api/api';
+ import webApi from './web-api/api';
++import { hasNewsRssHubRuntimeToken } from './web-api/newsrsshub-runtime';
+ 
+ const enableThirdPartyApi = config.twitter.thirdPartyApi;
+ // const enableMobileApi = config.twitter.username && config.twitter.password;
+-const enableWebApi = config.twitter.authToken;
++const enableWebApi = config.twitter.authToken || hasNewsRssHubRuntimeToken();
+ const enableDeveloperApi = config.twitter.consumerKey && config.twitter.consumerSecret;
+ 
+ type ApiItem = (id: string, params?: Record<string, any>) => Promise<Record<string, any>> | Record<string, any> | null;
+diff --git a/lib/routes/twitter/api/web-api/api.ts b/lib/routes/twitter/api/web-api/api.ts
+index 546342d..805d9a5 100644
+--- a/lib/routes/twitter/api/web-api/api.ts
++++ b/lib/routes/twitter/api/web-api/api.ts
+@@ -5,10 +5,13 @@ import ofetch from '@/utils/ofetch';
+ 
+ import { getTwitterUserCacheKey } from '../../utils';
+ import { baseUrl, gqlFeatures, gqlMap, initGqlMap } from './constants';
++import { hasNewsRssHubRuntimeToken } from './newsrsshub-runtime';
+ import { gatherLegacyFromData, paginationTweets, twitterGot } from './utils';
+ 
+-const getUserData = (id) =>
+-    cache.tryGet(`twitter-userdata-${id}`, () => {
++const useNewsRssHubRuntimeToken = hasNewsRssHubRuntimeToken();
++
++const getUserData = (id) => {
++    const load = () => {
+         const params = {
+             variables: id.startsWith('+')
+                 ? JSON.stringify({
+@@ -40,7 +43,10 @@ const getUserData = (id) =>
+         return twitterGot(`${baseUrl}${id.startsWith('+') ? gqlMap.UserByRestId : gqlMap.UserByScreenName}`, params, {
+             allowNoAuth: !id.startsWith('+'),
+         });
+-    });
++    };
++    // 运行时 token 可以随 Web 保存即时变化，不能复用旧 token 的用户资料缓存。
++    return useNewsRssHubRuntimeToken ? load() : cache.tryGet(`twitter-userdata-${id}`, load);
++};
+ 
+ const cacheTryGet = async (_id, params, operationName, func) => {
+     const userData: any = await getUserData(_id);
+@@ -49,7 +55,10 @@ const cacheTryGet = async (_id, params, operationName, func) => {
+         cache.set(`twitter-userdata-${_id}`, '', config.cache.contentExpire);
+         throw new InvalidParameterError('User not found');
+     }
+-    return cache.tryGet(getTwitterUserCacheKey(id, operationName, params), () => func(id, params), config.cache.routeExpire, false);
++    // 同上，动态凭据模式下每次请求都应真实发往 X，避免旧缓存掩盖失效 Cookie。
++    return useNewsRssHubRuntimeToken
++        ? func(id, params)
++        : cache.tryGet(getTwitterUserCacheKey(id, operationName, params), () => func(id, params), config.cache.routeExpire, false);
+ };
+ 
+ const getUserTweets = (id: string, params?: Record<string, any>) =>
+diff --git a/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts b/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts
+@@ -0,0 +1,35 @@
++import { readFile } from 'node:fs/promises';
++import path from 'node:path';
++
++import ConfigNotFoundError from '@/errors/types/config-not-found';
++
++const RUNTIME_DIRECTORY_ENV = 'NEWSRSSHUB_RUNTIME_DIR';
++const X_CREDENTIAL_FILENAME = 'x-twitter.json';
++
++export const hasNewsRssHubRuntimeToken = () => Boolean(process.env[RUNTIME_DIRECTORY_ENV]?.trim());
++
++export async function getNewsRssHubRuntimeToken(): Promise<string | undefined> {
++    const directory = process.env[RUNTIME_DIRECTORY_ENV]?.trim();
++    if (!directory) {
++        return undefined;
++    }
++
++    const credentialPath = path.join(directory, X_CREDENTIAL_FILENAME);
++    let raw: string;
++    try {
++        raw = await readFile(credentialPath, 'utf8');
++    } catch {
++        throw new ConfigNotFoundError('NewsRSSHub X 凭据文件不可读取');
++    }
++
++    try {
++        const document = JSON.parse(raw) as { auth_token?: unknown };
++        const authToken = typeof document.auth_token === 'string' ? document.auth_token.trim() : '';
++        if (!authToken) {
++            throw new Error('missing auth_token');
++        }
++        return authToken;
++    } catch {
++        throw new ConfigNotFoundError('NewsRSSHub X 凭据文件格式无效');
++    }
++}
+diff --git a/lib/routes/twitter/api/web-api/utils.ts b/lib/routes/twitter/api/web-api/utils.ts
+index 3d3dbcf..801217d 100644
+--- a/lib/routes/twitter/api/web-api/utils.ts
++++ b/lib/routes/twitter/api/web-api/utils.ts
+@@ -1,3 +1,5 @@
++import { createHash } from 'node:crypto';
++
+ import { cookie as HttpCookieAgentCookie, CookieAgent } from 'http-cookie-agent/undici';
+ import queryString from 'query-string';
+ import { Cookie, CookieJar } from 'tough-cookie';
+@@ -12,11 +14,18 @@ import proxy from '@/utils/proxy';
+ 
+ import { baseUrl, bearerToken, gqlFeatures, gqlMap, thirdPartySupportedAPI } from './constants';
+ // import login from './login';
++import { getNewsRssHubRuntimeToken } from './newsrsshub-runtime';
+ 
+ let authTokenIndex = 0;
+ 
++const tokenFingerprint = (token?: string) =>
++    token ? createHash('sha256').update(token).digest('hex') : 'guest';
++
++const displayToken = (token?: string) => (token ? `#${tokenFingerprint(token).slice(0, 12)}` : 'guest');
++
+ const token2Cookie = async (token) => {
+-    const c = await cache.get(`twitter:cookie:${token}`);
++    const cacheKey = tokenFingerprint(token);
++    const c = await cache.get(`twitter:cookie:${cacheKey}`);
+     if (c) {
+         return c;
+     }
+@@ -42,7 +51,7 @@ const token2Cookie = async (token) => {
+             }
+         }
+         const cookie = JSON.stringify(jar.serializeSync());
+-        cache.set(`twitter:cookie:${token}`, cookie);
++        cache.set(`twitter:cookie:${cacheKey}`, cookie);
+         return cookie;
+     } catch {
+         // ignore
+@@ -52,20 +61,30 @@ const token2Cookie = async (token) => {
+ 
+ const lockPrefix = 'twitter:lock-token1:';
+ 
++const availableAuthTokens = async (): Promise<string[]> => {
++    const runtimeToken = await getNewsRssHubRuntimeToken();
++    if (runtimeToken) {
++        return [runtimeToken];
++    }
++    return config.twitter.authToken || [];
++};
++
+ const getAuth = async (retry: number) => {
+-    if (!config.twitter.authToken || retry <= 0) {
++    const tokens = await availableAuthTokens();
++    if (!tokens.length || retry <= 0) {
+         return;
+     }
+-    const index = authTokenIndex++ % config.twitter.authToken.length;
+-    const token = config.twitter.authToken[index];
+-    const lock = await cache.get(`${lockPrefix}${token}`, false);
++    const index = authTokenIndex++ % tokens.length;
++    const token = tokens[index];
++    const fingerprint = tokenFingerprint(token);
++    const lock = await cache.get(`${lockPrefix}${fingerprint}`, false);
+     if (lock) {
+-        logger.debug(`twitter debug: twitter cookie for token ${token} is locked, retry: ${retry}`);
++        logger.debug(`twitter debug: twitter cookie for token ${displayToken(token)} is locked, retry: ${retry}`);
+         await new Promise((resolve) => setTimeout(resolve, Math.random() * 500 + 500));
+         return await getAuth(retry - 1);
+     }
+-    logger.debug(`twitter debug: lock twitter cookie for token ${token}`);
+-    await cache.set(`${lockPrefix}${token}`, '1', 20);
++    logger.debug(`twitter debug: lock twitter cookie for token ${displayToken(token)}`);
++    await cache.set(`${lockPrefix}${fingerprint}`, '1', 20);
+     return {
+         token,
+         // username: config.twitter.username?.[index],
+@@ -104,7 +123,7 @@ export const twitterGot = async (
+           }
+         | undefined;
+     if (cookie) {
+-        logger.debug(`twitter debug: got twitter cookie for token ${auth?.token}`);
++        logger.debug(`twitter debug: got twitter cookie for token ${displayToken(auth?.token)}`);
+         if (typeof cookie === 'string') {
+             cookie = JSON.parse(cookie);
+         }
+@@ -122,7 +141,7 @@ export const twitterGot = async (
+             agent,
+         };
+     } else if (auth) {
+-        throw new ConfigNotFoundError(`Twitter cookie for token ${auth?.token?.replace(/(\w{8})(\w+)/, (_, v1, v2) => v1 + '*'.repeat(v2.length))} is not valid`);
++        throw new ConfigNotFoundError('Twitter cookie is not valid');
+     }
+     const jsonCookie = dispatchers
+         ? Object.fromEntries(
+@@ -184,18 +203,16 @@ export const twitterGot = async (
+     const remaining = response.headers.get('x-rate-limit-remaining');
+     const remainingInt = Number.parseInt(remaining || '0');
+     const reset = response.headers.get('x-rate-limit-reset');
+-    logger.debug(
+-        `twitter debug: twitter rate limit remaining for token ${auth?.token} is ${remaining} and reset at ${reset}, auth: ${JSON.stringify(auth)}, status: ${response.status}, data: ${JSON.stringify(responseData?.data)}, cookie: ${JSON.stringify(dispatchers?.jar.serializeSync())}`
+-    );
++    logger.debug(`twitter debug: rate limit remaining for ${displayToken(auth?.token)} is ${remaining}; reset=${reset}; status=${response.status}`);
+     if (auth) {
+         if (remaining && remainingInt < 2 && reset) {
+             const resetTime = new Date(Number.parseInt(reset) * 1000);
+             const delay = (resetTime.getTime() - Date.now()) / 1000;
+-            logger.debug(`twitter debug: twitter rate limit exceeded for token ${auth.token} with status ${response.status}, will unlock after ${delay}s`);
+-            await cache.set(`${lockPrefix}${auth.token}`, '1', Math.ceil(delay) * 2);
++            logger.debug(`twitter debug: rate limit exceeded for token ${displayToken(auth.token)} with status ${response.status}, will unlock after ${delay}s`);
++            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '1', Math.ceil(delay) * 2);
+         } else if (response.status === 429 || JSON.stringify(responseData?.data) === '{"user":{}}') {
+-            logger.debug(`twitter debug: twitter rate limit exceeded for token ${auth.token} with status ${response.status}`);
+-            await cache.set(`${lockPrefix}${auth.token}`, '1', 2000);
++            logger.debug(`twitter debug: rate limit exceeded for token ${displayToken(auth.token)} with status ${response.status}`);
++            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '1', 2000);
+         } else if (response.status === 403 || response.status === 401) {
+             // const newCookie = await login({
+             //     username: auth.username,
+@@ -223,12 +240,12 @@ export const twitterGot = async (
+             //         config.twitter.password?.splice(passwordIndex, 1);
+             //     }
+             // }
+-            logger.debug(`twitter debug: delete twitter cookie for token ${auth.token} with status ${response.status}, remaining tokens: ${config.twitter.authToken?.length}`);
+-            await cache.set(`${lockPrefix}${auth.token}`, '1', 3600);
++            logger.debug(`twitter debug: delete twitter cookie for token ${displayToken(auth.token)} with status ${response.status}, remaining tokens: ${config.twitter.authToken?.length}`);
++            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '1', 3600);
+             // }
+         } else {
+-            logger.debug(`twitter debug: unlock twitter cookie with success for token ${auth.token}`);
+-            await cache.set(`${lockPrefix}${auth.token}`, '', 1);
++            logger.debug(`twitter debug: unlock twitter cookie with success for token ${displayToken(auth.token)}`);
++            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '', 1);
+         }
+     }
+ 
+@@ -237,8 +254,8 @@ export const twitterGot = async (
+     }
+ 
+     if (auth?.token) {
+-        logger.debug(`twitter debug: update twitter cookie for token ${auth.token}`);
+-        await cache.set(`twitter:cookie:${auth.token}`, JSON.stringify(dispatchers?.jar.serializeSync()), config.cache.contentExpire);
++        logger.debug(`twitter debug: update twitter cookie for token ${displayToken(auth.token)}`);
++        await cache.set(`twitter:cookie:${tokenFingerprint(auth.token)}`, JSON.stringify(dispatchers?.jar.serializeSync()), config.cache.contentExpire);
+     }
+ 
+     return responseData;
+diff --git a/lib/routes/twitter/user.ts b/lib/routes/twitter/user.ts
+index df4d0ac..2936739 100644
+--- a/lib/routes/twitter/user.ts
++++ b/lib/routes/twitter/user.ts
+@@ -4,6 +4,7 @@ import logger from '@/utils/logger';
+ 
+ import api from './api';
+ import utils from './utils';
++import { hasNewsRssHubRuntimeToken } from './api/web-api/newsrsshub-runtime';
+ 
+ export const route: Route = {
+     path: '/user/:id/:routeParams?',
+@@ -65,6 +66,10 @@ export const route: Route = {
+ };
+ 
+ async function handler(ctx) {
++    // NewsRSSHub 的 Cookie 由运行时文件热更新，不能命中旧 token 的路由缓存。
++    if (hasNewsRssHubRuntimeToken()) {
++        ctx.header('Cache-Control', 'no-cache');
++    }
+     const id = ctx.req.param('id');
+ 
+     // For compatibility
+diff --git a/lib/routes/newsrsshub/namespace.ts b/lib/routes/newsrsshub/namespace.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/newsrsshub/namespace.ts
+@@ -0,0 +1,8 @@
++import type { Namespace } from '@/types';
++
++export const namespace: Namespace = {
++    name: 'NewsRSSHub',
++    url: 'newsrsshub.local',
++    categories: ['other'],
++    lang: 'zh-CN',
++};
+diff --git a/lib/routes/newsrsshub/runtime.ts b/lib/routes/newsrsshub/runtime.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/newsrsshub/runtime.ts
+@@ -0,0 +1,46 @@
++import { readFile } from 'node:fs/promises';
++import path from 'node:path';
++
++import ConfigNotFoundError from '@/errors/types/config-not-found';
++
++const RUNTIME_DIRECTORY_ENV = 'NEWSRSSHUB_RUNTIME_DIR';
++const FEED_MANIFEST_FILENAME = 'rss-feeds.json';
++const FEED_KEY = /^[a-f0-9]{64}$/;
++
++type FeedManifest = {
++    feeds?: Record<string, { url?: unknown }>;
++};
++
++const runtimeDirectory = () => {
++    const directory = process.env[RUNTIME_DIRECTORY_ENV]?.trim();
++    if (!directory) {
++        throw new ConfigNotFoundError('NewsRSSHub 运行时目录尚未配置');
++    }
++    return directory;
++};
++
++export async function getManagedFeedUrl(key: string): Promise<string> {
++    if (!FEED_KEY.test(key)) {
++        throw new Error('无效的 NewsRSSHub RSS 来源标识');
++    }
++
++    let raw: string;
++    try {
++        raw = await readFile(path.join(runtimeDirectory(), FEED_MANIFEST_FILENAME), 'utf8');
++    } catch {
++        throw new ConfigNotFoundError('NewsRSSHub RSS 来源清单不可读取');
++    }
++
++    try {
++        const manifest = JSON.parse(raw) as FeedManifest;
++        const value = manifest.feeds?.[key]?.url;
++        const url = typeof value === 'string' ? value.trim() : '';
++        const parsed = new URL(url);
++        if (!url || !['http:', 'https:'].includes(parsed.protocol)) {
++            throw new Error('invalid feed url');
++        }
++        return url;
++    } catch {
++        throw new Error('NewsRSSHub RSS 来源清单格式无效或来源不存在');
++    }
++}
+diff --git a/lib/routes/newsrsshub/rss.ts b/lib/routes/newsrsshub/rss.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/newsrsshub/rss.ts
+@@ -0,0 +1,38 @@
++import type { DataItem, Route } from '@/types';
++import parser from '@/utils/rss-parser';
++
++import { getManagedFeedUrl } from './runtime';
++
++export const route: Route = {
++    path: '/rss/:key',
++    categories: ['other'],
++    example: '/newsrsshub/rss/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
++    parameters: { key: 'NewsRSSHub 生成的 RSS 来源标识' },
++    features: {
++        requireConfig: [
++            {
++                name: 'NEWSRSSHUB_RUNTIME_DIR',
++                description: 'NewsRSSHub 共享运行时目录',
++            },
++        ],
++        requirePuppeteer: false,
++        antiCrawler: false,
++        supportBT: false,
++        supportPodcast: false,
++        supportScihub: false,
++    },
++    name: '受管 RSS / Atom 来源',
++    maintainers: ['NewsRSSHub'],
++    handler,
++};
++
++async function handler(ctx) {
++    const url = await getManagedFeedUrl(ctx.req.param('key'));
++    const feed = await parser.parseURL(url);
++    return {
++        title: feed.title || 'NewsRSSHub RSS 来源',
++        link: feed.link || url,
++        description: feed.description,
++        item: feed.items as DataItem[],
++    };
++}
+diff --git a/lib/routes/newsrsshub/x-validate.ts b/lib/routes/newsrsshub/x-validate.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/newsrsshub/x-validate.ts
+@@ -0,0 +1,39 @@
++import type { Route } from '@/types';
++import twitterWebApi from '@/routes/twitter/api/web-api/api';
++import { getNewsRssHubRuntimeToken } from '@/routes/twitter/api/web-api/newsrsshub-runtime';
++
++export const route: Route = {
++    path: '/x/validate',
++    categories: ['other'],
++    example: '/newsrsshub/x/validate',
++    features: {
++        requireConfig: [
++            {
++                name: 'NEWSRSSHUB_RUNTIME_DIR',
++                description: 'NewsRSSHub 共享运行时目录',
++            },
++        ],
++        requirePuppeteer: false,
++        antiCrawler: false,
++        supportBT: false,
++        supportPodcast: false,
++        supportScihub: false,
++    },
++    name: 'X 凭据校验',
++    maintainers: ['NewsRSSHub'],
++    handler,
++};
++
++async function handler(ctx) {
++    // 凭据更新后必须绕过 RSSHub 路由缓存，才能真正验证当前文件中的 token。
++    ctx.header('Cache-Control', 'no-cache');
++    await getNewsRssHubRuntimeToken();
++    await twitterWebApi.init();
++    await twitterWebApi.getUserTweets('OpenAI', { count: 1 });
++    return {
++        title: 'NewsRSSHub X 凭据校验',
++        link: 'https://x.com/OpenAI',
++        item: [],
++        allowEmpty: true,
++    };
++}
+diff --git a/lib/routes/reddit/namespace.ts b/lib/routes/reddit/namespace.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/reddit/namespace.ts
+@@ -0,0 +1,8 @@
++import type { Namespace } from '@/types';
++
++export const namespace: Namespace = {
++    name: 'Reddit',
++    url: 'reddit.com',
++    categories: ['bbs'],
++    lang: 'en',
++};
+diff --git a/lib/routes/reddit/subreddit.ts b/lib/routes/reddit/subreddit.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/reddit/subreddit.ts
+@@ -0,0 +1,38 @@
++import type { DataItem, Route } from '@/types';
++import parser from '@/utils/rss-parser';
++
++const SUBREDDIT_NAME = /^[A-Za-z0-9_]{2,21}$/;
++
++export const route: Route = {
++    path: '/r/:subreddit',
++    categories: ['bbs'],
++    example: '/reddit/r/OpenAI',
++    parameters: { subreddit: '社区名称，不包含 r/' },
++    features: {
++        requireConfig: false,
++        requirePuppeteer: false,
++        antiCrawler: false,
++        supportBT: false,
++        supportPodcast: false,
++        supportScihub: false,
++    },
++    name: 'Subreddit',
++    maintainers: ['NewsRSSHub'],
++    handler,
++};
++
++async function handler(ctx) {
++    const subreddit = ctx.req.param('subreddit');
++    if (!SUBREDDIT_NAME.test(subreddit)) {
++        throw new Error('无效的 Reddit 社区名称');
++    }
++
++    const url = `https://www.reddit.com/r/${subreddit}/.rss`;
++    const feed = await parser.parseURL(url);
++    return {
++        title: feed.title || `Reddit · r/${subreddit}`,
++        link: `https://www.reddit.com/r/${subreddit}/`,
++        description: feed.description,
++        item: feed.items as DataItem[],
++    };
++}
+diff --git a/lib/routes/reddit/user.ts b/lib/routes/reddit/user.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/routes/reddit/user.ts
+@@ -0,0 +1,38 @@
++import type { DataItem, Route } from '@/types';
++import parser from '@/utils/rss-parser';
++
++const USER_NAME = /^[A-Za-z0-9_]+$/;
++
++export const route: Route = {
++    path: '/u/:username',
++    categories: ['bbs'],
++    example: '/reddit/u/spez',
++    parameters: { username: '用户名，不包含 u/' },
++    features: {
++        requireConfig: false,
++        requirePuppeteer: false,
++        antiCrawler: false,
++        supportBT: false,
++        supportPodcast: false,
++        supportScihub: false,
++    },
++    name: 'User submissions',
++    maintainers: ['NewsRSSHub'],
++    handler,
++};
++
++async function handler(ctx) {
++    const username = ctx.req.param('username');
++    if (!USER_NAME.test(username)) {
++        throw new Error('无效的 Reddit 用户名');
++    }
++
++    const url = `https://www.reddit.com/user/${username}/submitted/.rss`;
++    const feed = await parser.parseURL(url);
++    return {
++        title: feed.title || `Reddit · u/${username}`,
++        link: `https://www.reddit.com/user/${username}/`,
++        description: feed.description,
++        item: feed.items as DataItem[],
++    };
++}

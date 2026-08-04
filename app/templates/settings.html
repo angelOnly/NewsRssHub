@@ -158,11 +158,11 @@
     <div class="platform-mobile-overview" aria-label="平台连接概览">
       {% for connection in platform_connections %}
         <div class="platform-mobile-item {{ 'is-ready' if connection.usable else 'needs-setup' }}">
-          <strong>{{ 'RSS' if connection.key == 'rss_public' else connection.platform }}</strong>
+          <strong>{{ 'RSS' if connection.key == 'rsshub_rss' else connection.platform }}</strong>
           {% if connection.requires_credentials %}
             <span>{{ '已连接' if connection.usable else '需配置' }}</span>
           {% else %}
-            <span>公开可用</span>
+            <span>{{ '公开可用' if connection.usable else '需 RSSHub' }}</span>
           {% endif %}
         </div>
       {% endfor %}
@@ -199,7 +199,7 @@
                 <label>
                   X Cookie
                   <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 auth_token 值，或完整 Cookie 字符串">
-                  <small>支持单独的 <code>auth_token</code> 值，也支持包含 <code>auth_token</code> 和 <code>ct0</code> 的 Cookie 片段。提交后先验证；失败时不会覆盖当前已保存的 Cookie。</small>
+                  <small>支持单独的 <code>auth_token</code> 值或完整 Cookie 片段；系统只保存并同步 <code>auth_token</code> 给 RSSHub。提交后经 RSSHub 验证；失败时不会覆盖当前已保存的 Cookie。</small>
                 </label>
                 <div class="form-actions">
                   <button class="button button-primary" type="submit">验证并更新 X Cookie</button>
@@ -224,11 +224,11 @@
                   <p class="eyebrow">{{ connection.platform|upper }}</p>
                   <h3>{{ connection.platform }}</h3>
                 </div>
-                <span class="status healthy">公开可用</span>
+                <span class="status {{ 'healthy' if connection.usable else 'error' }}">{{ '公开可用' if connection.usable else '需要 RSSHub' }}</span>
               </div>
               <p>{{ connection.message }}</p>
               <div class="connection-card-foot">
-                <span class="connection-mode">无需账号凭据</span>
+                <span class="connection-mode">{{ '无需账号凭据' if connection.usable else '请先配置 RSSHub 地址' }}</span>
                 <a class="button button-secondary" href="/sources/new">添加来源</a>
               </div>
             </article>

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -38,6 +41,7 @@ def build_settings(root: Path) -> Settings:
         openai_model_name="test-model",
         credential_encryption_key=None,
         timezone="Asia/Shanghai",
+        rsshub_base_url="https://rsshub.example.test",
     )
 
 
@@ -48,6 +52,36 @@ class WebTests(unittest.TestCase):
         self.assertEqual(_compact_relative_time((now - timedelta(minutes=47)).isoformat()), "47 min")
         self.assertEqual(_compact_relative_time((now + timedelta(minutes=2)).isoformat()), "2 min")
         self.assertEqual(_compact_relative_time((now - timedelta(hours=3)).isoformat()), "3 h")
+
+    def test_web_x_cookie_save_writes_the_shared_runtime_file(self) -> None:
+        """设置页保存成功后，RSSHub 可立即读取同一数据卷中的最小凭据文件。"""
+
+        with TemporaryDirectory() as directory:
+            settings = replace(
+                build_settings(Path(directory)),
+                credential_encryption_key=Fernet.generate_key().decode("ascii"),
+            )
+            services = build_services(settings)
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    # 此用例只验证 Web 到共享文件的调用链，RSSHub 本身由独立集成测试验证。
+                    with patch.object(services.x_sessions, "_validate_runtime_credential"):
+                        response = client.post(
+                            "/settings/x-session",
+                            data={"cookie_value": "auth_token=web-test-token; ct0=csrf-token"},
+                            follow_redirects=False,
+                        )
+
+                self.assertEqual(response.status_code, 303)
+                payload = json.loads(
+                    (settings.data_dir / "rsshub-runtime" / "x-twitter.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(payload, {"version": 1, "auth_token": "web-test-token"})
+            finally:
+                delattr(app.state, "services")
 
     def test_mobile_navigation_and_compact_brief_markup_are_present(self) -> None:
         navigation = templates.get_template("base.html").render(request=object(), active_path="/briefs")

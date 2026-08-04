@@ -16,17 +16,6 @@ from app.storage.database import Database
 from app.storage.repository import Repository
 
 
-class FakeXClient:
-    def __init__(self, cookies: dict[str, str]) -> None:
-        self.cookies = cookies
-
-    def validate(self) -> dict[str, str]:
-        return self.cookies
-
-    def close(self) -> None:
-        return None
-
-
 def build_settings(root: Path) -> Settings:
     source_dir = root / "sources"
     source_dir.mkdir()
@@ -43,6 +32,7 @@ def build_settings(root: Path) -> Settings:
         openai_model_name="test-model",
         credential_encryption_key=Fernet.generate_key().decode("ascii"),
         timezone="Asia/Shanghai",
+        rsshub_base_url="https://rsshub.example.test",
     )
 
 
@@ -52,11 +42,11 @@ class ConnectionCatalogTests(unittest.TestCase):
             settings = build_settings(Path(directory))
             repository = Repository(Database(settings.database_path))
             repository.database.initialize()
-            x_sessions = XSessionService(repository, settings, client_factory=FakeXClient)
-            catalog = ConnectionCatalog(x_sessions)
+            x_sessions = XSessionService(repository, settings, validator=lambda: None)
+            catalog = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
             sources = SourceService(
                 repository,
-                build_source_registry(x_sessions),
+                build_source_registry(),
                 settings,
                 catalog,
             )
@@ -73,7 +63,7 @@ class ConnectionCatalogTests(unittest.TestCase):
             self.assertEqual(source["locator"], "OpenAI")
 
     def test_public_platforms_do_not_request_unneeded_credentials(self) -> None:
-        catalog = ConnectionCatalog()
+        catalog = ConnectionCatalog(rsshub_base_url="https://rsshub.example.test")
         for kind in (SourceKind.REDDIT, SourceKind.RSS):
             connection = catalog.ensure_source_ready(kind)
             self.assertFalse(connection.requires_credentials)

@@ -10,6 +10,7 @@ from app.config import Settings
 from app.domain.models import SourceDraft, SourceKind, ValidationResult
 from app.plugins.base import PluginRegistry
 from app.services.connections import ConnectionCatalog
+from app.services.rsshub_runtime import RssHubRuntimeFiles
 from app.storage.repository import Repository
 
 
@@ -20,11 +21,13 @@ class SourceService:
         registry: PluginRegistry,
         settings: Settings,
         connections: ConnectionCatalog | None = None,
+        runtime_files: RssHubRuntimeFiles | None = None,
     ) -> None:
         self.repository = repository
         self.registry = registry
         self.settings = settings
-        self.connections = connections or ConnectionCatalog()
+        self.connections = connections or ConnectionCatalog(rsshub_base_url=settings.rsshub_base_url)
+        self.runtime_files = runtime_files or RssHubRuntimeFiles(settings)
 
     def prepare_draft(self, draft: SourceDraft) -> tuple[SourceDraft, str]:
         """Turn user input into one normalized, durable source draft."""
@@ -53,6 +56,8 @@ class SourceService:
             self.connections.ensure_source_ready(draft.kind)
         normalized, feed_url = self.prepare_draft(draft)
         source_id = self.repository.create_source(normalized, feed_url)
+        # 新增通用 RSS 后先更新白名单，随后的 RSSHub 连通性测试才能访问它。
+        self.sync_rsshub_runtime()
         source = self.repository.get_source(source_id)
         assert source is not None
 
@@ -103,6 +108,7 @@ class SourceService:
         )
         if draft.enabled and not current["enabled"]:
             self.repository.schedule_initial_fetch(source_id)
+        self.sync_rsshub_runtime()
         source = self.repository.get_source(source_id)
         assert source is not None
         return source, None
@@ -137,6 +143,48 @@ class SourceService:
         """Request a fresh worker check after a shared platform login succeeds."""
 
         return self.repository.requeue_failed_sources_for_kind(SourceKind(kind).value)
+
+    def archive_source(self, source_id: int) -> None:
+        """归档后立刻从 RSSHub 通用 RSS 白名单移除该来源。"""
+
+        self.repository.archive_source(source_id)
+        self.sync_rsshub_runtime()
+
+    def sync_rsshub_runtime(self) -> None:
+        """同步通用 RSS 白名单；X 凭据由 XSessionService 单独管理。"""
+
+        feed_urls = [
+            str(source["locator"])
+            for source in self.repository.list_sources()
+            if source["kind"] == SourceKind.RSS.value
+        ]
+        self.runtime_files.write_rss_feed_manifest(feed_urls)
+
+    def refresh_rsshub_feed_urls(self) -> int:
+        """将旧数据库里直连的 URL 迁移为当前 RSSHub 路由。"""
+
+        if not self.settings.rsshub_base_url:
+            return 0
+        updated = 0
+        for source in self.repository.list_sources(include_archived=True):
+            try:
+                desired = self.registry.get(source["kind"]).resolve_feed_url(
+                    str(source["locator"]), self.settings
+                )
+            except Exception:
+                # 保留无法自动识别的历史记录，避免启动时破坏已有来源。
+                continue
+            if desired != source["feed_url"]:
+                self.repository.update_source(int(source["id"]), {"feed_url": desired})
+                updated += 1
+        return updated
+
+    def synchronize_rsshub_sources(self) -> int:
+        """启动或导入后统一迁移 URL 并刷新共享运行时清单。"""
+
+        updated = self.refresh_rsshub_feed_urls()
+        self.sync_rsshub_runtime()
+        return updated
 
     def queue_sources_for_manual_test(self, source_ids: Sequence[int]) -> int:
         """将当前页仍启用的来源交给下一轮后台抓取验证。"""
@@ -187,6 +235,7 @@ class SourceService:
             if normalized.enabled:
                 self.repository.schedule_initial_fetch(source_id)
             created += 1
+        self.synchronize_rsshub_sources()
         return created
 
     def form_choices(self) -> list[tuple[str, str]]:

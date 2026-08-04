@@ -40,9 +40,19 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     x_sessions = XSessionService(repository, settings)
     llm_connections = LLMConnectionService(repository, settings)
     connections = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
-    registry = build_source_registry(x_sessions)
+    registry = build_source_registry()
     source_backups = SourceBackupService(repository, settings)
     web_push = WebPushService(repository, settings)
+    source_service = SourceService(
+        repository,
+        registry,
+        settings,
+        connections,
+        runtime_files=x_sessions.runtime_files,
+    )
+    # 进程重启后也要恢复共享文件，并把历史数据库里的直连地址改为 RSSHub 地址。
+    x_sessions.sync_runtime_file()
+    source_service.synchronize_rsshub_sources()
     pipeline = IntelligencePipeline(
         repository,
         registry,
@@ -52,7 +62,6 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         source_backups,
         web_push,
     )
-    source_service = SourceService(repository, registry, settings, connections)
     batch_source_service = BatchSourceImportService(source_service)
     return ApplicationServices(
         settings=settings,

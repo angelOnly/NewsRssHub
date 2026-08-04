@@ -1145,7 +1145,7 @@ def archive_source(
     source_kind: str = Form("all"),
     page: int = Form(1),
 ) -> RedirectResponse:
-    get_services(request).repository.archive_source(source_id)
+    get_services(request).sources.archive_source(source_id)
     return sources_redirect(
         notice="来源已归档，可随时从数据库恢复。", kind=source_kind, page=page
     )

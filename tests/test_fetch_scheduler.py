@@ -30,6 +30,7 @@ def build_settings(root: Path) -> Settings:
         openai_model_name="test-model",
         credential_encryption_key=None,
         timezone="Asia/Shanghai",
+        rsshub_base_url="https://rsshub.example.test",
     )
 
 
@@ -157,7 +158,7 @@ class CollectorSchedulingTests(unittest.TestCase):
                 repository,
                 PluginRegistry([plugin]),
                 settings,
-                ConnectionCatalog(),
+                ConnectionCatalog(rsshub_base_url=settings.rsshub_base_url),
                 sleeper=lambda _seconds: None,
                 delay_provider=lambda: 2.0,
             ).collect_due_sources()
@@ -200,7 +201,7 @@ class CollectorSchedulingTests(unittest.TestCase):
                 repository,
                 PluginRegistry([rss_plugin, reddit_plugin]),
                 settings,
-                ConnectionCatalog(),
+                ConnectionCatalog(rsshub_base_url=settings.rsshub_base_url),
                 sleeper=waits.append,
                 delay_provider=lambda: 2.5,
             ).collect_due_sources()

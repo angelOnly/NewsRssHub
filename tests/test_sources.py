@@ -31,6 +31,7 @@ class SourceServiceTests(unittest.TestCase):
                 openai_model_name="test",
                 credential_encryption_key=None,
                 timezone="Asia/Shanghai",
+                rsshub_base_url="https://rsshub.example.test",
             )
             database = Database(settings.database_path)
             database.initialize()
@@ -157,6 +158,7 @@ class SourceServiceTests(unittest.TestCase):
                 openai_model_name="test",
                 credential_encryption_key=None,
                 timezone="Asia/Shanghai",
+                rsshub_base_url="https://rsshub.example.test",
             )
             repository = Repository(Database(settings.database_path))
             repository.database.initialize()
@@ -173,4 +175,4 @@ class SourceServiceTests(unittest.TestCase):
             )
             self.assertIsNone(validation)
             self.assertEqual(source["locator"], "r/comfyui")
-            self.assertEqual(source["feed_url"], "https://www.reddit.com/r/comfyui/.rss")
+            self.assertEqual(source["feed_url"], "https://rsshub.example.test/reddit/r/comfyui")
