@@ -51,7 +51,7 @@ NewsRSSHub
 
 启用步骤：
 
-1. 站点必须以稳定 HTTPS 域名访问，并在 `config.yml` 的 `app.web_push_subject` 中填写同一站点的 HTTPS 地址或有效的 `mailto:` 地址。
+1. 站点必须以稳定 HTTPS 域名访问，并在 `config.yml` 的 `app.web_push_subject` 中填写不带端口的 HTTPS 地址或有效的 `mailto:` 地址。该字段是 VAPID 发件人联系标识，不是网站实际访问地址。
 2. 重新部署后，用 iPhone Safari 删除旧的主屏幕图标，再通过“分享 → 添加到主屏幕”创建新版 Web App。
 3. 从主屏幕图标打开 NewsRSSHub，进入“设置与连接 → 手机通知”，点击“开启手机通知”，允许 iOS 系统权限后可用“发送测试通知”验证。
 

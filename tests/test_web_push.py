@@ -8,6 +8,7 @@ import unittest
 
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
+from py_vapid import Vapid
 from pywebpush import WebPushException
 
 from app.config import Settings
@@ -177,6 +178,23 @@ class WebPushServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(WebPushConfigurationError, "发件人标识无效"):
                 service.save_subscription(sample_subscription())
             self.assertIsNone(repository.get_connector_credential("web_push_subscription"))
+
+    def test_vapid_subject_normalizes_https_port_for_py_vapid(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(
+                Path(directory),
+                credential_key=Fernet.generate_key().decode("ascii"),
+                web_push_subject="https://news.example.test:18443",
+            )
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            service = WebPushService(repository, settings, sender=lambda **_kwargs: None)
+
+            subject = service._vapid_subject()
+            self.assertEqual(subject, "https://news.example.test")
+            vapid = Vapid()
+            vapid.generate_keys()
+            vapid.sign({"sub": subject, "aud": "https://push.example.test"})
 
 
 class WebPushRouteTests(unittest.TestCase):

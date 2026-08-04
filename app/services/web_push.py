@@ -474,6 +474,16 @@ class WebPushService:
             return subject
         parsed = urlparse(subject)
         if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
+            # py-vapid 会把带端口的 HTTPS 联系地址误判为缺少 sub；VAPID 联系标识
+            # 不需要和站点实际访问端口一致，因此仅在投递时去掉端口。
+            try:
+                has_port = parsed.port is not None
+            except ValueError as exc:
+                raise WebPushConfigurationError(
+                    "Web Push 发件人标识无效，请在配置中设置 app.web_push_subject。"
+                ) from exc
+            if has_port:
+                return f"https://{parsed.hostname}"
             return subject
         raise WebPushConfigurationError(
             "Web Push 发件人标识无效，请在配置中设置 app.web_push_subject。"

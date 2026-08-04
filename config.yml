@@ -3,8 +3,8 @@ app:
   source_dir: "sources"      # RSS源配置文件所在的文件夹
   log_level: "INFO"
   request_timeout: 30
-  # Web Push 的 VAPID 发件人标识；域名或端口变更时请同步更新。
-  web_push_subject: "https://news-rss.xiaolicloud.cn:18443"
+  # Web Push 的 VAPID 发件人标识；HTTPS 格式不带端口，或改用有效的 mailto: 地址。
+  web_push_subject: "https://news-rss.xiaolicloud.cn"
   # YouTube 来源通过你已部署的 RSSHub 抓取。
   rsshub_base_url: "https://rsshub.xiaolicloud.cn:18443"
 
