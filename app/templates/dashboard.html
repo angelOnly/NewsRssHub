@@ -47,7 +47,7 @@
             <div class="event-meta">
               <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
               <span>{{ event.last_seen_at|relative_time }}</span>
-              {% if event.visible_source_count > 1 %}<span>{{ event.visible_source_count }} 个来源</span>{% endif %}
+              {% if event.visible_source_count > 1 %}<span class="source-badge">{{ event.visible_source_count }} 个来源</span>{% endif %}
             </div>
             <h3>{{ event.title }}</h3>
           </a>
