@@ -25,23 +25,20 @@ class PaginationTests(unittest.TestCase):
                     event_id = conn.execute(
                         """
                         INSERT INTO events (
-                            fingerprint, title, summary, editorial_tier, tier_reason,
-                            curation_order, curation_status, first_seen_at, last_seen_at,
-                            created_at, updated_at
-                        ) VALUES (?, ?, ?, 'brief', '', ?, 'complete', ?, ?, ?, ?)
+                            title, summary, editorial_tier, tier_reason, curation_order,
+                            curation_status, first_seen_at, last_seen_at
+                        ) VALUES (?, ?, 'brief', '', ?, 'complete', ?, ?)
                         """,
-                        (f"event-{index}", f"事件 {index}", "摘要", index, now, now, now, now),
+                        (f"事件 {index}", "摘要", index, now, now),
                     ).lastrowid
                     item_id = conn.execute(
                         """
                         INSERT INTO items (
-                            source_id, event_id, guid, title, fetched_at, summary,
-                            summary_status, raw_json
-                        ) VALUES (?, ?, ?, ?, ?, '摘要', 'complete', '{}')
+                            source_id, event_id, guid, title, fetched_at, summary, summary_status
+                        ) VALUES (?, ?, ?, ?, ?, '摘要', 'complete')
                         """,
                         (source_id, event_id, f"item-{index}", f"事件 {index}", now),
                     ).lastrowid
-                    conn.execute("INSERT INTO event_items (event_id, item_id) VALUES (?, ?)", (event_id, item_id))
                     conn.execute("UPDATE events SET primary_item_id = ? WHERE id = ?", (item_id, event_id))
             self.assertEqual(repository.count_events(tier=EditorialTier.BRIEF, period="all"), 55)
             self.assertEqual(len(repository.list_events(tier=EditorialTier.BRIEF, period="all", limit=100)), 50)

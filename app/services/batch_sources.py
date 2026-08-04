@@ -47,7 +47,8 @@ class BatchSourceImportService:
     手动测试；其他平台也保持相同的可控流程。
     """
 
-    MAX_ROWS = 100
+    # 导出的全部来源也要能一次回传；1 MB 文件上限仍限制了异常大请求。
+    MAX_ROWS = 1000
     MAX_UPLOAD_BYTES = 1_000_000
     DEFAULT_INTERVALS = {
         SourceKind.X_RSSHUB: 60,
@@ -79,6 +80,7 @@ class BatchSourceImportService:
                 kind: x_rsshub
                 locator: "@替换成 X 账号"
                 poll_interval_minutes: 60
+                # archived: false  # 导出的备份会携带该状态；归档来源导入后仍保持归档
 
               # 需要添加 YouTube、Reddit 或 RSS 时，复制下面对应区块并取消注释。
               # - name: "替换成 YouTube 频道名称"
@@ -256,6 +258,7 @@ class BatchSourceImportService:
             raw_source.get("is_official", defaults.get("official", defaults.get("is_official", False))),
         )
         enabled_value = raw_source.get("enabled", defaults.get("enabled", True))
+        archived_value = raw_source.get("archived", defaults.get("archived", False))
         interval_value = raw_source.get(
             "poll_interval_minutes",
             defaults.get("poll_interval_minutes", self.DEFAULT_INTERVALS[kind]),
@@ -269,6 +272,7 @@ class BatchSourceImportService:
                 is_official=self._parse_bool(official_value, "official"),
                 poll_interval_minutes=self._parse_interval(interval_value),
                 enabled=self._parse_bool(enabled_value, "enabled"),
+                archived=self._parse_bool(archived_value, "archived"),
             ),
         )
 

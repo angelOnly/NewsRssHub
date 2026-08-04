@@ -99,16 +99,13 @@ class CurationService:
         *,
         mark_retry: bool = True,
     ) -> tuple[list[int], int]:
-        run_id = self.repository.start_curation_run(len(items))
         try:
             groups = self._request_groups(client, items)
             event_ids = self.repository.apply_curation_groups(groups)
         except Exception as exc:
             if mark_retry:
                 self.repository.mark_curation_retry([int(item["id"]) for item in items], str(exc))
-            self.repository.finish_curation_run(run_id, status="retry", message=str(exc))
             raise
-        self.repository.finish_curation_run(run_id, status="complete", event_count=len(set(event_ids)))
         return event_ids, len(groups)
 
     def curate_available(self, limit: int = 120) -> CurationRun:

@@ -51,7 +51,7 @@ class SourceServiceTests(unittest.TestCase):
             saved = repository.get_source(source_id)
             assert saved is not None
             self.assertEqual(saved["health_status"], "unknown")
-            self.assertIsNone(saved["last_error"])
+            self.assertEqual(saved["last_error"], "")
 
     def test_enabled_platform_check_ignores_paused_and_archived_sources(self) -> None:
         with TemporaryDirectory() as directory:

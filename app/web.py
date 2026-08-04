@@ -448,6 +448,7 @@ def sources(
             "current_page_testable_count": current_page_testable_count,
             "can_queue_current_page_test": can_queue_current_page_test,
             "platform_tabs": platform_tabs,
+            "source_backups": services.source_backups.list_backups(),
             "notice": notice,
             "notice_level": notice_level if notice_level in {"success", "warning"} else "success",
             "error": error,
@@ -573,6 +574,31 @@ def batch_source_form(request: Request) -> HTMLResponse:
     return render(request, "source_batch.html", _batch_source_context())
 
 
+@app.get("/sources/export.yml")
+def export_sources(request: Request) -> Response:
+    """下载当前全部来源；文件可以直接回传到批量添加入口。"""
+
+    content = get_services(request).source_backups.export_text()
+    return Response(
+        content=content,
+        media_type="application/x-yaml; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="newsrsshub-sources-export.yml"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/sources/backups/{filename}")
+def download_source_backup(request: Request, filename: str) -> FileResponse:
+    """只允许下载持久化目录中由服务创建的来源快照。"""
+
+    path = get_services(request).source_backups.get_backup(filename)
+    if not path:
+        raise HTTPException(status_code=404, detail="未找到该来源备份。")
+    return FileResponse(path, media_type="application/x-yaml", filename=path.name)
+
+
 @app.get("/sources/batch/template.yml")
 def download_batch_source_template(request: Request) -> Response:
     content = get_services(request).batch_sources.yaml_template()
@@ -640,7 +666,6 @@ def _make_draft(
     locator: str,
     is_official: bool,
     poll_interval_minutes: int,
-    fallback_url: str,
     enabled: bool,
 ) -> SourceDraft:
     try:
@@ -655,7 +680,6 @@ def _make_draft(
         locator=locator.strip(),
         is_official=is_official,
         poll_interval_minutes=max(5, min(int(poll_interval_minutes), 1440)),
-        fallback_url=fallback_url.strip()[:500],
         enabled=enabled,
     )
 
@@ -668,7 +692,6 @@ def create_source(
     locator: str = Form(...),
     is_official: bool = Form(False),
     poll_interval_minutes: int = Form(60),
-    fallback_url: str = Form(""),
     enabled: bool = Form(False),
 ) -> RedirectResponse:
     services = get_services(request)
@@ -681,7 +704,6 @@ def create_source(
             locator=locator,
             is_official=is_official,
             poll_interval_minutes=poll_interval_minutes,
-            fallback_url=fallback_url,
             enabled=enabled,
         )
         source, validation = services.sources.add_source(draft, validate=True)
@@ -731,7 +753,6 @@ def edit_source(
     name: str = Form(...),
     is_official: bool = Form(False),
     poll_interval_minutes: int = Form(60),
-    fallback_url: str = Form(""),
     enabled: bool = Form(False),
 ) -> RedirectResponse:
     services = get_services(request)
@@ -745,7 +766,6 @@ def edit_source(
             locator=source["locator"],
             is_official=is_official,
             poll_interval_minutes=poll_interval_minutes,
-            fallback_url=fallback_url,
             enabled=enabled,
         )
         services.sources.update_source(source_id, draft)

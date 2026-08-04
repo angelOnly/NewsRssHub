@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 
 from app.config import Settings
@@ -10,6 +11,7 @@ from app.services.connections import ConnectionCatalog
 from app.services.curator import CurationService
 from app.services.llm_connection import LLMConnectionService
 from app.services.skill_loader import SkillLoader
+from app.services.source_backups import SourceBackupService
 from app.services.sources import SourceService
 from app.services.summarizer import SummaryService
 from app.services.translator import TranslationService
@@ -26,6 +28,7 @@ class IntelligencePipeline:
         settings: Settings,
         llm_connections: LLMConnectionService | None = None,
         source_connections: ConnectionCatalog | None = None,
+        source_backups: SourceBackupService | None = None,
     ) -> None:
         self.repository = repository
         self.registry = registry
@@ -35,6 +38,7 @@ class IntelligencePipeline:
             rsshub_base_url=settings.rsshub_base_url
         )
         self.sources = SourceService(repository, registry, settings, self.source_connections)
+        self.source_backups = source_backups or SourceBackupService(repository, settings)
         self.collector = Collector(repository, registry, settings, self.source_connections)
         self.summarizer = SummaryService(repository, settings, self.llm_connections)
         self.skill_loader = SkillLoader(settings)
@@ -48,6 +52,12 @@ class IntelligencePipeline:
         return self.sources.seed_existing_feeds()
 
     def run_once(self, force: bool = False) -> dict[str, object]:
+        try:
+            source_backup = self.source_backups.ensure_periodic_backup()
+        except OSError:
+            # 备份目录异常不能阻断正常抓取；详细原因保留在 Worker 日志中。
+            logging.getLogger(__name__).exception("来源自动备份失败，本轮抓取继续执行")
+            source_backup = None
         collected = self.collector.collect_due_sources(force=force)
         summarized = self.summarizer.summarize_pending(limit=50)
         curated = self.curator.curate_available(limit=120)
@@ -59,4 +69,5 @@ class IntelligencePipeline:
             "curation": asdict(curated),
             "translation": asdict(translated),
             "brief": brief,
+            "source_backup": source_backup.filename if source_backup else None,
         }

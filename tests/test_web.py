@@ -178,6 +178,42 @@ sources:
             finally:
                 delattr(app.state, "services")
 
+    def test_source_export_and_persistent_backups_are_downloadable(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            services.repository.create_source(
+                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
+                "https://x.com/OpenAI?not_for_export=true",
+            )
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    page = client.get("/sources")
+                    self.assertEqual(page.status_code, 200)
+                    self.assertIn("来源导出与备份", page.text)
+                    self.assertIn('href="/sources/export.yml"', page.text)
+                    self.assertIn("还没有自动备份", page.text)
+
+                    exported = client.get("/sources/export.yml")
+                    self.assertEqual(exported.status_code, 200)
+                    self.assertIn("attachment", exported.headers["content-disposition"])
+                    self.assertIn("sources:", exported.text)
+                    self.assertIn("OpenAI", exported.text)
+                    self.assertNotIn("not_for_export", exported.text)
+
+                    backup = services.source_backups.create_backup()
+                    updated_page = client.get("/sources")
+                    self.assertIn(backup.filename, updated_page.text)
+                    self.assertIn("每 3 天自动备份", updated_page.text)
+
+                    downloaded = client.get(f"/sources/backups/{backup.filename}")
+                    self.assertEqual(downloaded.status_code, 200)
+                    self.assertIn("attachment", downloaded.headers["content-disposition"])
+                    self.assertIn("OpenAI", downloaded.text)
+                    self.assertEqual(client.get("/sources/backups/not-a-backup.yml").status_code, 404)
+            finally:
+                delattr(app.state, "services")
+
     def test_current_platform_page_can_be_queued_for_background_test(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))

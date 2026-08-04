@@ -1,21 +1,43 @@
-"""Versioned SQLite schema migrations.
+"""SQLite v7 结构，以及显式迁移的安全校验。
 
-The project used to rely on ``CREATE TABLE IF NOT EXISTS`` only.  That leaves
-existing installations on an old shape forever, which is especially dangerous
-when a UI field has been removed.  This module owns the upgrade path and uses
-``PRAGMA user_version`` to make every step safe to run repeatedly.
+普通应用启动只初始化空数据库或接受已经是目标版本的数据库。已有数据库的
+重建只能由 ``python -m app.migrate`` 执行，避免部署服务启动时悄悄删列。
 """
 
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
+from typing import Iterable
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+
+TARGET_TABLES = (
+    "sources",
+    "events",
+    "items",
+    "briefs",
+    "feedback",
+    "connector_credentials",
+)
+
+LEGACY_TABLES = (
+    "sources",
+    "events",
+    "items",
+    "fetch_runs",
+    "event_items",
+    "curation_runs",
+    "briefs",
+    "feedback",
+    "connector_credentials",
+    "analyses",
+)
 
 
 SOURCES_TABLE = """
-CREATE TABLE IF NOT EXISTS sources (
+CREATE TABLE sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     kind TEXT NOT NULL,
@@ -25,43 +47,37 @@ CREATE TABLE IF NOT EXISTS sources (
     enabled INTEGER NOT NULL DEFAULT 1,
     archived INTEGER NOT NULL DEFAULT 0,
     poll_interval_minutes INTEGER NOT NULL DEFAULT 60,
-    fallback_url TEXT NOT NULL DEFAULT '',
     config_json TEXT NOT NULL DEFAULT '{}',
     health_status TEXT NOT NULL DEFAULT 'unknown',
     last_fetch_at TEXT,
     last_success_at TEXT,
-    last_error TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(kind, locator)
-);
+)
 """
 
 
 EVENTS_TABLE = """
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fingerprint TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '',
     editorial_tier TEXT NOT NULL DEFAULT 'pending',
     tier_reason TEXT NOT NULL DEFAULT '',
     curation_order INTEGER NOT NULL DEFAULT 9999,
     curation_status TEXT NOT NULL DEFAULT 'pending',
-    curated_at TEXT,
-    curation_version INTEGER NOT NULL DEFAULT 1,
-    primary_item_id INTEGER,
-    source_count INTEGER NOT NULL DEFAULT 1,
+    primary_item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
+    curated_at TEXT
+)
 """
 
 
 ITEMS_TABLE = """
-CREATE TABLE IF NOT EXISTS items (
+CREATE TABLE items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
@@ -85,58 +101,35 @@ CREATE TABLE IF NOT EXISTS items (
     translation_error TEXT NOT NULL DEFAULT '',
     translation_version INTEGER NOT NULL DEFAULT 0,
     translated_at TEXT,
-    raw_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(source_id, guid)
-);
+)
 """
 
 
-LATEST_SCHEMA = SOURCES_TABLE + EVENTS_TABLE + ITEMS_TABLE + """
-
-CREATE TABLE IF NOT EXISTS fetch_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-    started_at TEXT NOT NULL,
-    finished_at TEXT,
-    status TEXT NOT NULL,
-    new_item_count INTEGER NOT NULL DEFAULT 0,
-    message TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS event_items (
-    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-    PRIMARY KEY(event_id, item_id)
-);
-
-CREATE TABLE IF NOT EXISTS curation_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    status TEXT NOT NULL,
-    input_count INTEGER NOT NULL DEFAULT 0,
-    event_count INTEGER NOT NULL DEFAULT 0,
-    message TEXT NOT NULL DEFAULT '',
-    started_at TEXT NOT NULL,
-    finished_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS briefs (
+BRIEFS_TABLE = """
+CREATE TABLE briefs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     brief_date TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     intro TEXT NOT NULL,
     event_ids_json TEXT NOT NULL,
     generated_at TEXT NOT NULL
-);
+)
+"""
 
-CREATE TABLE IF NOT EXISTS feedback (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
-    source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+
+FEEDBACK_TABLE = """
+CREATE TABLE feedback (
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     action TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(event_id, action)
+) WITHOUT ROWID
+"""
 
-CREATE TABLE IF NOT EXISTS connector_credentials (
+
+CONNECTOR_CREDENTIALS_TABLE = """
+CREATE TABLE connector_credentials (
     connector TEXT PRIMARY KEY,
     ciphertext TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
@@ -145,339 +138,735 @@ CREATE TABLE IF NOT EXISTS connector_credentials (
     last_error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-);
+)
 """
 
 
-INDEXES = """
-DROP INDEX IF EXISTS idx_events_rank;
-CREATE INDEX IF NOT EXISTS idx_sources_due ON sources(enabled, archived, last_fetch_at);
-CREATE INDEX IF NOT EXISTS idx_items_source_guid ON items(source_id, guid);
-CREATE INDEX IF NOT EXISTS idx_items_event ON items(event_id);
-CREATE INDEX IF NOT EXISTS idx_items_summary ON items(summary_status, summarized_at);
-CREATE INDEX IF NOT EXISTS idx_items_translation ON items(translation_status, translated_at);
-CREATE INDEX IF NOT EXISTS idx_events_tier ON events(editorial_tier, curation_order, last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_events_curation ON events(curation_status, last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_fetch_runs_source ON fetch_runs(source_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_curation_runs_status ON curation_runs(status, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_connector_credentials_status ON connector_credentials(status);
-CREATE INDEX IF NOT EXISTS idx_feedback_event_action_created ON feedback(event_id, action, created_at);
-"""
+TABLE_DEFINITIONS = (
+    SOURCES_TABLE,
+    EVENTS_TABLE,
+    ITEMS_TABLE,
+    BRIEFS_TABLE,
+    FEEDBACK_TABLE,
+    CONNECTOR_CREDENTIALS_TABLE,
+)
+
+INDEX_DEFINITIONS = (
+    "CREATE INDEX idx_items_event ON items(event_id)",
+    "CREATE INDEX idx_items_summary ON items(summary_status, summarized_at)",
+    "CREATE INDEX idx_items_translation ON items(translation_status, translated_at)",
+    (
+        "CREATE INDEX idx_events_reader ON events("
+        "curation_status, editorial_tier, curation_order, last_seen_at DESC, id DESC)"
+    ),
+    "CREATE INDEX idx_events_curation ON events(curation_status, last_seen_at DESC, id DESC)",
+)
+
+TARGET_INDEX_NAMES = frozenset(
+    {
+        "idx_items_event",
+        "idx_items_summary",
+        "idx_items_translation",
+        "idx_events_reader",
+        "idx_events_curation",
+    }
+)
+
+TARGET_FOREIGN_KEYS = {
+    "items": {
+        ("source_id", "sources", "CASCADE"),
+        ("event_id", "events", "SET NULL"),
+    },
+    "events": {("primary_item_id", "items", "SET NULL")},
+    "feedback": {("event_id", "events", "CASCADE")},
+}
+
+TARGET_COLUMNS = {
+    "sources": {
+        "id",
+        "name",
+        "kind",
+        "locator",
+        "feed_url",
+        "is_official",
+        "enabled",
+        "archived",
+        "poll_interval_minutes",
+        "config_json",
+        "health_status",
+        "last_fetch_at",
+        "last_success_at",
+        "last_error",
+        "created_at",
+        "updated_at",
+    },
+    "events": {
+        "id",
+        "title",
+        "summary",
+        "editorial_tier",
+        "tier_reason",
+        "curation_order",
+        "curation_status",
+        "primary_item_id",
+        "first_seen_at",
+        "last_seen_at",
+        "curated_at",
+    },
+    "items": {
+        "id",
+        "source_id",
+        "event_id",
+        "guid",
+        "canonical_url",
+        "title",
+        "display_title",
+        "content",
+        "author",
+        "published_at",
+        "fetched_at",
+        "content_hash",
+        "summary",
+        "highlights_json",
+        "summary_status",
+        "summary_error",
+        "summary_version",
+        "summarized_at",
+        "translated_content",
+        "translation_status",
+        "translation_error",
+        "translation_version",
+        "translated_at",
+    },
+    "briefs": {"id", "brief_date", "title", "intro", "event_ids_json", "generated_at"},
+    "feedback": {"event_id", "action", "created_at"},
+    "connector_credentials": {
+        "connector",
+        "ciphertext",
+        "fingerprint",
+        "status",
+        "last_validated_at",
+        "last_error",
+        "created_at",
+        "updated_at",
+    },
+}
+
+
+class MigrationRequiredError(RuntimeError):
+    """已有数据库必须先通过维护命令显式迁移。"""
+
+
+class MigrationPreflightError(RuntimeError):
+    """旧数据库未通过安全预检，不能自动重建。"""
+
+
+@dataclass(frozen=True, slots=True)
+class MigrationReport:
+    """维护命令使用的只读预检结果。"""
+
+    current_version: int
+    target_version: int
+    is_empty: bool
+    is_current: bool
+    row_counts: dict[str, int]
+    feedback_target_rows: int
+    discarded_rows: dict[str, int]
+    raw_json_bytes: int
+    fallback_url_rows: int
+    issues: tuple[str, ...]
+
+    @property
+    def can_apply(self) -> bool:
+        return not self.issues
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _table_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    }
+
+
+def _index_names(conn: sqlite3.Connection) -> set[str]:
+    """返回显式命名的索引；SQLite 的 UNIQUE 自动索引不在其中。"""
+
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    }
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return bool(
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
-        ).fetchone()
-    )
+    return name in _table_names(conn)
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     if not _table_exists(conn, table):
         return set()
-    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def _ensure_column(conn: sqlite3.Connection, table: str, name: str, definition: str) -> None:
-    if name not in _columns(conn, table):
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
-
-
-def _column_expression(columns: set[str], name: str, fallback: str) -> str:
-    return name if name in columns else fallback
-
-
-def _rebuild_sources_without_category_or_priority(conn: sqlite3.Connection) -> None:
-    """Drop obsolete source metadata while retaining every operational field.
-
-    SQLite cannot drop columns on the versions commonly shipped in lightweight
-    Docker images.  A copy-and-swap retains source IDs, so existing items,
-    fetch runs and credentials remain valid.
-    """
-
-    columns = _columns(conn, "sources")
-    if not columns or not ({"category", "priority"} & columns):
-        return
-
-    conn.commit()
-    conn.execute("PRAGMA foreign_keys = OFF")
-    try:
-        conn.execute("BEGIN")
-        conn.execute(SOURCES_TABLE.replace("sources", "sources_new", 1))
-        fields = (
-            "id, name, kind, locator, feed_url, is_official, enabled, archived, "
-            "poll_interval_minutes, fallback_url, config_json, health_status, "
-            "last_fetch_at, last_success_at, last_error, created_at, updated_at"
-        )
-        values = ", ".join(
-            (
-                _column_expression(columns, "id", "NULL"),
-                _column_expression(columns, "name", "''"),
-                _column_expression(columns, "kind", "'rss'"),
-                _column_expression(columns, "locator", "''"),
-                _column_expression(columns, "feed_url", "''"),
-                _column_expression(columns, "is_official", "0"),
-                _column_expression(columns, "enabled", "1"),
-                _column_expression(columns, "archived", "0"),
-                _column_expression(columns, "poll_interval_minutes", "60"),
-                _column_expression(columns, "fallback_url", "''"),
-                _column_expression(columns, "config_json", "'{}'"),
-                _column_expression(columns, "health_status", "'unknown'"),
-                _column_expression(columns, "last_fetch_at", "NULL"),
-                _column_expression(columns, "last_success_at", "NULL"),
-                _column_expression(columns, "last_error", "''"),
-                _column_expression(columns, "created_at", "CURRENT_TIMESTAMP"),
-                _column_expression(columns, "updated_at", "CURRENT_TIMESTAMP"),
-            )
-        )
-        conn.execute(f"INSERT INTO sources_new ({fields}) SELECT {values} FROM sources")
-        conn.execute("DROP TABLE sources")
-        conn.execute("ALTER TABLE sources_new RENAME TO sources")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.execute("PRAGMA foreign_keys = ON")
-
-
-_LEGACY_EVENT_COLUMNS = frozenset(
-    {
-        "why_matters",
-        "tags_json",
-        "importance_score",
-        "confidence",
-        "analysis_status",
-        "analysis_version",
+    return {
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({_quote_identifier(table)})").fetchall()
     }
-)
-_LEGACY_ITEM_COLUMNS = frozenset({"relevance_score", "tags_json", "blacklisted"})
 
 
-def _copy_and_replace_table(
-    conn: sqlite3.Connection,
-    *,
-    table: str,
-    create_statement: str,
-    fields: tuple[str, ...],
-    columns: set[str],
-    fallbacks: dict[str, str],
-) -> None:
-    """Copy a known SQLite table into its current target shape.
-
-    All names passed here are application constants.  The helper deliberately
-    keeps the copy expressions explicit, so a legacy installation can be
-    upgraded even if it skipped an intermediate schema version.
-    """
-
-    replacement = f"{table}_new"
-    conn.execute(create_statement.replace(table, replacement, 1))
-    values = ", ".join(
-        _column_expression(columns, field, fallbacks[field]) for field in fields
-    )
-    conn.execute(
-        f"INSERT INTO {replacement} ({', '.join(fields)}) "
-        f"SELECT {values} FROM {table}"
-    )
-    conn.execute(f"DROP TABLE {table}")
-    conn.execute(f"ALTER TABLE {replacement} RENAME TO {table}")
+def _foreign_keys(conn: sqlite3.Connection, table: str) -> set[tuple[str, str, str]]:
+    if not _table_exists(conn, table):
+        return set()
+    return {
+        (str(row[3]), str(row[2]), str(row[6]).upper())
+        for row in conn.execute(f"PRAGMA foreign_key_list({_quote_identifier(table)})").fetchall()
+    }
 
 
-def _rebuild_content_tables_without_legacy_scoring(conn: sqlite3.Connection) -> None:
-    """Physically remove retired score/tag/analysis fields after data migration.
+def _primary_key_columns(conn: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    if not _table_exists(conn, table):
+        return ()
+    rows = conn.execute(f"PRAGMA table_info({_quote_identifier(table)})").fetchall()
+    return tuple(str(row[1]) for row in sorted(rows, key=lambda row: int(row[5])) if int(row[5]))
 
-    Item and event identities, raw content, summaries, event membership and
-    user feedback survive the copy.  Only derived fields from the retired
-    keyword-scoring and generic-analysis pipeline are discarded.
-    """
 
-    event_columns = _columns(conn, "events")
+def _count(conn: sqlite3.Connection, table: str) -> int:
+    if not _table_exists(conn, table):
+        return 0
+    return int(conn.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table)}").fetchone()[0])
+
+
+def _scalar(conn: sqlite3.Connection, sql: str, values: Iterable[object] = ()) -> int:
+    row = conn.execute(sql, tuple(values)).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def _schema_issues(conn: sqlite3.Connection) -> list[str]:
+    issues: list[str] = []
+    tables = _table_names(conn)
+    expected = set(TARGET_TABLES)
+    missing = sorted(expected - tables)
+    unknown = sorted(tables - expected)
+    if missing:
+        issues.append(f"缺少目标表：{', '.join(missing)}")
+    if unknown:
+        issues.append(f"存在非 v7 表：{', '.join(unknown)}")
+    for table, expected_columns in TARGET_COLUMNS.items():
+        actual = _columns(conn, table)
+        if actual and actual != expected_columns:
+            missing_columns = sorted(expected_columns - actual)
+            extra_columns = sorted(actual - expected_columns)
+            details: list[str] = []
+            if missing_columns:
+                details.append(f"缺少 {', '.join(missing_columns)}")
+            if extra_columns:
+                details.append(f"多出 {', '.join(extra_columns)}")
+            issues.append(f"{table} 字段不匹配（{'；'.join(details)}）")
+    missing_indexes = sorted(TARGET_INDEX_NAMES - _index_names(conn))
+    if missing_indexes:
+        issues.append(f"缺少目标索引：{', '.join(missing_indexes)}")
+    for table, expected_foreign_keys in TARGET_FOREIGN_KEYS.items():
+        if _table_exists(conn, table) and _foreign_keys(conn, table) != expected_foreign_keys:
+            issues.append(f"{table} 外键定义不匹配")
+    if _table_exists(conn, "feedback") and _primary_key_columns(conn, "feedback") != (
+        "event_id",
+        "action",
+    ):
+        issues.append("feedback 主键定义不匹配")
+    return issues
+
+
+def _legacy_relation_issues(conn: sqlite3.Connection) -> list[str]:
+    """删除旧关联表前，先验证事件归属关系。"""
+
+    issues: list[str] = []
+    tables = _table_names(conn)
+    if not {"sources", "items", "events"} <= tables:
+        return ["旧数据库缺少 sources、items 或 events，无法安全迁移"]
+
     item_columns = _columns(conn, "items")
-    rebuild_events = bool(event_columns & _LEGACY_EVENT_COLUMNS)
-    rebuild_items = bool(item_columns & _LEGACY_ITEM_COLUMNS)
-    drop_analyses = _table_exists(conn, "analyses")
-    if not (rebuild_events or rebuild_items or drop_analyses):
+    event_columns = _columns(conn, "events")
+    if not {"id", "source_id", "event_id"} <= item_columns:
+        issues.append("items 缺少 id、source_id 或 event_id，无法确定事件归属")
+    if not {"id", "primary_item_id"} <= event_columns:
+        issues.append("events 缺少 id 或 primary_item_id，无法校验主条目")
+    if issues:
+        return issues
+
+    if "event_items" in tables:
+        event_item_columns = _columns(conn, "event_items")
+        if {"event_id", "item_id"} <= event_item_columns:
+            missing_link = _scalar(
+                conn,
+                """
+                SELECT COUNT(*) FROM items i
+                WHERE i.event_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM event_items ei
+                    WHERE ei.event_id = i.event_id AND ei.item_id = i.id
+                  )
+                """,
+            )
+            conflicting_link = _scalar(
+                conn,
+                """
+                SELECT COUNT(*) FROM event_items ei
+                LEFT JOIN items i ON i.id = ei.item_id
+                WHERE i.id IS NULL OR i.event_id IS NULL OR i.event_id <> ei.event_id
+                """,
+            )
+            multi_event_item = _scalar(
+                conn,
+                """
+                SELECT COUNT(*) FROM (
+                    SELECT item_id FROM event_items GROUP BY item_id HAVING COUNT(*) > 1
+                )
+                """,
+            )
+            if missing_link:
+                issues.append(f"有 {missing_link} 条 items.event_id 未映射到 event_items")
+            if conflicting_link:
+                issues.append(f"有 {conflicting_link} 条 event_items 与 items.event_id 不一致")
+            if multi_event_item:
+                issues.append(f"有 {multi_event_item} 条内容属于多个旧事件，无法自动选择保留关系")
+        else:
+            issues.append("event_items 缺少 event_id 或 item_id，无法校验重复关系")
+
+    item_without_source = _scalar(
+        conn,
+        """
+        SELECT COUNT(*) FROM items i
+        WHERE NOT EXISTS (SELECT 1 FROM sources s WHERE s.id = i.source_id)
+        """,
+    )
+    item_without_event = _scalar(
+        conn,
+        """
+        SELECT COUNT(*) FROM items i
+        WHERE i.event_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM events e WHERE e.id = i.event_id)
+        """,
+    )
+    primary_invalid = _scalar(
+        conn,
+        """
+        SELECT COUNT(*) FROM events e
+        WHERE e.primary_item_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM items i
+            WHERE i.id = e.primary_item_id AND i.event_id = e.id
+          )
+        """,
+    )
+    if item_without_source:
+        issues.append(f"有 {item_without_source} 条内容缺少来源")
+    if item_without_event:
+        issues.append(f"有 {item_without_event} 条内容指向不存在的事件")
+    if primary_invalid:
+        issues.append(f"有 {primary_invalid} 个事件的主条目无效或不属于该事件")
+
+    if "briefs" in tables and "event_ids_json" in _columns(conn, "briefs"):
+        try:
+            missing_brief_events = _scalar(
+                conn,
+                """
+                SELECT COUNT(*)
+                FROM briefs b, json_each(b.event_ids_json) ids
+                LEFT JOIN events e ON e.id = CAST(ids.value AS INTEGER)
+                WHERE e.id IS NULL
+                """,
+            )
+        except sqlite3.DatabaseError:
+            issues.append("日报 event_ids_json 不是可解析的 JSON")
+        else:
+            if missing_brief_events:
+                issues.append(f"日报引用了 {missing_brief_events} 个不存在的事件")
+
+    if "feedback" in tables:
+        feedback_columns = _columns(conn, "feedback")
+        if {"event_id", "action", "created_at"} <= feedback_columns:
+            no_event = _scalar(conn, "SELECT COUNT(*) FROM feedback WHERE event_id IS NULL")
+            invalid_event = _scalar(
+                conn,
+                """
+                SELECT COUNT(*) FROM feedback f
+                WHERE f.event_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM events e WHERE e.id = f.event_id)
+                """,
+            )
+            invalid_action = _scalar(
+                conn,
+                "SELECT COUNT(*) FROM feedback WHERE TRIM(COALESCE(action, '')) = ''",
+            )
+            if no_event:
+                issues.append(f"有 {no_event} 条反馈不属于事件，不能安全迁移")
+            if invalid_event:
+                issues.append(f"有 {invalid_event} 条反馈指向不存在的事件")
+            if invalid_action:
+                issues.append(f"有 {invalid_action} 条反馈缺少 action")
+        elif _count(conn, "feedback"):
+            issues.append("feedback 缺少迁移所需字段")
+
+    return issues
+
+
+def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
+    """只读返回迁移报告，绝不修改被检查的数据库。"""
+
+    tables = _table_names(conn)
+    current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    is_empty = not tables
+    if is_empty:
+        return MigrationReport(
+            current_version=current_version,
+            target_version=SCHEMA_VERSION,
+            is_empty=True,
+            is_current=False,
+            row_counts={table: 0 for table in TARGET_TABLES},
+            feedback_target_rows=0,
+            discarded_rows={},
+            raw_json_bytes=0,
+            fallback_url_rows=0,
+            issues=(),
+        )
+
+    row_counts = {table: _count(conn, table) for table in TARGET_TABLES}
+    issues: list[str] = []
+    integrity = [str(row[0]) for row in conn.execute("PRAGMA integrity_check").fetchall()]
+    if integrity != ["ok"]:
+        issues.append(f"integrity_check 失败：{'；'.join(integrity[:3])}")
+    foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_key_errors:
+        issues.append(f"foreign_key_check 发现 {len(foreign_key_errors)} 条问题")
+
+    if current_version > SCHEMA_VERSION:
+        issues.append(
+            f"数据库版本 {current_version} 高于当前程序支持的 {SCHEMA_VERSION}，不能降级迁移"
+        )
+
+    if current_version == SCHEMA_VERSION:
+        issues.extend(_schema_issues(conn))
+        return MigrationReport(
+            current_version=current_version,
+            target_version=SCHEMA_VERSION,
+            is_empty=False,
+            is_current=not issues,
+            row_counts=row_counts,
+            feedback_target_rows=row_counts["feedback"],
+            discarded_rows={},
+            raw_json_bytes=0,
+            fallback_url_rows=0,
+            issues=tuple(issues),
+        )
+
+    allowed_legacy = set(LEGACY_TABLES)
+    unknown_tables = sorted(tables - allowed_legacy)
+    if unknown_tables:
+        issues.append(f"存在未识别的业务表：{', '.join(unknown_tables)}")
+    issues.extend(_legacy_relation_issues(conn))
+
+    feedback_target_rows = 0
+    if "feedback" in tables and {"event_id", "action"} <= _columns(conn, "feedback"):
+        feedback_target_rows = _scalar(
+            conn,
+            "SELECT COUNT(*) FROM (SELECT event_id, action FROM feedback GROUP BY event_id, action)",
+        )
+
+    discarded_rows = {
+        table: _count(conn, table)
+        for table in ("fetch_runs", "curation_runs", "event_items", "analyses")
+        if table in tables
+    }
+    raw_json_bytes = 0
+    if "items" in tables and "raw_json" in _columns(conn, "items"):
+        raw_json_bytes = _scalar(conn, "SELECT SUM(LENGTH(raw_json)) FROM items")
+    fallback_url_rows = 0
+    if "sources" in tables and "fallback_url" in _columns(conn, "sources"):
+        fallback_url_rows = _scalar(
+            conn,
+            "SELECT COUNT(*) FROM sources WHERE COALESCE(fallback_url, '') <> ''",
+        )
+
+    return MigrationReport(
+        current_version=current_version,
+        target_version=SCHEMA_VERSION,
+        is_empty=False,
+        is_current=False,
+        row_counts=row_counts,
+        feedback_target_rows=feedback_target_rows,
+        discarded_rows=discarded_rows,
+        raw_json_bytes=raw_json_bytes,
+        fallback_url_rows=fallback_url_rows,
+        issues=tuple(issues),
+    )
+
+
+def _create_target_schema(conn: sqlite3.Connection, *, include_indexes: bool = True) -> None:
+    for statement in TABLE_DEFINITIONS:
+        conn.execute(statement)
+    if include_indexes:
+        for statement in INDEX_DEFINITIONS:
+            conn.execute(statement)
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def initialize_runtime_schema(conn: sqlite3.Connection) -> None:
+    """初始化新的 v7 数据库，但绝不重建已有数据库。"""
+
+    tables = _table_names(conn)
+    if not tables:
+        _create_target_schema(conn)
+        conn.commit()
         return
 
-    conn.commit()
-    conn.execute("PRAGMA foreign_keys = OFF")
-    try:
-        conn.execute("BEGIN")
-        if rebuild_events:
-            _copy_and_replace_table(
-                conn,
-                table="events",
-                create_statement=EVENTS_TABLE,
-                fields=(
-                    "id",
-                    "fingerprint",
-                    "title",
-                    "summary",
-                    "editorial_tier",
-                    "tier_reason",
-                    "curation_order",
-                    "curation_status",
-                    "curated_at",
-                    "curation_version",
-                    "primary_item_id",
-                    "source_count",
-                    "first_seen_at",
-                    "last_seen_at",
-                    "created_at",
-                    "updated_at",
-                ),
-                columns=event_columns,
-                fallbacks={
-                    "id": "NULL",
-                    "fingerprint": "printf('legacy-event-%s', id)",
-                    "title": "''",
-                    "summary": "''",
-                    "editorial_tier": "'pending'",
-                    "tier_reason": "''",
-                    "curation_order": "9999",
-                    "curation_status": "'pending'",
-                    "curated_at": "NULL",
-                    "curation_version": "1",
-                    "primary_item_id": "NULL",
-                    "source_count": "1",
-                    "first_seen_at": "CURRENT_TIMESTAMP",
-                    "last_seen_at": "CURRENT_TIMESTAMP",
-                    "created_at": "CURRENT_TIMESTAMP",
-                    "updated_at": "CURRENT_TIMESTAMP",
-                },
-            )
-        if rebuild_items:
-            _copy_and_replace_table(
-                conn,
-                table="items",
-                create_statement=ITEMS_TABLE,
-                fields=(
-                    "id",
-                    "source_id",
-                    "event_id",
-                    "guid",
-                    "canonical_url",
-                    "title",
-                    "display_title",
-                    "content",
-                    "author",
-                    "published_at",
-                    "fetched_at",
-                    "content_hash",
-                    "summary",
-                    "highlights_json",
-                    "summary_status",
-                    "summary_error",
-                    "summary_version",
-                    "summarized_at",
-                    "translated_content",
-                    "translation_status",
-                    "translation_error",
-                    "translation_version",
-                    "translated_at",
-                    "raw_json",
-                ),
-                columns=item_columns,
-                fallbacks={
-                    "id": "NULL",
-                    "source_id": "0",
-                    "event_id": "NULL",
-                    "guid": "printf('legacy-item-%s', id)",
-                    "canonical_url": "''",
-                    "title": "''",
-                    "display_title": "''",
-                    "content": "''",
-                    "author": "''",
-                    "published_at": "NULL",
-                    "fetched_at": "CURRENT_TIMESTAMP",
-                    "content_hash": "''",
-                    "summary": "''",
-                    "highlights_json": "'[]'",
-                    "summary_status": "'pending'",
-                    "summary_error": "''",
-                    "summary_version": "0",
-                    "summarized_at": "NULL",
-                    "translated_content": "''",
-                    "translation_status": "'pending'",
-                    "translation_error": "''",
-                    "translation_version": "0",
-                    "translated_at": "NULL",
-                    "raw_json": "'{}'",
-                },
-            )
-        if drop_analyses:
-            conn.execute("DROP TABLE analyses")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.execute("PRAGMA foreign_keys = ON")
-
-
-def _upgrade_existing_schema(conn: sqlite3.Connection) -> None:
-    """Bring the pre-Skill schema up to the target non-scoring shape."""
-
-    _rebuild_sources_without_category_or_priority(conn)
-
-    # Add the target fields before rebuilding legacy tables so all old rows can
-    # be copied into a complete, retryable summary/curation state.
-    for name, definition in (
-        ("content_hash", "TEXT NOT NULL DEFAULT ''"),
-        ("display_title", "TEXT NOT NULL DEFAULT ''"),
-        ("summary", "TEXT NOT NULL DEFAULT ''"),
-        ("highlights_json", "TEXT NOT NULL DEFAULT '[]'"),
-        ("summary_status", "TEXT NOT NULL DEFAULT 'pending'"),
-        ("summary_error", "TEXT NOT NULL DEFAULT ''"),
-        ("summary_version", "INTEGER NOT NULL DEFAULT 0"),
-        ("summarized_at", "TEXT"),
-        ("translated_content", "TEXT NOT NULL DEFAULT ''"),
-        ("translation_status", "TEXT NOT NULL DEFAULT 'pending'"),
-        ("translation_error", "TEXT NOT NULL DEFAULT ''"),
-        ("translation_version", "INTEGER NOT NULL DEFAULT 0"),
-        ("translated_at", "TEXT"),
-    ):
-        _ensure_column(conn, "items", name, definition)
-    for name, definition in (
-        ("editorial_tier", "TEXT NOT NULL DEFAULT 'pending'"),
-        ("tier_reason", "TEXT NOT NULL DEFAULT ''"),
-        ("curation_order", "INTEGER NOT NULL DEFAULT 9999"),
-        ("curation_status", "TEXT NOT NULL DEFAULT 'pending'"),
-        ("curated_at", "TEXT"),
-        ("curation_version", "INTEGER NOT NULL DEFAULT 1"),
-    ):
-        _ensure_column(conn, "events", name, definition)
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS curation_runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            status TEXT NOT NULL,
-            input_count INTEGER NOT NULL DEFAULT 0,
-            event_count INTEGER NOT NULL DEFAULT 0,
-            message TEXT NOT NULL DEFAULT '',
-            started_at TEXT NOT NULL,
-            finished_at TEXT
+    current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if current_version != SCHEMA_VERSION:
+        raise MigrationRequiredError(
+            "检测到旧版 SQLite 结构；请停止 web 和 worker 后运行 "
+            "`docker compose --profile maintenance run --rm migrate --check`，"
+            "再运行 `... migrate --apply`。"
         )
-        """
-    )
-    # Legacy events were built with keyword and score logic. They must be sent
-    # through the Skill before reappearing, never mapped from an old score.
-    conn.execute(
-        "UPDATE events SET editorial_tier = 'pending', curation_status = 'pending' "
-        "WHERE curation_status IS NULL OR curation_status = ''"
-    )
-    _rebuild_content_tables_without_legacy_scoring(conn)
+    issues = _schema_issues(conn)
+    if issues:
+        raise MigrationRequiredError("当前数据库不是完整的 v7 结构：" + "；".join(issues))
 
 
 def apply_migrations(conn: sqlite3.Connection) -> None:
-    """Create a fresh schema or upgrade an existing database in place."""
+    """为旧导入路径保留的兼容名称。
 
-    has_sources = _table_exists(conn, "sources")
-    conn.executescript(LATEST_SCHEMA)
-    if has_sources:
-        _upgrade_existing_schema(conn)
-    conn.executescript(INDEXES)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    conn.commit()
+    它刻意遵循运行时安全行为，绝不会隐式执行破坏性迁移。
+    """
+
+    initialize_runtime_schema(conn)
+
+
+def _column_expression(
+    columns: set[str], field: str, fallback: str, *, coalesce: bool = False
+) -> str:
+    if field not in columns:
+        return fallback
+    column = _quote_identifier(field)
+    return f"COALESCE({column}, {fallback})" if coalesce else column
+
+
+def _copy_columns(
+    conn: sqlite3.Connection,
+    *,
+    target: str,
+    legacy: str,
+    fields: tuple[tuple[str, str, bool], ...],
+) -> None:
+    if not _table_exists(conn, legacy):
+        return
+    columns = _columns(conn, legacy)
+    target_fields = ", ".join(_quote_identifier(field) for field, _, _ in fields)
+    expressions = ", ".join(
+        _column_expression(columns, field, fallback, coalesce=coalesce)
+        for field, fallback, coalesce in fields
+    )
+    conn.execute(
+        f"INSERT INTO {_quote_identifier(target)} ({target_fields}) "
+        f"SELECT {expressions} FROM {_quote_identifier(legacy)}"
+    )
+
+
+SOURCE_COPY_FIELDS = (
+    ("id", "NULL", False),
+    ("name", "''", True),
+    ("kind", "'rss'", True),
+    ("locator", "''", True),
+    ("feed_url", "''", True),
+    ("is_official", "0", True),
+    ("enabled", "1", True),
+    ("archived", "0", True),
+    ("poll_interval_minutes", "60", True),
+    ("config_json", "'{}'", True),
+    ("health_status", "'unknown'", True),
+    ("last_fetch_at", "NULL", False),
+    ("last_success_at", "NULL", False),
+    ("last_error", "''", True),
+    ("created_at", "CURRENT_TIMESTAMP", True),
+    ("updated_at", "CURRENT_TIMESTAMP", True),
+)
+
+EVENT_COPY_FIELDS = (
+    ("id", "NULL", False),
+    ("title", "''", True),
+    ("summary", "''", True),
+    ("editorial_tier", "'pending'", True),
+    ("tier_reason", "''", True),
+    ("curation_order", "9999", True),
+    ("curation_status", "'pending'", True),
+    ("primary_item_id", "NULL", False),
+    ("first_seen_at", "CURRENT_TIMESTAMP", True),
+    ("last_seen_at", "CURRENT_TIMESTAMP", True),
+    ("curated_at", "NULL", False),
+)
+
+ITEM_COPY_FIELDS = (
+    ("id", "NULL", False),
+    ("source_id", "0", True),
+    ("event_id", "NULL", False),
+    ("guid", "''", True),
+    ("canonical_url", "''", True),
+    ("title", "''", True),
+    ("display_title", "''", True),
+    ("content", "''", True),
+    ("author", "''", True),
+    ("published_at", "NULL", False),
+    ("fetched_at", "CURRENT_TIMESTAMP", True),
+    ("content_hash", "''", True),
+    ("summary", "''", True),
+    ("highlights_json", "'[]'", True),
+    ("summary_status", "'pending'", True),
+    ("summary_error", "''", True),
+    ("summary_version", "0", True),
+    ("summarized_at", "NULL", False),
+    ("translated_content", "''", True),
+    ("translation_status", "'pending'", True),
+    ("translation_error", "''", True),
+    ("translation_version", "0", True),
+    ("translated_at", "NULL", False),
+)
+
+BRIEF_COPY_FIELDS = (
+    ("id", "NULL", False),
+    ("brief_date", "''", True),
+    ("title", "''", True),
+    ("intro", "''", True),
+    ("event_ids_json", "'[]'", True),
+    ("generated_at", "CURRENT_TIMESTAMP", True),
+)
+
+CREDENTIAL_COPY_FIELDS = (
+    ("connector", "''", True),
+    ("ciphertext", "''", True),
+    ("fingerprint", "''", True),
+    ("status", "'unknown'", True),
+    ("last_validated_at", "NULL", False),
+    ("last_error", "''", True),
+    ("created_at", "CURRENT_TIMESTAMP", True),
+    ("updated_at", "CURRENT_TIMESTAMP", True),
+)
+
+
+def _legacy_name(table: str) -> str:
+    return f"__legacy_v7_{table}"
+
+
+def _assert_preserved_counts(conn: sqlite3.Connection, report: MigrationReport) -> None:
+    for table in ("sources", "events", "items", "briefs", "connector_credentials"):
+        expected = report.row_counts.get(table, 0)
+        actual = _count(conn, table)
+        if actual != expected:
+            raise MigrationPreflightError(
+                f"迁移后 {table} 行数不一致：预期 {expected}，实际 {actual}"
+            )
+    feedback_rows = _count(conn, "feedback")
+    if feedback_rows != report.feedback_target_rows:
+        raise MigrationPreflightError(
+            f"迁移后 feedback 行数不一致：预期 {report.feedback_target_rows}，实际 {feedback_rows}"
+        )
+
+
+def apply_v7_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """将已通过预检的旧结构重建为精简后的 v7。
+
+    调用方必须在停掉 web/worker 后执行。这里使用单个显式事务；任何校验
+    或复制失败都会回滚，不会留下半完成的表结构。
+    """
+
+    report = report or inspect_migration(conn)
+    if not report.can_apply:
+        raise MigrationPreflightError("预检未通过：" + "；".join(report.issues))
+    if report.is_current:
+        return report
+    if report.is_empty:
+        _create_target_schema(conn)
+        conn.commit()
+        return inspect_migration(conn)
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN EXCLUSIVE")
+        for table in LEGACY_TABLES:
+            if _table_exists(conn, table):
+                legacy = _legacy_name(table)
+                if _table_exists(conn, legacy):
+                    raise MigrationPreflightError(f"发现遗留迁移表 {legacy}，请先人工检查")
+                conn.execute(
+                    f"ALTER TABLE {_quote_identifier(table)} RENAME TO {_quote_identifier(legacy)}"
+                )
+
+        # 旧的命名索引在遗留表真正删除前仍占用名称，先只建表；旧表删除
+        # 后再创建 v7 索引，避免发生同名索引冲突。
+        _create_target_schema(conn, include_indexes=False)
+        _copy_columns(
+            conn,
+            target="sources",
+            legacy=_legacy_name("sources"),
+            fields=SOURCE_COPY_FIELDS,
+        )
+        _copy_columns(
+            conn,
+            target="events",
+            legacy=_legacy_name("events"),
+            fields=EVENT_COPY_FIELDS,
+        )
+        _copy_columns(
+            conn,
+            target="items",
+            legacy=_legacy_name("items"),
+            fields=ITEM_COPY_FIELDS,
+        )
+        _copy_columns(
+            conn,
+            target="briefs",
+            legacy=_legacy_name("briefs"),
+            fields=BRIEF_COPY_FIELDS,
+        )
+        _copy_columns(
+            conn,
+            target="connector_credentials",
+            legacy=_legacy_name("connector_credentials"),
+            fields=CREDENTIAL_COPY_FIELDS,
+        )
+
+        legacy_feedback = _legacy_name("feedback")
+        if _table_exists(conn, legacy_feedback):
+            conn.execute(
+                f"""
+                INSERT INTO feedback (event_id, action, created_at)
+                SELECT event_id, action, MAX(created_at)
+                FROM {_quote_identifier(legacy_feedback)}
+                WHERE event_id IS NOT NULL AND TRIM(COALESCE(action, '')) <> ''
+                GROUP BY event_id, action
+                """
+            )
+
+        _assert_preserved_counts(conn, report)
+
+        for table in LEGACY_TABLES:
+            legacy = _legacy_name(table)
+            if _table_exists(conn, legacy):
+                conn.execute(f"DROP TABLE {_quote_identifier(legacy)}")
+
+        # 旧索引会随旧表一起删除；此处只创建目标结构真正需要的索引。
+        for statement in INDEX_DEFINITIONS:
+            conn.execute(statement)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    verified = inspect_migration(conn)
+    if not verified.is_current or not verified.can_apply:
+        raise MigrationPreflightError("迁移后校验失败：" + "；".join(verified.issues))
+    return verified

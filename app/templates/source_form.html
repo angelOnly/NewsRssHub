@@ -51,7 +51,6 @@
       <small>RSS 填完整 URL；X 填 @账号；Reddit 填 r/社区名 或 u/用户名。</small>
     </label>
     <label>抓取间隔（分钟）<input name="poll_interval_minutes" type="number" min="5" max="1440" value="{{ source.poll_interval_minutes if source else 60 }}"></label>
-    <label>备用原始链接（可选）<input name="fallback_url" type="url" value="{{ source.fallback_url if source else '' }}" placeholder="官方博客或 GitHub Releases"></label>
     <div class="check-row">
       <label><input name="is_official" type="checkbox" value="true" {% if source and source.is_official %}checked{% endif %}> 官方或机构控制的来源</label>
       <label><input name="enabled" type="checkbox" value="true" {% if not source or source.enabled %}checked{% endif %}> 保存后启用抓取</label>

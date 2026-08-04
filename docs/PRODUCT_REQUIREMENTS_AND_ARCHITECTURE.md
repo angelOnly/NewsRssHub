@@ -1,8 +1,10 @@
 # NewsRSSHub 产品需求与目标架构设计
 
-> 文档版本：v1.1
+> 2026-08-04 更新：当前实现的数据库精简目标、六表模型、线上预检/备份/显式迁移流程以 [SQLite 结构精简与安全迁移说明](SQLITE_SCHEMA_AND_MIGRATION.md) 为准；本文中与旧 `event_items`、`fetch_runs`、`curation_runs` 或自动重建迁移冲突的描述均由该说明覆盖。
+
+> 文档版本：v1.2
 > 文档状态：已进入实现与验证  
-> 更新时间：2026-08-03  
+> 更新时间：2026-08-04
 > 适用范围：单用户、私有部署的 NewsRSSHub
 
 本文档是本阶段实现的需求与架构基线。它同时说明当前系统已经具备什么、哪些旧机制需要删除、目标系统应如何运行。核心代码已按本文档进入实现与自动化验证；部署环境仍需在目标 Docker 主机完成最终验收。
@@ -218,6 +220,8 @@ flowchart LR
 - 编辑来源名称、平台类型、账号/社区/URL、抓取间隔、备用原始链接、官方来源标记和启用状态。
 - 保存前验证来源。
 - 单独测试、暂停、启用和归档来源。
+- 导出当前全部来源为 YAML，并允许将该文件或自动备份文件直接上传到批量添加入口恢复来源。
+- Worker 首次运行后每 3 天最多生成一份来源 YAML 快照，保存到宿主机持久化目录，只保留最新 5 份。
 - 暂停来源后，其历史内容不再出现在用户可见列表中。
 - 一个来源失败时不阻塞其他平台和来源。
 
@@ -315,7 +319,7 @@ CurationService 将已完成摘要的新条目分批发送给项目级 Skill。
 - 同一公司同时发生的独立变化必须分别保留。
 - 后续消息没有新内容时，只作为重复来源，不生成新事件，也不提高层级。
 - 后续消息增加能力边界、开放范围、价格、截止日期或真实结果时，更新原事件。
-- 同一事件的多个原始条目通过 `event_items` 关联。
+- 同一事件的多个原始条目通过 `items.event_id` 关联；一条内容最多归属一个事件。
 
 “事件”定义：
 
@@ -821,64 +825,12 @@ JSON 契约由 Pydantic 领域模型定义，不写入 Skill。
 ### 11.1 目标关系
 
 ```mermaid
-erDiagram
-    SOURCES ||--o{ ITEMS : "抓取"
-    SOURCES ||--o{ FETCH_RUNS : "执行"
-    ITEMS ||--o{ EVENT_ITEMS : "归入"
-    EVENTS ||--o{ EVENT_ITEMS : "包含"
-    EVENTS ||--o{ FEEDBACK : "收到"
-    EVENTS }o--o{ BRIEFS : "入选"
-    CURATION_RUNS ||--o{ EVENTS : "更新"
-    CONNECTOR_CREDENTIALS ||--|| PLATFORM_CONNECTIONS : "提供"
-
-    SOURCES {
-        integer id
-        text name
-        text kind
-        text locator
-        text feed_url
-        boolean is_official
-        boolean enabled
-        integer poll_interval_minutes
-        text health_status
-    }
-
-    ITEMS {
-        integer id
-        integer source_id
-        text guid
-        text title
-        text display_title
-        text content
-        text summary
-        text highlights_json
-        text summary_status
-        text translated_content
-        text translation_status
-        text published_at
-        text fetched_at
-    }
-
-    EVENTS {
-        integer id
-        text title
-        text summary
-        text editorial_tier
-        text tier_reason
-        integer curation_order
-        text curation_status
-        text first_seen_at
-        text last_seen_at
-    }
-
-    CURATION_RUNS {
-        integer id
-        text status
-        integer input_count
-        integer event_count
-        text started_at
-        text finished_at
-    }
+flowchart LR
+    S["sources：来源与当前健康状态"] --> I["items：原文、摘要、高亮、翻译"]
+    I -->|"event_id：一条内容至多归属一个事件"| E["events：合并后的阅读主题"]
+    E --> F["feedback：已读、不感兴趣、收藏"]
+    B["briefs：日报的有序事件列表"] -. "引用事件 ID" .-> E
+    C["connector_credentials：加密 Cookie / API Key"] -. "平台共享凭证" .-> S
 ```
 
 ### 11.2 来源字段
@@ -890,7 +842,7 @@ erDiagram
 | `name` | 用户可识别的来源名称 |
 | `kind` | 平台插件类型，例如 `rss / x_rsshub / reddit` |
 | `locator` | 账号、社区或 URL |
-| `feed_url` | 可选备用原始链接 |
+| `feed_url` | 连接器规范化后的实际抓取地址 |
 | `is_official` | 是否为官方或机构来源 |
 | `enabled` | 是否参与抓取和前台可见查询 |
 | `poll_interval_minutes` | 抓取间隔 |
@@ -907,8 +859,9 @@ erDiagram
 | `curation_order` | 同层展示顺序 |
 | `curation_status` | `pending / complete / retry / failed` |
 | `curated_at` | 最近筛选时间 |
-| `curation_version` | Skill 或提示版本 |
 | `primary_item_id` | 代表标题和摘要的主要条目 |
+
+事件的来源数量不再缓存为字段，而是从 `items.event_id` 实时统计，避免事件合并后显示不一致。
 
 ### 11.4 用户隐藏与模型隐藏
 
@@ -1121,6 +1074,14 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 重启、重建容器和重新拉取 GitHub 代码不会重置数据库。
 - 不删除宿主机数据目录。
 - 数据库结构变更必须执行迁移，不能依赖 `CREATE TABLE IF NOT EXISTS` 自动补齐字段。
+
+### 15.5 来源导出与恢复
+
+- 来源管理页面提供“导出全部来源”，生成的 YAML 与批量添加入口完全兼容。
+- Worker 在首次运行时创建首份快照，之后每 3 天最多创建一份；快照目录为容器内 `/app/data/source_backups/`，对应宿主机 `/home/jzb/docker/rss-hub/data/source_backups/`。
+- 只保留最新 5 份快照，页面列出并提供下载。
+- 导出与快照只包含 `name`、`kind`、`locator`、`official`、`enabled`、`archived` 与 `poll_interval_minutes`；不包含 Cookie、API Key、`feed_url`、抓取状态、错误信息或连接器缓存。
+- 将文件重新上传时，已有来源按 `(kind, locator)` 安全跳过，不覆盖现有配置；暂停和归档状态会被保留。
 
 ---
 

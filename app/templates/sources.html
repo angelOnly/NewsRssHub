@@ -16,6 +16,34 @@
 {% if notice %}<div class="notice {{ notice_level }}" role="status" aria-live="polite">{{ notice }}</div>{% endif %}
 {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
 
+<section class="source-backup-panel" aria-label="来源导出与备份">
+  <div class="source-backup-intro">
+    <strong>来源导出与备份</strong>
+    <p>下载的 YAML 可直接上传到“批量添加”恢复来源；不包含 Cookie、API Key 或抓取记录。</p>
+  </div>
+  <a class="button button-secondary" href="/sources/export.yml" download>导出全部来源</a>
+</section>
+<section class="source-backup-history" aria-label="来源备份列表">
+  <div class="source-backup-history-head">
+    <p>Worker 每 3 天自动备份一次到持久化 <code>data/source_backups/</code>，仅保留最新 5 份。</p>
+  </div>
+  {% if source_backups %}
+  <ul class="source-backup-list">
+    {% for backup in source_backups %}
+    <li>
+      <div>
+        <strong>{{ backup.filename }}</strong>
+        <small>{{ backup.created_at|relative_time }} · {{ backup.source_count }} 个来源</small>
+      </div>
+      <a href="/sources/backups/{{ backup.filename }}" download>下载</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="source-backup-empty">还没有自动备份；Worker 下一轮运行时会创建第一份。</p>
+  {% endif %}
+</section>
+
 {% if has_x_sources and x_credential.state != 'valid' and selected_source_kind in ('all', 'x_rsshub') %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
   <div><strong>X 来源暂不测试或抓取</strong><p>先在“设置与连接”保存并验证 Cookie；账号可以先批量录入，之后再手动点击“测试”。</p></div>

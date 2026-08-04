@@ -30,7 +30,7 @@ def _decode_json(value: str | None, fallback: Any) -> Any:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in ("raw_json", "event_ids_json", "config_json", "highlights_json"):
+    for key in ("event_ids_json", "config_json", "highlights_json"):
         if key in data:
             data[key.removesuffix("_json")] = _decode_json(
                 data[key], {} if key == "config_json" else []
@@ -49,10 +49,9 @@ def _event_has_live_item_clause(event_alias: str = "e") -> str:
     return f"""
         EXISTS (
             SELECT 1
-            FROM event_items visible_ei
-            JOIN items visible_i ON visible_i.id = visible_ei.item_id
+            FROM items visible_i
             JOIN sources visible_s ON visible_s.id = visible_i.source_id
-            WHERE visible_ei.event_id = {event_alias}.id
+            WHERE visible_i.event_id = {event_alias}.id
               AND {_source_is_live_clause('visible_s')}
         )
     """
@@ -205,9 +204,9 @@ class Repository:
             cursor = conn.execute(
                 """
                 INSERT INTO sources (
-                    name, kind, locator, feed_url, is_official, enabled,
-                    poll_interval_minutes, fallback_url, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    name, kind, locator, feed_url, is_official, enabled, archived,
+                    poll_interval_minutes, health_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     draft.name,
@@ -215,9 +214,10 @@ class Repository:
                     draft.locator,
                     feed_url,
                     int(draft.is_official),
-                    int(draft.enabled),
+                    int(draft.enabled and not draft.archived),
+                    int(draft.archived),
                     draft.poll_interval_minutes,
-                    draft.fallback_url,
+                    "archived" if draft.archived else "unknown",
                     now,
                     now,
                 ),
@@ -230,7 +230,6 @@ class Repository:
             "is_official",
             "enabled",
             "poll_interval_minutes",
-            "fallback_url",
             "feed_url",
             "health_status",
             "last_fetch_at",
@@ -337,26 +336,7 @@ class Repository:
         with self.database.transaction() as conn:
             conn.execute("DELETE FROM connector_credentials WHERE connector = ?", (connector,))
 
-    # Fetch runs and raw items ------------------------------------------------
-    def start_fetch_run(self, source_id: int) -> int:
-        with self.database.transaction() as conn:
-            cursor = conn.execute(
-                "INSERT INTO fetch_runs (source_id, started_at, status) VALUES (?, ?, 'running')",
-                (source_id, iso_now()),
-            )
-            return int(cursor.lastrowid)
-
-    def finish_fetch_run(self, run_id: int, status: str, new_item_count: int, message: str = "") -> None:
-        with self.database.transaction() as conn:
-            conn.execute(
-                """
-                UPDATE fetch_runs
-                SET finished_at = ?, status = ?, new_item_count = ?, message = ?
-                WHERE id = ?
-                """,
-                (iso_now(), status, new_item_count, message[:1000], run_id),
-            )
-
+    # 原始条目 ----------------------------------------------------------------
     @staticmethod
     def _content_hash(item: FeedItem) -> str:
         payload = "\n".join((item.title.strip(), item.content.strip()))
@@ -366,14 +346,13 @@ class Repository:
         published_at = item.published_at.isoformat() if item.published_at else None
         now = iso_now()
         content_hash = self._content_hash(item)
-        raw_json = json.dumps(item.raw, ensure_ascii=False)
         with self.database.transaction() as conn:
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO items (
                     source_id, guid, canonical_url, title, content, author, published_at,
-                    fetched_at, content_hash, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    fetched_at, content_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_id,
@@ -385,7 +364,6 @@ class Repository:
                     published_at,
                     now,
                     content_hash,
-                    raw_json,
                 ),
             )
             if cursor.rowcount:
@@ -411,7 +389,7 @@ class Repository:
                     highlights_json = '[]', summary_status = 'pending', summary_error = '',
                     summary_version = 0, summarized_at = NULL, translated_content = '',
                     translation_status = 'pending', translation_error = '', translation_version = 0,
-                    translated_at = NULL, raw_json = ?
+                    translated_at = NULL
                 WHERE id = ?
                 """,
                 (
@@ -422,14 +400,13 @@ class Repository:
                     published_at,
                     now,
                     content_hash,
-                    raw_json,
                     item_id,
                 ),
             )
             if row["event_id"] is not None:
                 conn.execute(
-                    "UPDATE events SET curation_status = 'pending', updated_at = ? WHERE id = ?",
-                    (now, int(row["event_id"])),
+                    "UPDATE events SET curation_status = 'pending' WHERE id = ?",
+                    (int(row["event_id"]),),
                 )
             return item_id, True
 
@@ -499,10 +476,10 @@ class Repository:
             conn.execute(
                 """
                 UPDATE events
-                SET curation_status = 'pending', updated_at = ?
+                SET curation_status = 'pending'
                 WHERE id = (SELECT event_id FROM items WHERE id = ?) AND curation_status = 'complete'
                 """,
-                (now, item_id),
+                (item_id,),
             )
 
     def mark_item_summary_retry(self, item_id: int, error: str) -> None:
@@ -586,34 +563,6 @@ class Repository:
         return [_row_to_dict(row) for row in rows]
 
     # Curation ----------------------------------------------------------------
-    def start_curation_run(self, input_count: int) -> int:
-        with self.database.transaction() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO curation_runs (status, input_count, started_at)
-                VALUES ('running', ?, ?)
-                """,
-                (input_count, iso_now()),
-            )
-            return int(cursor.lastrowid)
-
-    def finish_curation_run(
-        self, run_id: int, *, status: str, event_count: int = 0, message: str = ""
-    ) -> None:
-        with self.database.transaction() as conn:
-            conn.execute(
-                """
-                UPDATE curation_runs
-                SET status = ?, event_count = ?, message = ?, finished_at = ?
-                WHERE id = ?
-                """,
-                (status, event_count, message[:1000], iso_now(), run_id),
-            )
-
-    @staticmethod
-    def _fingerprint_for_item(item_id: int) -> str:
-        return f"curated-item-{item_id}"
-
     def _event_for_group(self, conn: Any, item_ids: Sequence[int]) -> tuple[int | None, list[int]]:
         placeholders = ", ".join("?" for _ in item_ids)
         rows = conn.execute(
@@ -628,13 +577,19 @@ class Repository:
             if event_id == target_event_id:
                 continue
             conn.execute("UPDATE items SET event_id = ? WHERE event_id = ?", (target_event_id, event_id))
-            conn.execute(
-                "INSERT OR IGNORE INTO event_items (event_id, item_id) "
-                "SELECT ?, item_id FROM event_items WHERE event_id = ?",
-                (target_event_id, event_id),
-            )
-            conn.execute("UPDATE feedback SET event_id = ? WHERE event_id = ?", (target_event_id, event_id))
-            conn.execute("DELETE FROM event_items WHERE event_id = ?", (event_id,))
+            feedback_rows = conn.execute(
+                "SELECT action, created_at FROM feedback WHERE event_id = ?", (event_id,)
+            ).fetchall()
+            for feedback in feedback_rows:
+                conn.execute(
+                    """
+                    INSERT INTO feedback (event_id, action, created_at) VALUES (?, ?, ?)
+                    ON CONFLICT(event_id, action) DO UPDATE SET
+                        created_at = MAX(feedback.created_at, excluded.created_at)
+                    """,
+                    (target_event_id, str(feedback["action"]), str(feedback["created_at"])),
+                )
+            conn.execute("DELETE FROM feedback WHERE event_id = ?", (event_id,))
             conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
 
     def apply_curation_groups(self, groups: Sequence[CurationGroup]) -> list[int]:
@@ -661,14 +616,11 @@ class Repository:
                     cursor = conn.execute(
                         """
                         INSERT INTO events (
-                            fingerprint, title, summary, editorial_tier, tier_reason,
-                            curation_order, curation_status, curated_at, curation_version,
-                            primary_item_id, source_count, first_seen_at, last_seen_at,
-                            created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, 'complete', ?, 1, ?, 1, ?, ?, ?, ?)
+                            title, summary, editorial_tier, tier_reason, curation_order,
+                            curation_status, curated_at, primary_item_id, first_seen_at, last_seen_at
+                        ) VALUES (?, ?, ?, ?, ?, 'complete', ?, ?, ?, ?)
                         """,
                         (
-                            self._fingerprint_for_item(group.primary_item_id),
                             display_title,
                             str(primary["summary"]),
                             group.tier.value,
@@ -678,8 +630,6 @@ class Repository:
                             group.primary_item_id,
                             now,
                             now,
-                            now,
-                            now,
                         ),
                     )
                     target_event_id = int(cursor.lastrowid)
@@ -687,20 +637,14 @@ class Repository:
                     self._merge_event_rows(conn, target_event_id, existing_event_ids)
 
                 placeholders = ", ".join("?" for _ in item_ids)
-                conn.execute(f"DELETE FROM event_items WHERE item_id IN ({placeholders})", tuple(item_ids))
                 conn.execute(
                     f"UPDATE items SET event_id = ? WHERE id IN ({placeholders})",
                     (target_event_id, *item_ids),
-                )
-                conn.executemany(
-                    "INSERT OR IGNORE INTO event_items (event_id, item_id) VALUES (?, ?)",
-                    [(target_event_id, item_id) for item_id in item_ids],
                 )
 
                 aggregate = conn.execute(
                     """
                     SELECT
-                        COUNT(DISTINCT source_id) AS source_count,
                         MIN(COALESCE(published_at, fetched_at)) AS first_seen_at,
                         MAX(COALESCE(published_at, fetched_at)) AS last_seen_at
                     FROM items WHERE event_id = ?
@@ -712,8 +656,7 @@ class Repository:
                     UPDATE events
                     SET title = ?, summary = ?, editorial_tier = ?, tier_reason = ?,
                         curation_order = ?, curation_status = 'complete', curated_at = ?,
-                        curation_version = curation_version + 1, primary_item_id = ?,
-                        source_count = ?, first_seen_at = ?, last_seen_at = ?, updated_at = ?
+                        primary_item_id = ?, first_seen_at = ?, last_seen_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -724,10 +667,8 @@ class Repository:
                         group.order,
                         now,
                         group.primary_item_id,
-                        int(aggregate["source_count"] or 1),
                         str(aggregate["first_seen_at"] or now),
                         str(aggregate["last_seen_at"] or now),
-                        now,
                         target_event_id,
                     ),
                 )
@@ -741,10 +682,10 @@ class Repository:
         with self.database.transaction() as conn:
             conn.execute(
                 f"""
-                UPDATE events SET curation_status = 'retry', updated_at = ?
+                UPDATE events SET curation_status = 'retry'
                 WHERE id IN (SELECT DISTINCT event_id FROM items WHERE id IN ({placeholders}) AND event_id IS NOT NULL)
                 """,
-                (iso_now(), *item_ids),
+                tuple(item_ids),
             )
 
     def primary_items_for_events(self, event_ids: Sequence[int]) -> list[dict[str, Any]]:
@@ -841,19 +782,17 @@ class Repository:
                 ) AS user_read,
                 (
                     SELECT s.name
-                    FROM event_items ei
-                    JOIN items i ON i.id = ei.item_id
+                    FROM items i
                     JOIN sources s ON s.id = i.source_id
-                    WHERE ei.event_id = e.id AND {_source_is_live_clause('s')}
+                    WHERE i.event_id = e.id AND {_source_is_live_clause('s')}
                     ORDER BY COALESCE(i.published_at, i.fetched_at) DESC
                     LIMIT 1
                 ) AS primary_source_name,
                 (
                     SELECT i.canonical_url
-                    FROM event_items ei
-                    JOIN items i ON i.id = ei.item_id
+                    FROM items i
                     JOIN sources s ON s.id = i.source_id
-                    WHERE ei.event_id = e.id AND {_source_is_live_clause('s')}
+                    WHERE i.event_id = e.id AND {_source_is_live_clause('s')}
                     ORDER BY COALESCE(i.published_at, i.fetched_at) DESC
                     LIMIT 1
                 ) AS primary_url,
@@ -864,10 +803,9 @@ class Repository:
                 ) AS highlights_json,
                 (
                     SELECT COUNT(DISTINCT i.source_id)
-                    FROM event_items ei
-                    JOIN items i ON i.id = ei.item_id
+                    FROM items i
                     JOIN sources s ON s.id = i.source_id
-                    WHERE ei.event_id = e.id AND {_source_is_live_clause('s')}
+                    WHERE i.event_id = e.id AND {_source_is_live_clause('s')}
                 ) AS visible_source_count
             FROM events e
             WHERE {where}
@@ -906,10 +844,9 @@ class Repository:
             items = conn.execute(
                 f"""
                 SELECT i.*, s.name AS source_name, s.kind AS source_kind, s.is_official
-                FROM event_items ei
-                JOIN items i ON i.id = ei.item_id
+                FROM items i
                 JOIN sources s ON s.id = i.source_id
-                WHERE ei.event_id = ? AND {_source_is_live_clause('s')}
+                WHERE i.event_id = ? AND {_source_is_live_clause('s')}
                 ORDER BY CASE WHEN i.id = ? THEN 0 ELSE 1 END,
                          COALESCE(i.published_at, i.fetched_at) DESC
                 """,
@@ -919,22 +856,31 @@ class Repository:
                 "SELECT EXISTS(SELECT 1 FROM feedback WHERE event_id = ? AND action = 'not_interested')",
                 (event_id,),
             ).fetchone()[0]
+            visible_source_count = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT i.source_id)
+                FROM items i JOIN sources s ON s.id = i.source_id
+                WHERE i.event_id = ? AND {_source_is_live_clause('s')}
+                """,
+                (event_id,),
+            ).fetchone()[0]
         if not items:
             return None
         data = _row_to_dict(event)
         data["items"] = [_row_to_dict(item) for item in items]
         data["highlights"] = data["items"][0].get("highlights", [])
         data["user_hidden"] = bool(user_hidden)
+        data["visible_source_count"] = int(visible_source_count)
         return data
 
     def mark_event_not_interested(self, event_id: int) -> None:
         now = iso_now()
         with self.database.transaction() as conn:
             conn.execute(
-                "DELETE FROM feedback WHERE event_id = ? AND action = 'not_interested'", (event_id,)
-            )
-            conn.execute(
-                "INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'not_interested', ?)",
+                """
+                INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'not_interested', ?)
+                ON CONFLICT(event_id, action) DO UPDATE SET created_at = excluded.created_at
+                """,
                 (event_id, now),
             )
 
@@ -945,10 +891,10 @@ class Repository:
         now = datetime.now(timezone.utc).isoformat()
         with self.database.transaction() as conn:
             conn.execute(
-                "DELETE FROM feedback WHERE event_id = ? AND action = 'read'", (event_id,)
-            )
-            conn.execute(
-                "INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'read', ?)",
+                """
+                INSERT INTO feedback (event_id, action, created_at) VALUES (?, 'read', ?)
+                ON CONFLICT(event_id, action) DO UPDATE SET created_at = excluded.created_at
+                """,
                 (event_id, now),
             )
 

@@ -215,6 +215,10 @@
 .event-card.is-read .source-badge{background:#edf1ec;color:#718076}
 .event-card.is-read .event-preview summary,.event-card.is-read .event-actions{color:#829087}
 
+/* 来源快照是文件级恢复入口：保持紧凑，且在手机上优先展示下载操作。 */
+.source-backup-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 8px;padding:13px 15px;border:1px solid #d4e3d7;border-radius:13px;background:#f4faf5}.source-backup-intro strong{display:block;color:#27543d}.source-backup-intro p{margin:3px 0 0;color:#627066;font-size:13px;line-height:1.45}.source-backup-panel .button{flex:none;white-space:nowrap}.source-backup-history{margin:0 0 15px;padding:0 2px}.source-backup-history-head p,.source-backup-empty{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.source-backup-list{display:grid;gap:6px;margin:8px 0 0;padding:0;list-style:none}.source-backup-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid #e0e7df;border-radius:9px;background:var(--panel)}.source-backup-list strong{display:block;overflow-wrap:anywhere;color:#3d5b48;font:600 12px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace}.source-backup-list small{display:block;margin-top:2px;color:var(--muted);font-size:11px}.source-backup-list a{flex:none;padding:4px 7px;border:1px solid var(--line);border-radius:7px;color:var(--accent);font-size:12px;font-weight:700}.source-backup-list a:hover{border-color:#9bc5a9;background:#f2f8f3}
+@media(max-width:600px){.source-backup-panel{align-items:flex-start;flex-direction:column;gap:9px;padding:12px 13px}.source-backup-panel .button{width:100%;min-height:38px}.source-backup-history{margin-bottom:12px}.source-backup-list li{padding:8px 9px}.source-backup-list strong{font-size:11px}.source-backup-list a{padding:5px 7px}}
+
 /* 来源添加的远端验证可能稍慢，明确显示处理中并防止重复提交。 */
 .notice.warning{color:#825326;background:#fff3e5;border:1px solid #efd5b8}
 .form-submit-status{display:flex;align-items:center;gap:8px;margin:-4px 0 0;color:#406051;font-size:13px;font-weight:700}

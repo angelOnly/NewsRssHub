@@ -5,26 +5,35 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from app.storage.migrations import apply_migrations
+from app.storage.migrations import initialize_runtime_schema
 
 
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def connect(self) -> sqlite3.Connection:
+    def _open_connection(self, *, enable_wal: bool) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=20, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA busy_timeout = 20000")
+        if enable_wal:
+            connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
+    def connect(self) -> sqlite3.Connection:
+        return self._open_connection(enable_wal=True)
+
     def initialize(self) -> None:
-        connection = self.connect()
+        # 先检查结构，再切换 WAL。若发现旧库，本次启动除了打开连接外不对
+        # 服务器数据库产生任何结构或日志模式变更。
+        connection = self._open_connection(enable_wal=False)
         try:
-            apply_migrations(connection)
+            # 服务启动只允许初始化空库或使用已完成迁移的库；历史结构必须
+            # 通过维护命令显式迁移，避免 Web/Worker 启动时重建线上数据表。
+            initialize_runtime_schema(connection)
+            connection.execute("PRAGMA journal_mode = WAL")
         finally:
             connection.close()
 

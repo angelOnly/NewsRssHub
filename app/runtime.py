@@ -9,6 +9,7 @@ from app.services.connections import ConnectionCatalog
 from app.services.batch_sources import BatchSourceImportService
 from app.services.llm_connection import LLMConnectionService
 from app.services.sources import SourceService
+from app.services.source_backups import SourceBackupService
 from app.services.translator import TranslationService
 from app.services.x_session import XSessionService
 from app.storage.database import Database
@@ -26,6 +27,7 @@ class ApplicationServices:
     connections: ConnectionCatalog
     translator: TranslationService
     batch_sources: BatchSourceImportService
+    source_backups: SourceBackupService
 
 
 def build_services(settings: Settings | None = None) -> ApplicationServices:
@@ -37,7 +39,15 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     llm_connections = LLMConnectionService(repository, settings)
     connections = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
     registry = build_source_registry(x_sessions)
-    pipeline = IntelligencePipeline(repository, registry, settings, llm_connections, connections)
+    source_backups = SourceBackupService(repository, settings)
+    pipeline = IntelligencePipeline(
+        repository,
+        registry,
+        settings,
+        llm_connections,
+        connections,
+        source_backups,
+    )
     source_service = SourceService(repository, registry, settings, connections)
     batch_source_service = BatchSourceImportService(source_service)
     return ApplicationServices(
@@ -50,4 +60,5 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         connections=connections,
         translator=pipeline.translator,
         batch_sources=batch_source_service,
+        source_backups=source_backups,
     )

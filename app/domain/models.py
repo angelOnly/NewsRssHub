@@ -20,8 +20,8 @@ class SourceDraft:
     locator: str
     is_official: bool = False
     poll_interval_minutes: int = 60
-    fallback_url: str = ""
     enabled: bool = True
+    archived: bool = False
 
 
 @dataclass(slots=True)

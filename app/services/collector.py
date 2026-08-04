@@ -51,7 +51,6 @@ class Collector:
 
         for kind, group in grouped.items():
             plugin = self.registry.get(kind)
-            run_ids = {int(source["id"]): self.repository.start_fetch_run(int(source["id"])) for source in group}
             result.sources_checked += len(group)
             try:
                 outcomes = plugin.fetch_many(group, self.settings)
@@ -60,16 +59,15 @@ class Collector:
 
             for source in group:
                 source_id = int(source["id"])
-                run_id = run_ids[source_id]
                 outcome = outcomes.get(source_id)
                 if not outcome:
                     outcome = SourceFetchResult(error=RuntimeError("连接器未返回该来源的抓取结果。"))
                 if outcome.error:
-                    self._record_failure(source, run_id, outcome.error)
+                    self._record_failure(source, outcome.error)
                     result.sources_failed += 1
                     continue
 
-                new_count = self._record_items(source, run_id, outcome.items)
+                new_count = self._record_items(source, outcome.items)
                 result.new_items += new_count
 
         return result
@@ -77,7 +75,6 @@ class Collector:
     def _record_items(
         self,
         source: dict[str, Any],
-        run_id: int,
         items: list[Any],
     ) -> int:
         new_count = 0
@@ -92,14 +89,12 @@ class Collector:
             source_id,
             {"health_status": "healthy", "last_fetch_at": iso_now(), "last_success_at": iso_now(), "last_error": ""},
         )
-        self.repository.finish_fetch_run(run_id, "success", new_count)
         return new_count
 
-    def _record_failure(self, source: dict[str, Any], run_id: int, exc: Exception) -> None:
+    def _record_failure(self, source: dict[str, Any], exc: Exception) -> None:
         message = str(exc)[:1000]
         logger.warning("Source fetch failed for %s: %s", source["name"], message)
         self.repository.update_source(
             int(source["id"]),
             {"health_status": "error", "last_fetch_at": iso_now(), "last_error": message},
         )
-        self.repository.finish_fetch_run(run_id, "error", 0, message)

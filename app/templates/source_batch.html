@@ -14,7 +14,7 @@
   <section class="batch-template-panel" aria-label="YAML 示例文件">
     <div>
       <strong>先下载 YAML 示例文件</strong>
-      <p>一个文件可以混合 X、Reddit、YouTube 和 RSS；保留需要的条目，改好名称和地址后再上传。</p>
+      <p>一个文件可以混合 X、Reddit、YouTube 和 RSS；保留需要的条目，改好名称和地址后再上传。来源管理页导出或自动备份的 YAML 也能直接上传恢复。</p>
     </div>
     <div class="batch-template-actions">
       <a class="button button-secondary" href="/sources/batch/template.yml" download>下载 YAML 示例</a>
@@ -35,7 +35,7 @@
   <form class="source-form batch-source-form" method="post" action="/sources/batch" enctype="multipart/form-data">
     <label class="batch-upload-label">选择填写好的 YAML 文件
       <input class="batch-upload-input" name="source_file" type="file" accept=".yml,.yaml,application/x-yaml,text/yaml" required>
-      <small>仅支持 UTF-8 编码的 <code>.yml</code> 或 <code>.yaml</code> 文件，单次最多 100 条、文件不超过 1 MB。</small>
+      <small>仅支持 UTF-8 编码的 <code>.yml</code> 或 <code>.yaml</code> 文件，单次最多 1000 条、文件不超过 1 MB。</small>
     </label>
     <details class="batch-yaml-help">
       <summary>查看 YAML 字段说明</summary>
@@ -43,7 +43,7 @@
         <div><dt><code>name</code></dt><dd>页面显示名称。</dd></div>
         <div><dt><code>kind</code></dt><dd><code>x_rsshub</code>、<code>reddit</code>、<code>youtube</code> 或 <code>rss</code>。</dd></div>
         <div><dt><code>locator</code></dt><dd>X 填 <code>@账号</code>，Reddit 填 <code>r/社区</code>，YouTube 填 <code>@频道</code> 或频道地址，RSS 填订阅地址。</dd></div>
-        <div><dt><code>official</code> / <code>enabled</code> / <code>poll_interval_minutes</code></dt><dd>可在 <code>defaults</code> 中统一设置，也可在单条来源中覆盖。</dd></div>
+        <div><dt><code>official</code> / <code>enabled</code> / <code>archived</code> / <code>poll_interval_minutes</code></dt><dd>可在 <code>defaults</code> 中统一设置，也可在单条来源中覆盖；来源导出文件会保留暂停、归档和抓取间隔。</dd></div>
       </dl>
     </details>
     <div class="batch-flow-note">

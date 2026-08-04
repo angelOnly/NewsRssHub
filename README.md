@@ -7,8 +7,9 @@
 - 首页默认打开“必看”，每页最多 50 条；四个 Tab 互不混排；
 - 普通资讯可只看标题，点击后才查看摘要、原始内容与链接；
 - 来源可在网页中添加、测试、启停、编辑和归档；
+- 来源管理可导出全部来源，并会每 3 天自动保存一份可下载快照；导出和快照均可直接回传到“批量添加”恢复来源；
 - 同一事件的多条内容会合并，避免信息流重复轰炸。
-- 来源只保存名称、平台、地址、抓取间隔、备用链接、官方标记和启用状态；不再有主题或优先级字段。
+- 来源只保存名称、平台、地址、抓取间隔、官方标记和启用状态；不再有主题、优先级或备用链接字段。
 
 ## Docker 启动
 
@@ -29,6 +30,24 @@
    docker compose up -d --build
    ```
 
+### 数据库结构升级
+
+普通启动只会初始化空数据库，不会静默执行删表或重建表。遇到 v7 这类结构升级时，在服务器上先停止服务，再执行内置迁移命令：
+
+```bash
+cd /home/jzb/docker/rss-hub
+git pull
+docker compose down
+docker compose --profile maintenance build migrate
+docker compose --profile maintenance run --rm migrate --check
+docker compose --profile maintenance run --rm migrate --apply
+docker compose up -d --build
+```
+
+迁移命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理与回滚步骤见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
+
+首次升级到 v7 时，请先执行上面的维护命令，再恢复平时的 GitHub/Docker 自动部署；如果你的面板只会直接执行 `docker compose up -d`，需要先通过服务器终端完成这一次迁移。
+
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统先验证，成功后才加密保存。
 
 Web 服务只负责页面和配置；Worker 独立完成抓取 → 中文标题/摘要/重点 → Skill 筛选 → 必看与重要更新的正文译文 → 每日简报。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 会一并复制到镜像，缺失时系统会明确显示筛选不可用，而不会退回旧关键词评分。
@@ -42,6 +61,14 @@ uvicorn app.web:app --reload
 ```
 
 默认会导入 `sources/feeds.yml` 中已有的来源。X 账号 Cookie 只存入 SQLite 的加密字段，既不会写入 `docker-compose.yml`，也不会回显到网页；更换 Cookie 后不需要重启容器。Worker 每轮抓取 X 账号前都会先验证 Cookie，失效时首页和来源管理页会提示更新。
+
+## 来源导出与自动备份
+
+在“来源管理”点击“导出全部来源”，即可下载当前来源的 YAML。这个文件和页面中的任一自动备份文件都可以直接上传到“批量添加”入口：名称、平台、地址、官方标记、暂停/归档状态和抓取间隔都会恢复；已存在的来源会被安全跳过，不会覆盖当前记录。
+
+Worker 首次运行会创建一份来源快照，之后每 3 天最多创建一份。快照保存到容器的 `/app/data/source_backups/`，因 Compose 已挂载数据目录，服务器实际位置为 `/home/jzb/docker/rss-hub/data/source_backups/`。系统仅保留最新 5 份；Cookie、API Key、抓取状态、错误记录和连接器缓存都不会写入这些 YAML 文件。
+
+本次 SQLite v7、来源备份恢复和筛选合并规则调整的背景、问题、实现与部署边界见 [2026-08-04 迭代记录](docs/ITERATION_2026-08-04_SQLITE_AND_SOURCE_BACKUP.md)。
 
 ## 内容处理顺序
 

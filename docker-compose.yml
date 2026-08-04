@@ -23,3 +23,16 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+  # 仅在手工执行数据库预检/迁移时启动。它不会随 `docker compose up -d`
+  # 自动运行，避免服务启动过程中重建已经在使用的 SQLite 数据库。
+  migrate:
+    build: .
+    # 用 entrypoint 保证 `docker compose run migrate --check/--apply` 中的
+    # 参数会传给迁移程序，而不是覆盖整条 Python 命令。
+    entrypoint: ["python", "-m", "app.migrate"]
+    command: ["--check"]
+    volumes:
+      - /home/jzb/docker/rss-hub/data:/app/data
+    profiles: ["maintenance"]
+    restart: "no"

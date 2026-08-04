@@ -89,7 +89,6 @@ class SourceService:
                 "is_official": int(draft.is_official),
                 "enabled": int(draft.enabled),
                 "poll_interval_minutes": draft.poll_interval_minutes,
-                "fallback_url": draft.fallback_url,
             },
         )
         source = self.repository.get_source(source_id)
@@ -168,8 +167,8 @@ class SourceService:
                 locator=locator,
                 is_official=bool(entry.get("official", False)),
                 poll_interval_minutes=poll_interval,
-                fallback_url=str(entry.get("fallback_url") or ""),
                 enabled=bool(entry.get("enabled", True)),
+                archived=bool(entry.get("archived", False)),
             )
             normalized, feed_url = self.prepare_draft(draft)
             if self.repository.find_source(normalized.kind.value, normalized.locator):
