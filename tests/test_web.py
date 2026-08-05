@@ -104,9 +104,7 @@ class WebTests(unittest.TestCase):
                     "id": 42,
                     "display_name": "MiniMax-M3 发布与评测",
                     "content_count": 8,
-                    "event_count": 3,
-                    "source_count": 4,
-                    "latest_at": "2026-08-05T12:00:00+00:00",
+                    "description": "围绕 MiniMax-M3 的发布信息与实测结果。",
                     "events": [
                         {
                             "id": 11,
@@ -126,33 +124,47 @@ class WebTests(unittest.TestCase):
         self.assertIn('data-topic-id="42"', daily_page)
         self.assertIn('id="topic-42"', daily_page)
         self.assertIn("MiniMax-M3 发布与评测", daily_page)
-        self.assertIn("8<small>条内容</small>", daily_page)
+        self.assertIn('class="daily-topic-content-count">8 条内容</span>', daily_page)
+        self.assertIn("围绕 MiniMax-M3 的发布信息与实测结果。", daily_page)
+        self.assertNotIn("3 个事件", daily_page)
+        self.assertNotIn("4 个来源", daily_page)
+        self.assertIn('class="daily-topic-description"', daily_page)
+        self.assertNotIn('class="weekly-topic-kicker"', daily_page)
+        self.assertNotIn('class="weekly-topic-events"', daily_page)
 
-    def test_dashboard_shows_daily_topic_strip_above_time_filters(self) -> None:
+    def test_dashboard_hides_topic_strip_and_labels_matching_events(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))
             app.state.services = services
-            topic = {
+            event = {
                 "id": 42,
-                "display_name": "MiniMax-M3 发布与评测",
-                "content_count": 8,
-                "event_count": 3,
-                "source_count": 4,
+                "title": "MiniMax-M3 发布",
+                "primary_source_name": "RSS",
+                "latest_published_at": None,
+                "latest_fetched_at": None,
+                "visible_item_count": 1,
+                "visible_source_count": 1,
+                "user_read": False,
+                "user_saved": False,
+                "user_hidden": False,
+                "summary": None,
+                "highlights": [],
+                "tier_reason": None,
             }
             try:
-                with patch.object(
-                    services.repository, "list_daily_topics", return_value=[topic]
+                with patch.object(services.repository, "list_events", return_value=[event]), patch.object(
+                    services.repository,
+                    "list_daily_topic_names_for_events",
+                    return_value={42: "MiniMax-M3 发布与评测"},
                 ) as topic_query:
                     with TestClient(app) as client:
                         response = client.get("/?tier=must_read&period=24h")
 
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(topic_query.call_args.kwargs["limit"], 5)
-                self.assertIn('class="dashboard-topic-strip"', response.text)
-                self.assertIn('href="/daily-topics#topic-42"', response.text)
-                self.assertIn('data-topic-id="42"', response.text)
+                self.assertEqual(topic_query.call_args.kwargs["event_ids"], [42])
+                self.assertNotIn('class="dashboard-topic-strip"', response.text)
+                self.assertIn('class="daily-topic-badge"', response.text)
                 self.assertIn("MiniMax-M3 发布与评测", response.text)
-                self.assertIn("今日热点", response.text)
             finally:
                 delattr(app.state, "services")
 

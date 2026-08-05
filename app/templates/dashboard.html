@@ -26,28 +26,6 @@
   {% endfor %}
 </nav>
 
-{% if daily_topics %}
-<section class="dashboard-topic-strip" aria-label="今日热点话题">
-  <header class="dashboard-topic-strip-head">
-    <div class="dashboard-topic-title">
-      <span class="dashboard-topic-icon">{{ icon('trending') }}</span><strong>今日热点</strong><small>按内容条数</small>
-    </div>
-    <a class="dashboard-topic-all" href="/daily-topics">查看全部</a>
-  </header>
-  <div class="dashboard-topic-list">
-    {% for topic in daily_topics %}
-    <a class="dashboard-topic-chip" href="/daily-topics#topic-{{ topic.id }}" data-topic-id="{{ topic.id }}" aria-label="查看话题 {{ topic.display_name }}">
-      <span class="dashboard-topic-chip-copy">
-        <strong>{{ topic.display_name }}</strong>
-        <small>{{ topic.event_count }} 个事件 · {{ topic.source_count }} 个来源</small>
-      </span>
-      <span class="dashboard-topic-chip-count"><b>{{ topic.content_count }}</b><small>条</small></span>
-    </a>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
 <div class="filter-bar dashboard-filter-bar">
   <div class="filter-group" aria-label="时间范围">
     {% for value, label in [('24h', '24 小时'), ('7d', '7 天'), ('30d', '30 天'), ('all', '全部')] %}
@@ -73,6 +51,9 @@
           <a class="event-main" href="/events/{{ event.id }}?tier={{ tier }}&period={{ period }}&page={{ page }}" aria-label="查看 {{ event.title }} 的详情">
             <div class="event-meta">
               <span class="source-badge">{{ event.primary_source_name or '聚合来源' }}</span>
+              {% if event.daily_topic_name %}
+              <span class="daily-topic-badge" title="所属今日热点：{{ event.daily_topic_name }}">{{ event.daily_topic_name }}</span>
+              {% endif %}
               <span class="event-facts">
                 {% if event.latest_published_at %}<span>发布{{ event.latest_published_at|compact_relative_time|replace(' ', '') }}</span>{% else %}<span>发布时间未知</span>{% endif %}
                 {% if event.latest_fetched_at %}<span>抓取{{ event.latest_fetched_at|compact_relative_time|replace(' ', '') }}</span>{% endif %}

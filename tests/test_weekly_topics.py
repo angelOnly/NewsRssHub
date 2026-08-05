@@ -179,6 +179,7 @@ class DailyTopicTests(unittest.TestCase):
             self.assertEqual(topics[0]["display_name"], "MiniMax-M3 发布与评测")
             self.assertEqual(topics[0]["content_count"], 3)
             self.assertEqual(topics[0]["event_count"], 2)
+            self.assertEqual(topics[0]["description"], "MiniMax-M3 发布 的事实摘要。")
 
             third_event = self._create_event(
                 repository, source_id, "m3-access", "MiniMax-M3 接入方式", now + timedelta(minutes=5)
@@ -211,7 +212,9 @@ class DailyTopicTests(unittest.TestCase):
             repository.database.initialize()
             source_id = self._create_source(repository)
             now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
-            self._create_event(repository, source_id, "first", "MiniMax-M3 发布", now - timedelta(minutes=1))
+            first_event = self._create_event(
+                repository, source_id, "first", "MiniMax-M3 发布", now - timedelta(minutes=1)
+            )
 
             client = TopicClient()
             service = self._service(repository, settings, client)
@@ -228,7 +231,9 @@ class DailyTopicTests(unittest.TestCase):
                 [],
             )
 
-            self._create_event(repository, source_id, "review", "MiniMax-M3 实测", now + timedelta(seconds=30))
+            second_event = self._create_event(
+                repository, source_id, "review", "MiniMax-M3 实测", now + timedelta(seconds=30)
+            )
             second = service.refresh_current_day(now=now + timedelta(minutes=6))
             self.assertTrue(second.refreshed)
             topics = repository.list_daily_topics(
@@ -237,6 +242,19 @@ class DailyTopicTests(unittest.TestCase):
             self.assertEqual(len(topics), 1)
             self.assertEqual(topics[0]["content_count"], 2)
             self.assertEqual(topics[0]["event_count"], 2)
+            labels = repository.list_daily_topic_names_for_events(
+                topic_date=window.topic_date,
+                start=window.start,
+                end=now + timedelta(minutes=6),
+                event_ids=[first_event, second_event],
+            )
+            self.assertEqual(
+                labels,
+                {
+                    first_event: "MiniMax-M3 发布与评测",
+                    second_event: "MiniMax-M3 发布与评测",
+                },
+            )
 
     def test_failed_increment_keeps_existing_assignments_and_retries_only_unassigned_events(self) -> None:
         with TemporaryDirectory() as directory:

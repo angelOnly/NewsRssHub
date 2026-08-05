@@ -1762,10 +1762,77 @@ class Repository:
             ).fetchall()
         topics = [_row_to_dict(row) for row in rows]
         for topic in topics:
-            topic["events"] = self.list_daily_topic_events(
+            events = self.list_daily_topic_events(
                 topic_id=int(topic["id"]), topic_date=day_key, start=start, end=end
             )
+            topic["events"] = events
+            # 卡片只保留一行说明，复用话题内热度最高事件的现成摘要，避免额外请求模型。
+            topic["description"] = ""
+            for event in events:
+                description = " ".join(
+                    str(event.get("summary") or event.get("title") or "").split()
+                )
+                if description:
+                    topic["description"] = description
+                    break
         return topics
+
+    def list_daily_topic_names_for_events(
+        self,
+        *,
+        topic_date: date | str,
+        start: datetime,
+        end: datetime,
+        event_ids: Sequence[int],
+    ) -> dict[int, str]:
+        """返回首页事件命中的今日热点名，不加载完整话题卡片数据。"""
+
+        candidate_ids = list(dict.fromkeys(int(event_id) for event_id in event_ids))
+        if not candidate_ids:
+            return {}
+
+        day_key = _topic_date_key(topic_date)
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        placeholders = ", ".join("?" for _ in candidate_ids)
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                WITH hot_topics AS (
+                    SELECT t.id
+                    FROM daily_topics t
+                    JOIN daily_topic_events dte
+                      ON dte.topic_id = t.id AND dte.topic_date = t.topic_date
+                    JOIN events e ON e.id = dte.event_id
+                    JOIN items i ON i.event_id = e.id
+                    JOIN sources s ON s.id = i.source_id
+                    WHERE t.topic_date = ?
+                      AND e.curation_status = 'complete'
+                      AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                      AND NOT {_user_hidden_clause('e')}
+                      AND {_source_is_live_clause('s')}
+                      AND COALESCE(i.published_at, i.fetched_at) >= ?
+                      AND COALESCE(i.published_at, i.fetched_at) < ?
+                    GROUP BY t.id
+                    HAVING COUNT(i.id) >= ?
+                )
+                SELECT DISTINCT dte.event_id, t.display_name
+                FROM hot_topics h
+                JOIN daily_topics t ON t.id = h.id AND t.topic_date = ?
+                JOIN daily_topic_events dte
+                  ON dte.topic_id = t.id AND dte.topic_date = t.topic_date
+                WHERE dte.event_id IN ({placeholders})
+                """,
+                (
+                    day_key,
+                    start_at,
+                    end_at,
+                    MIN_DAILY_TOPIC_CONTENT_COUNT,
+                    day_key,
+                    *candidate_ids,
+                ),
+            ).fetchall()
+        return {int(row["event_id"]): str(row["display_name"]) for row in rows}
 
     def list_daily_topic_events(
         self, *, topic_id: int, topic_date: date | str, start: datetime, end: datetime

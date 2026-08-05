@@ -412,13 +412,15 @@ def dashboard(
     total_events = services.repository.count_events(tier=selected_tier, period=period)
     topic_service = services.pipeline.daily_topics
     topic_window = topic_service.current_window()
-    # 首页只取少量话题作导航入口，完整事件清单仍在“今日热点”页展示。
-    daily_topics = services.repository.list_daily_topics(
+    # 首页不再展示话题聚合区；只为列表中命中的事件补充一个紧凑话题名。
+    topic_names = services.repository.list_daily_topic_names_for_events(
         topic_date=topic_window.topic_date,
         start=topic_window.start,
         end=topic_window.end,
-        limit=5,
+        event_ids=[int(event["id"]) for event in events],
     )
+    for event in events:
+        event["daily_topic_name"] = topic_names.get(int(event["id"]))
     return render(
         request,
         "dashboard.html",
@@ -431,7 +433,6 @@ def dashboard(
             "period": period,
             "page": page,
             "has_more": page * 50 < total_events,
-            "daily_topics": daily_topics,
         },
     )
 

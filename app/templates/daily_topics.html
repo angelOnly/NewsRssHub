@@ -20,26 +20,10 @@
 <section class="weekly-topic-list" aria-label="今日热点话题">
   {% for topic in topics %}
   <article id="topic-{{ topic.id }}" class="weekly-topic-card" data-topic-id="{{ topic.id }}">
-    <header class="weekly-topic-card-head">
-      <div>
-        <span class="weekly-topic-kicker">今日话题</span>
-        <h2>{{ topic.display_name }}</h2>
-      </div>
-      <span class="weekly-topic-count">{{ topic.content_count }}<small>条内容</small></span>
-    </header>
-    <div class="weekly-topic-metrics" aria-label="话题统计">
-      <span>{{ topic.event_count }} 个事件</span><span>{{ topic.source_count }} 个来源</span>
-      {% if topic.latest_at %}<span>更新{{ topic.latest_at|compact_relative_time|replace(' ', '') }}</span>{% endif %}
-    </div>
-    <ul class="weekly-topic-events" aria-label="话题包含的事件">
-      {% for event in topic.events %}
-      <li>
-        <a href="/events/{{ event.id }}?tier={{ event.editorial_tier }}&period=24h" aria-label="查看 {{ event.title }}">
-          <span>{{ event.title }}</span><small>{{ event.content_count }} 条内容</small>
-        </a>
-      </li>
-      {% endfor %}
-    </ul>
+    <h2 title="{{ topic.display_name }}">{{ topic.display_name }}</h2>
+    <p class="daily-topic-description"{% if topic.description %} title="{{ topic.description }}"{% endif %}>
+      <span class="daily-topic-content-count">{{ topic.content_count }} 条内容</span>{% if topic.description %} · {{ topic.description }}{% endif %}
+    </p>
   </article>
   {% endfor %}
 </section>
