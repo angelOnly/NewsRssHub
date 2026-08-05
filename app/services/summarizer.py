@@ -13,6 +13,8 @@ from app.storage.repository import Repository
 
 
 SUMMARY_VERSION = 2
+DISPLAY_TITLE_MAX_LENGTH = 50
+SUMMARY_MAX_LENGTH = 220
 
 
 def _compact(value: str, limit: int) -> str:
@@ -82,7 +84,7 @@ class SummaryService:
         """
 
         content = _compact(str(item.get("content") or ""), 900)
-        title = _compact(str(item.get("title") or ""), 320)
+        title = _compact(str(item.get("title") or ""), DISPLAY_TITLE_MAX_LENGTH)
         if not content:
             if not title:
                 return None
@@ -90,9 +92,9 @@ class SummaryService:
         elif len(content) <= 520:
             prefix = "官方宣布：" if item.get("is_official") else ""
             if title and content.casefold() != title.casefold() and not content.startswith(title):
-                summary = _compact(f"{prefix}{title}。{content}", 900)
+                summary = _compact(f"{prefix}{title}。{content}", SUMMARY_MAX_LENGTH)
             else:
-                summary = _compact(f"{prefix}{content}", 900)
+                summary = _compact(f"{prefix}{content}", SUMMARY_MAX_LENGTH)
         else:
             return None
         return SummaryArtifact(display_title=title, summary=summary, highlights=[summary[:180]])
@@ -107,9 +109,10 @@ class SummaryService:
             "必须保留产品、模型、版本、发布日期、开放范围、硬件条件、价格、限制和明确结论。"
             "如果来源身份影响事实，可以写明官方宣布或社区实测。"
             "输出严格 JSON："
-            "{\"title_zh\":\"简洁准确的中文标题，保留产品/模型名\","
-            "\"summary\":\"2到4句简体中文摘要\","
+            "{\"title_zh\":\"不超过50字的简洁准确中文标题，保留产品/模型名\","
+            "\"summary\":\"约200字、最多220字的2到4句简体中文摘要\","
             "\"highlights\":[\"2到4条可扫描的关键事实\"]}。"
+            "原文信息较少时摘要可以更短，不得为了凑字数补充事实。"
             "highlights 只写事实要点，每条一句，不使用 Markdown、编号或重要性评级。"
         )
         payload = client.complete_json(
@@ -120,8 +123,8 @@ class SummaryService:
                 "content": _compact(str(item.get("content") or ""), 12_000),
             },
         )
-        display_title = _compact(str(payload.get("title_zh") or ""), 300)
-        summary = _compact(str(payload.get("summary") or ""), 1800)
+        display_title = _compact(str(payload.get("title_zh") or ""), DISPLAY_TITLE_MAX_LENGTH)
+        summary = _compact(str(payload.get("summary") or ""), SUMMARY_MAX_LENGTH)
         highlights = _clean_highlights(payload.get("highlights"))
         if not display_title:
             raise LLMRequestError("模型没有生成有效的中文标题。")

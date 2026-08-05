@@ -44,6 +44,9 @@ class WeeklyTopicService:
 
     REFRESH_STATE_SETTING = "weekly_topics_refresh_state"
     REFRESH_INTERVAL = timedelta(minutes=5)
+    SKILL_TITLE_LIMIT = 30
+    SKILL_SUMMARY_LIMIT = 100
+    SKILL_TOPIC_NAME_LIMIT = 30
 
     def __init__(
         self,
@@ -72,21 +75,16 @@ class WeeklyTopicService:
         start = datetime.combine(week_start, time.min, tzinfo=local_now.tzinfo)
         return WeeklyTopicWindow(week_start=week_start, start=start, end=local_now)
 
-    @staticmethod
-    def _candidate_signature(candidates: Sequence[dict[str, Any]]) -> str:
-        """只在候选事件实际变化时再次调用话题模型。"""
+    @classmethod
+    def _candidate_signature(cls, candidates: Sequence[dict[str, Any]]) -> str:
+        """只在会改变模型归并判断的候选事实变化时再次调用话题模型。"""
 
-        compact = [
-            {
-                "id": int(candidate["id"]),
-                "title": str(candidate.get("title") or ""),
-                "summary": str(candidate.get("summary") or ""),
-                "content_count": int(candidate.get("content_count") or 0),
-                "source_count": int(candidate.get("source_count") or 0),
-                "latest_at": str(candidate.get("latest_at") or ""),
-            }
-            for candidate in candidates
-        ]
+        # 与实际模型输入保持一致。内容数、来源数和更新时间由页面实时统计，
+        # 只有跨过展示门槛时才需要额外触发一次，以生成首份话题关系。
+        compact = {
+            "events": cls._skill_events(candidates),
+            "eligible": cls._content_count(candidates) >= MIN_WEEKLY_TOPIC_CONTENT_COUNT,
+        }
         payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -170,27 +168,41 @@ class WeeklyTopicService:
         )
 
     @staticmethod
-    def _skill_events(candidates: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _compact_skill_text(value: Any, limit: int) -> str:
+        """压缩话题归并所需事实，优先在完整句末截断。"""
+
+        text = " ".join(str(value or "").split())
+        if len(text) <= limit:
+            return text
+        clipped = text[:limit]
+        sentence_end = max(clipped.rfind(mark) for mark in "。！？；")
+        if sentence_end >= limit // 2:
+            return clipped[: sentence_end + 1]
+        return f"{clipped[: limit - 1].rstrip()}…"
+
+    @classmethod
+    def _skill_events(cls, candidates: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
             {
                 "id": int(candidate["id"]),
-                "title": str(candidate.get("title") or "")[:320],
-                "summary": str(candidate.get("summary") or "")[:900],
-                "content_count": int(candidate.get("content_count") or 0),
-                "source_count": int(candidate.get("source_count") or 0),
-                "latest_at": str(candidate.get("latest_at") or ""),
+                "title": cls._compact_skill_text(candidate.get("title"), cls.SKILL_TITLE_LIMIT),
+                "summary": cls._compact_skill_text(
+                    candidate.get("summary"), cls.SKILL_SUMMARY_LIMIT
+                ),
             }
             for candidate in candidates
         ]
 
-    @staticmethod
+    @classmethod
     def _skill_existing_topics(
-        topics: Sequence[dict[str, Any]], candidate_ids: set[int]
+        cls, topics: Sequence[dict[str, Any]], candidate_ids: set[int]
     ) -> list[dict[str, Any]]:
         return [
             {
                 "id": int(topic["id"]),
-                "display_name": str(topic.get("display_name") or "")[:80],
+                "display_name": cls._compact_skill_text(
+                    topic.get("display_name"), cls.SKILL_TOPIC_NAME_LIMIT
+                ),
                 # 只保留仍在本周候选集中的事件，避免历史隐藏状态干扰归并。
                 "event_ids": [
                     int(event_id)
@@ -239,6 +251,23 @@ class WeeklyTopicService:
         skill = self.skill_loader.load()
         candidate_ids = {int(candidate["id"]) for candidate in candidates}
         existing_ids = {int(topic["id"]) for topic in existing_topics}
+        skill_events = self._skill_events(candidates)
+        skill_existing_topics = self._skill_existing_topics(existing_topics, candidate_ids)
+        request = {
+            "week": {
+                "week_start": window.week_start.isoformat(),
+                "timezone": self.settings.timezone,
+            },
+            "existing_topics": skill_existing_topics,
+            "events": skill_events,
+        }
+        request_size = len(json.dumps(request, ensure_ascii=False, separators=(",", ":")))
+        logging.getLogger(__name__).info(
+            "本周话题归并请求：%d 个事件、%d 个既有话题、输入 %d 字符",
+            len(skill_events),
+            len(skill_existing_topics),
+            request_size,
+        )
         system = (
             f"{skill}\n\n"
             "你正在执行本周热点话题归并。只输出 JSON，不要 Markdown。"
@@ -250,14 +279,7 @@ class WeeklyTopicService:
         )
         payload = client.complete_json(
             system=system,
-            user={
-                "week": {
-                    "week_start": window.week_start.isoformat(),
-                    "timezone": self.settings.timezone,
-                },
-                "existing_topics": self._skill_existing_topics(existing_topics, candidate_ids),
-                "events": self._skill_events(candidates),
-            },
+            user=request,
         )
         output = WeeklyTopicOutput.model_validate(payload)
         return self._validate_output(

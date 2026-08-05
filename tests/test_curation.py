@@ -98,7 +98,11 @@ class FailingCrossBatchClient:
 
 
 class SummaryArtifactClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
     def complete_json(self, *, system: str, user: dict[str, object]) -> dict[str, object]:
+        self.calls.append({"system": system, "user": user})
         return {
             "title_zh": "MiniMax H3 已支持在 RTX 3060 本地运行",
             "summary": "MiniMax H3 已发布并获得 ComfyUI 原生支持。"
@@ -107,6 +111,15 @@ class SummaryArtifactClient:
                 "已获得 ComfyUI 原生支持。",
                 "12GB 显存 RTX 3060 可本地生成 480p 视频。",
             ],
+        }
+
+
+class OversizedSummaryArtifactClient:
+    def complete_json(self, *, system: str, user: dict[str, object]) -> dict[str, object]:
+        return {
+            "title_zh": "标" * 51,
+            "summary": "摘" * 221,
+            "highlights": [],
         }
 
 
@@ -158,11 +171,12 @@ class CurationTests(unittest.TestCase):
             )
             self.assertTrue(inserted)
 
+            client = SummaryArtifactClient()
             service = SummaryService(
                 repository,
                 settings,
                 llm_connections=FixedConnection(),  # type: ignore[arg-type]
-                client_factory=lambda _config: SummaryArtifactClient(),  # type: ignore[arg-type]
+                client_factory=lambda _config: client,  # type: ignore[arg-type]
             )
             result = service.summarize_pending()
             item = repository.get_item(item_id)
@@ -175,6 +189,8 @@ class CurationTests(unittest.TestCase):
                 item["highlights"],
                 ["已获得 ComfyUI 原生支持。", "12GB 显存 RTX 3060 可本地生成 480p 视频。"],
             )
+            self.assertIn("不超过50字", str(client.calls[0]["system"]))
+            self.assertIn("约200字、最多220字", str(client.calls[0]["system"]))
 
             event_id = repository.apply_curation_groups(
                 [
@@ -191,6 +207,20 @@ class CurationTests(unittest.TestCase):
             assert event is not None
             self.assertEqual(event["title"], item["display_title"])
             self.assertEqual(event["highlights"], item["highlights"])
+
+    def test_model_summary_output_is_bounded_to_title_fifty_and_summary_two_hundred_twenty(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            service = SummaryService(repository, settings)
+
+            artifact = service._summarize_with_model(  # noqa: SLF001
+                OversizedSummaryArtifactClient(),  # type: ignore[arg-type]
+                {"title": "原始标题", "content": "原始正文"},
+            )
+
+            self.assertEqual(artifact.display_title, "标" * 50)
+            self.assertEqual(artifact.summary, "摘" * 220)
 
     def test_cross_batch_failure_does_not_hide_completed_events(self) -> None:
         with TemporaryDirectory() as directory:

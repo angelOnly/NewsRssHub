@@ -163,7 +163,7 @@ class WeeklyTopicTests(unittest.TestCase):
             self.assertEqual({int(event["id"]) for event in model_events if isinstance(event, dict)}, {first_event, second_event})
             self.assertTrue(
                 all(
-                    set(event) == {"id", "title", "summary", "content_count", "source_count", "latest_at"}
+                    set(event) == {"id", "title", "summary"}
                     for event in model_events
                     if isinstance(event, dict)
                 )
@@ -203,6 +203,61 @@ class WeeklyTopicTests(unittest.TestCase):
             self.assertEqual(updated[0]["content_count"], 4)
             self.assertEqual(updated[0]["event_count"], 3)
             self.assertEqual({int(event["id"]) for event in updated[0]["events"]}, {first_event, second_event, third_event})
+
+    def test_skill_events_only_keep_compact_semantic_facts(self) -> None:
+        events = WeeklyTopicService._skill_events(
+            [
+                {
+                    "id": 7,
+                    "title": "题" * 31,
+                    "summary": "要" * 101,
+                    "content_count": 99,
+                    "source_count": 8,
+                    "latest_at": "2026-08-05T12:00:00+00:00",
+                    "content": "这是不能传给话题模型的原始正文。",
+                }
+            ]
+        )
+
+        self.assertEqual(
+            events,
+            [{"id": 7, "title": "题" * 29 + "…", "summary": "要" * 99 + "…"}],
+        )
+
+    def test_candidate_signature_ignores_live_heat_statistics(self) -> None:
+        base = {
+            "id": 7,
+            "title": "MiniMax-M3 发布",
+            "summary": "模型发布并开放测试。",
+            "content_count": 2,
+            "source_count": 1,
+            "latest_at": "2026-08-05T12:00:00+00:00",
+        }
+        changed_statistics = {
+            **base,
+            "content_count": 99,
+            "source_count": 8,
+            "latest_at": "2026-08-05T15:00:00+00:00",
+        }
+
+        self.assertEqual(
+            WeeklyTopicService._candidate_signature([base]),
+            WeeklyTopicService._candidate_signature([changed_statistics]),
+        )
+
+    def test_candidate_signature_changes_when_content_crosses_display_threshold(self) -> None:
+        base = {
+            "id": 7,
+            "title": "MiniMax-M3 发布",
+            "summary": "模型发布并开放测试。",
+            "content_count": 1,
+        }
+        promoted = {**base, "content_count": 2}
+
+        self.assertNotEqual(
+            WeeklyTopicService._candidate_signature([base]),
+            WeeklyTopicService._candidate_signature([promoted]),
+        )
 
     def test_failed_refresh_keeps_last_successful_topic_snapshot(self) -> None:
         with TemporaryDirectory() as directory:
