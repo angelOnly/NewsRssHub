@@ -206,8 +206,8 @@
               <form class="source-form credential-form" method="post" action="/settings/x-session" autocomplete="off">
                 <label>
                   X Cookie
-                  <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 auth_token 值，或完整 Cookie 字符串">
-                  <small>支持单独的 <code>auth_token</code> 值或完整 Cookie 片段；系统只保存并同步 <code>auth_token</code> 给 RSSHub。提交后经 RSSHub 验证；失败时不会覆盖当前已保存的 Cookie。</small>
+                  <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 x.com 的完整 Cookie 字符串">
+                  <small>请粘贴 x.com 请求中的完整 <code>Cookie</code> 字符串，至少包含 <code>auth_token</code> 与 <code>ct0</code>。系统会加密保存并完整同步给 RSSHub；旧版仅 <code>auth_token</code> 的方式已停用。验证失败时不会覆盖当前已保存的完整 Cookie。</small>
                 </label>
                 <div class="form-actions">
                   <button class="button button-primary" type="submit">验证并更新 X Cookie</button>

@@ -56,7 +56,7 @@ class ConnectionCatalogTests(unittest.TestCase):
                 sources.add_source(draft, validate=False)
             self.assertEqual(repository.count_sources(), 0)
 
-            x_sessions.save_from_web("auth_token=known-good-cookie")
+            x_sessions.save_from_web("auth_token=known-good-cookie; ct0=known-good-csrf")
             connection = catalog.ensure_source_ready(SourceKind.X_RSSHUB)
             self.assertTrue(connection.usable)
             source, _ = sources.add_source(draft, validate=False)

@@ -31,16 +31,16 @@ class RssHubRuntimeFiles:
         return self._directory / self._RSS_FEEDS_FILENAME
 
     def write_x_credential(self, cookies: Mapping[str, str]) -> None:
-        """同步 X 的 auth_token，不把完整浏览器 Cookie 暴露给 RSSHub。"""
+        """同步完整 X Cookie，供 RSSHub 原样建立登录会话。"""
 
-        auth_token = str(cookies.get("auth_token") or "").strip()
-        if not auth_token:
-            raise ValueError("X Cookie 中缺少 auth_token，无法同步到 RSSHub。")
+        cookie_header = str(cookies.get("cookie_header") or "").strip()
+        if not cookie_header:
+            raise ValueError("X Cookie 缺少完整 Cookie 字符串，无法同步到 RSSHub。")
         self._write_private_json(
             self.x_credential_path,
             {
-                "version": 1,
-                "auth_token": auth_token,
+                "version": 2,
+                "cookie_header": cookie_header,
             },
         )
 

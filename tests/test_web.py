@@ -79,7 +79,13 @@ class WebTests(unittest.TestCase):
                         encoding="utf-8"
                     )
                 )
-                self.assertEqual(payload, {"version": 1, "auth_token": "web-test-token"})
+                self.assertEqual(
+                    payload,
+                    {
+                        "version": 2,
+                        "cookie_header": "auth_token=web-test-token; ct0=csrf-token",
+                    },
+                )
             finally:
                 delattr(app.state, "services")
 

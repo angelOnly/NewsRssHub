@@ -1,12 +1,12 @@
 # RSSHub 全平台抓取部署
 
-本项目的 X、Reddit、YouTube 和通用 RSS 均通过 RSSHub 抓取。X Cookie 不写入 Compose 环境变量，也不依赖容器重启；Web 页面保存并验证成功后，应用会原子写入宿主机的共享文件。
+本项目的 X、Reddit、YouTube 和通用 RSS 均通过 RSSHub 抓取。X 的完整 Cookie 不写入 Compose 环境变量，也不依赖容器重启；Web 页面保存并验证成功后，应用会原子写入宿主机的共享文件。
 
 共享目录为：
 
 ```text
 /home/jzb/docker/rss-hub/data/rsshub-runtime/
-├── x-twitter.json   # 仅 auth_token，权限 0600
+├── x-twitter.json   # 完整 x.com Cookie，权限 0600
 └── rss-feeds.json   # 通用 RSS 白名单，权限 0600
 ```
 
@@ -71,7 +71,7 @@ docker compose up -d --build web collector processor
 1. 将旧数据库中 X、Reddit、YouTube、通用 RSS 的直连 `feed_url` 迁移为 RSSHub 路由；
 2. 从 SQLite 的加密 X 凭据恢复 `x-twitter.json`，并从所有未归档通用 RSS 来源生成 `rss-feeds.json`。
 
-之后在 Web 的“设置与连接”更新 X Cookie，会依次执行：写入候选共享文件 → 请求 RSSHub 的 X 验证路由 → 成功后加密写入 SQLite。验证失败会恢复之前的共享文件和 SQLite 凭据。
+之后在 Web 的“设置与连接”更新 X Cookie，会依次执行：校验完整 Cookie 至少包含 `auth_token` 与 `ct0` → 写入候选共享文件 → 请求 RSSHub 的 X 验证路由 → 成功后加密写入 SQLite。验证失败会恢复之前的共享文件和 SQLite 凭据。旧版仅保存 `auth_token` 的记录会被停用，不再同步给 RSSHub；请重新粘贴完整 Cookie。
 
 ## 3. 真实验证
 

@@ -1,9 +1,10 @@
-"""X Cookie 的加密保存与经 RSSHub 的连接验证。"""
+"""X 完整 Cookie 的加密保存与经 RSSHub 的连接验证。"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -16,6 +17,8 @@ from app.storage.repository import Repository
 
 
 X_CONNECTOR = "x_session"
+_COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_REQUIRED_COOKIE_NAMES = ("auth_token", "ct0")
 
 
 class XSessionError(RuntimeError):
@@ -31,6 +34,10 @@ class XCredentialExpiredError(XSessionError):
 
 
 class XCredentialConfigurationError(XSessionError):
+    pass
+
+
+class XCredentialFullCookieRequiredError(XSessionError):
     pass
 
 
@@ -50,37 +57,47 @@ class XCredentialStatus:
 
 
 def parse_x_cookie(value: str) -> dict[str, str]:
-    """接受 auth_token 值或浏览器 Cookie 片段，但只保留 auth_token。"""
+    """规范化完整的 x.com Cookie，并要求会话所需的关键字段。"""
 
     raw = value.strip()
     if raw.lower().startswith("cookie:"):
         raw = raw.split(":", 1)[1].strip()
     if not raw:
-        raise XCredentialMissingError("请粘贴 X 的 auth_token Cookie。")
+        raise XCredentialMissingError("请粘贴 x.com 的完整 Cookie 字符串。")
+    if "\r" in raw or "\n" in raw:
+        raise XCredentialMissingError("Cookie 格式无效，请粘贴单行的 x.com Cookie 字符串。")
 
-    if "auth_token=" not in raw:
-        auth_token = raw
-        if any(character.isspace() for character in auth_token):
-            raise XCredentialMissingError("请输入 auth_token 的值，或完整的 Cookie 字符串。")
-    else:
-        auth_token = ""
-        for part in raw.split(";"):
-            name, separator, cookie_value = part.strip().partition("=")
-            if separator and name.strip() == "auth_token" and cookie_value.strip():
-                auth_token = cookie_value.strip()
-                break
+    values: dict[str, str] = {}
+    for raw_part in raw.split(";"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        name, separator, cookie_value = part.partition("=")
+        name = name.strip()
+        cookie_value = cookie_value.strip()
+        if not separator or not _COOKIE_NAME.fullmatch(name) or not cookie_value:
+            raise XCredentialMissingError("Cookie 格式无效，请粘贴 x.com 的完整 Cookie 字符串。")
+        values[name] = cookie_value
 
-    if not auth_token:
-        raise XCredentialMissingError("未找到 auth_token；请从 x.com 的 Cookie 中复制该值。")
-    return {"auth_token": auth_token}
+    missing = [name for name in _REQUIRED_COOKIE_NAMES if not values.get(name)]
+    if missing:
+        labels = "、".join(missing)
+        raise XCredentialMissingError(
+            f"完整 X Cookie 中缺少 {labels}；请从 x.com 请求的 Cookie 头重新复制。"
+        )
+
+    return {
+        "auth_token": values["auth_token"],
+        "cookie_header": "; ".join(f"{name}={cookie_value}" for name, cookie_value in values.items()),
+    }
 
 
 def _fingerprint(cookies: dict[str, str]) -> str:
-    return hashlib.sha256(cookies["auth_token"].encode("utf-8")).hexdigest()[-10:]
+    return hashlib.sha256(cookies["cookie_header"].encode("utf-8")).hexdigest()[-10:]
 
 
 class XSessionService:
-    """将 X Cookie 保存在 SQLite，并同步给 RSSHub 的只读运行时文件。"""
+    """保存完整 X Cookie，并同步给 RSSHub 的只读运行时文件。"""
 
     def __init__(
         self,
@@ -114,18 +131,19 @@ class XSessionService:
             return XCredentialStatus("needs_key", str(exc), False)
         record = self.repository.get_connector_credential(X_CONNECTOR)
         if not record:
-            return XCredentialStatus("missing", "尚未保存 X 登录 Cookie，X 账号暂不会抓取。", False)
+            return XCredentialStatus("missing", "尚未保存完整 X Cookie，X 账号暂不会抓取。", False)
         state = str(record.get("status") or "unknown")
         last_error = str(record.get("last_error") or "")
         messages = {
-            "valid": "X 登录 Cookie 可用。",
-            "invalid": "X 登录 Cookie 已失效，请在此更新后再抓取。",
+            "valid": "完整 X Cookie 已验证，可添加多个 X 账号来源。",
+            "needs_full_cookie": "旧版仅 auth_token 凭据已停用，请重新粘贴完整的 x.com Cookie。",
+            "invalid": "X 登录 Cookie 已失效，请更新完整 Cookie 后再抓取。",
             "error": last_error or "暂时无法验证 X 登录状态，请稍后重试。",
         }
         return XCredentialStatus(
             state,
-            messages.get(state, "尚未验证 X 登录 Cookie。"),
-            True,
+            messages.get(state, "尚未验证完整 X Cookie。"),
+            state not in {"needs_full_cookie"},
             fingerprint=str(record.get("fingerprint") or ""),
             updated_at=record.get("updated_at"),
             last_validated_at=record.get("last_validated_at"),
@@ -133,19 +151,23 @@ class XSessionService:
         )
 
     def sync_runtime_file(self) -> None:
-        """启动时从已加密的 SQLite 恢复共享文件，兼容升级前的已存凭据。"""
+        """启动时恢复完整 Cookie；旧 token 凭据不会再进入 RSSHub。"""
 
-        if not self.repository.get_connector_credential(X_CONNECTOR):
+        record = self.repository.get_connector_credential(X_CONNECTOR)
+        if not record:
             self.runtime_files.clear_x_credential()
             return
         try:
             self.runtime_files.write_x_credential(self._load_cookies())
+        except XCredentialFullCookieRequiredError as exc:
+            self.runtime_files.clear_x_credential()
+            self._mark_full_cookie_required(record, exc)
         except XSessionError:
             # 密钥配置或历史密文异常时宁可不给 RSSHub 残留凭据，也不能让服务无法启动。
             self.runtime_files.clear_x_credential()
 
     def save_from_web(self, cookie_value: str) -> XCredentialStatus:
-        """验证候选 Cookie；失败时恢复旧共享文件，绝不覆盖已验证的 SQLite 记录。"""
+        """验证候选完整 Cookie；失败时恢复之前已验证的完整会话。"""
 
         candidate = parse_x_cookie(cookie_value)
         self._cipher()
@@ -160,7 +182,14 @@ class XSessionService:
         return self.status()
 
     def test_saved(self) -> XCredentialStatus:
-        cookies = self._load_cookies()
+        try:
+            cookies = self._load_cookies()
+        except XCredentialFullCookieRequiredError as exc:
+            self.runtime_files.clear_x_credential()
+            record = self.repository.get_connector_credential(X_CONNECTOR)
+            if record:
+                self._mark_full_cookie_required(record, exc)
+            raise
         # RSSHub 容器可能在应用重启前后才创建；每次测试前都重新同步一次。
         self.runtime_files.write_x_credential(cookies)
         try:
@@ -171,6 +200,19 @@ class XSessionService:
             raise safe_error from exc
         self._save_valid(cookies)
         return self.status()
+
+    def record_rsshub_auth_failure(self, error: Exception) -> bool:
+        """将 RSSHub 返回的明确 X 鉴权失败同步到设置页状态。"""
+
+        response = getattr(error, "response", None)
+        body = str(getattr(response, "text", "") or "")[:2000] if response is not None else ""
+        details = f"{error}\n{body}".casefold()
+        if "twitter api error: 401" not in details and "twitter api error: 403" not in details:
+            return False
+        self._record_failure(
+            XCredentialExpiredError("X 登录 Cookie 已失效，请更新完整 Cookie 后重试。")
+        )
+        return True
 
     def _validate_runtime_credential(self) -> None:
         if self._validator:
@@ -196,7 +238,7 @@ class XSessionService:
             return
         body = response.text[:200]
         if response.status_code in {401, 403} or "Twitter API error: 401" in body or "Twitter API error: 403" in body:
-            raise XCredentialExpiredError("X 登录 Cookie 已失效，请更新后重试。")
+            raise XCredentialExpiredError("X 登录 Cookie 已失效，请更新完整 Cookie 后重试。")
         if response.status_code == 404:
             raise XCredentialConfigurationError(
                 "RSSHub 尚未部署 NewsRSSHub 自定义路由，请按部署说明更新 RSSHub 镜像。"
@@ -206,28 +248,42 @@ class XSessionService:
     def _load_saved_cookies_or_none(self) -> dict[str, str] | None:
         if not self.repository.get_connector_credential(X_CONNECTOR):
             return None
-        return self._load_cookies()
+        try:
+            return self._load_cookies()
+        except XCredentialFullCookieRequiredError:
+            # 旧 token 已停用，候选完整 Cookie 验证失败后不能再恢复它。
+            return None
 
     def _load_cookies(self) -> dict[str, str]:
         record = self.repository.get_connector_credential(X_CONNECTOR)
         if not record:
-            raise XCredentialMissingError("X 登录 Cookie 未配置，请在“设置与连接”页面保存后重试。")
+            raise XCredentialMissingError("尚未配置完整 X Cookie，请在“设置与连接”页面保存后重试。")
         try:
             decrypted = self._cipher().decrypt(str(record["ciphertext"]).encode("ascii"))
             payload = json.loads(decrypted.decode("utf-8"))
         except (InvalidToken, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
             raise XCredentialConfigurationError("已保存的 X Cookie 无法读取，请重新保存一次。") from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("auth_token"), str):
-            raise XCredentialConfigurationError("已保存的 X Cookie 格式无效，请重新保存一次。")
-        auth_token = str(payload["auth_token"]).strip()
-        if not auth_token:
-            raise XCredentialConfigurationError("已保存的 X Cookie 格式无效，请重新保存一次。")
-        return {"auth_token": auth_token}
+        if not isinstance(payload, dict):
+            raise XCredentialConfigurationError("已保存的 X Cookie 格式无效，请重新保存完整 Cookie。")
+        if payload.get("version") != 2 or not isinstance(payload.get("cookie_header"), str):
+            raise XCredentialFullCookieRequiredError(
+                "旧版仅 auth_token 凭据已停用，请重新粘贴完整的 x.com Cookie。"
+            )
+        try:
+            return parse_x_cookie(str(payload["cookie_header"]))
+        except XCredentialMissingError as exc:
+            raise XCredentialConfigurationError(
+                "已保存的 X Cookie 格式无效，请重新保存完整 Cookie。"
+            ) from exc
 
     def _save_valid(self, cookies: dict[str, str]) -> None:
-        sanitized = {"auth_token": str(cookies["auth_token"]).strip()}
+        sanitized = parse_x_cookie(cookies["cookie_header"])
         ciphertext = self._cipher().encrypt(
-            json.dumps(sanitized, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            json.dumps(
+                {"version": 2, "cookie_header": sanitized["cookie_header"]},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
         ).decode("ascii")
         self.repository.save_connector_credential(
             connector=X_CONNECTOR,
@@ -235,7 +291,7 @@ class XSessionService:
             fingerprint=_fingerprint(sanitized),
             status="valid",
         )
-        # SQLite 是可信的持久化存储；RSSHub 只读取这个仅含 auth_token 的运行时副本。
+        # SQLite 是可信的持久化存储；RSSHub 只读取完整 Cookie 的运行时副本。
         self.runtime_files.write_x_credential(sanitized)
 
     def _restore_runtime_file(self, previous: dict[str, str] | None) -> None:
@@ -243,6 +299,18 @@ class XSessionService:
             self.runtime_files.write_x_credential(previous)
         else:
             self.runtime_files.clear_x_credential()
+
+    def _mark_full_cookie_required(self, record: dict[str, object], exc: XCredentialFullCookieRequiredError) -> None:
+        if (
+            str(record.get("status") or "") == "needs_full_cookie"
+            and str(record.get("last_error") or "") == str(exc)
+        ):
+            return
+        self.repository.update_connector_credential_health(
+            X_CONNECTOR,
+            status="needs_full_cookie",
+            last_error=str(exc),
+        )
 
     def _record_failure(self, exc: XSessionError) -> None:
         if not self.repository.get_connector_credential(X_CONNECTOR):

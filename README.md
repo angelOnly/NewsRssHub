@@ -34,7 +34,7 @@
 
 更早的历史结构仍不会在运行服务中重建。只有部署前遗留在 v7 或更早版本的数据库，才需要停掉服务后使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check` 和 `--apply`。维护命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理与回滚步骤见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
 
-4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统会先经 RSSHub 验证，成功后才加密保存并同步运行时文件。
+4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 **x.com 的完整 Cookie 字符串**（至少应包含 `auth_token` 与 `ct0`）。系统会先经 RSSHub 验证，成功后才加密保存并同步运行时文件；仅 `auth_token` 的旧方式已停用。
 
 Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → Skill 筛选 → 正文译文 → 每日简报与过期内容清理。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 会一并复制到镜像，缺失时系统会明确显示筛选不可用，而不会退回旧关键词评分。
 
@@ -65,7 +65,7 @@ python -m app.worker --once --force
 uvicorn app.web:app --reload
 ```
 
-默认会导入 `sources/feeds.yml` 中已有的来源。X Cookie 持久化保存于 SQLite 加密字段；RSSHub 只读挂载的运行时文件仅含 `auth_token`，既不会写入 `docker-compose.yml`，也不会回显到网页；更换 Cookie 后不需要重启容器。X 抓取和验证均经 RSSHub 完成，失效时首页和来源管理页会提示更新。
+默认会导入 `sources/feeds.yml` 中已有的来源。X 的完整 Cookie 持久化保存于 SQLite 加密字段；RSSHub 只读挂载的运行时文件会保存完整 Cookie，既不会写入 `docker-compose.yml`，也不会回显到网页；更换 Cookie 后不需要重启容器。旧版仅 `auth_token` 的已保存凭据会被停用，需重新粘贴完整 Cookie。X 抓取和验证均经 RSSHub 完成，失效时首页和来源管理页会提示更新。
 
 ## 来源导出与自动备份
 

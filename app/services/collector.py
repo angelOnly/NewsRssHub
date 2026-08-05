@@ -80,6 +80,11 @@ class Collector:
             except Exception as exc:  # plugin boundaries must not halt other kinds
                 outcomes = {int(source["id"]): SourceFetchResult(error=exc) for source in group}
 
+            if kind == "x_rsshub" and self.connections.x_sessions:
+                for outcome in outcomes.values():
+                    if outcome.error and self.connections.x_sessions.record_rsshub_auth_failure(outcome.error):
+                        break
+
             for source in group:
                 source_id = int(source["id"])
                 outcome = outcomes.get(source_id)
