@@ -17,8 +17,12 @@ database:
 
 
 # 你的 OpenAI 兼容接口
-OPENAI_API_KEY: "sk-35ff889fff5042749285e5273fc3e995"
-OPENAI_BASE_URL: "https://llm-api.xiaolicloud.cn:18443/v1"
-OPENAI_MODEL_NAME: "gemini-3.5-flash-extra-low"
+# OPENAI_API_KEY: "sk-35ff889fff5042749285e5273fc3e995"
+# OPENAI_BASE_URL: "https://llm-api.xiaolicloud.cn:18443/v1"
+# OPENAI_MODEL_NAME: "gemini-3.5-flash-extra-low"
+
+OPENAI_API_KEY: "sk-WD2338WbHuLFQz1OfhBFiC66zoylD4U4A5RcXp4eRDXIwnAE"
+OPENAI_BASE_URL: "https://tokenhub.tencentmaas.com/v1"
+OPENAI_MODEL_NAME: "ep-4wzac5e0" # deepseek v4 flash
 
 CREDENTIAL_ENCRYPTION_KEY: "l-kccqZuqwMkNmHq5cPzlCEaFf1QNIobfpGxjvTkOwg="
