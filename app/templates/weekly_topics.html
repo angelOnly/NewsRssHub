@@ -6,7 +6,7 @@
   <div>
     <p class="eyebrow">WEEKLY TOPICS</p>
     <h1>本周热点</h1>
-    <p class="subhead">{{ week_start.strftime('%m 月 %d 日') }}起，按可见内容条数统计；已隐藏内容不参与。</p>
+    <p class="subhead">{{ week_start.strftime('%m 月 %d 日') }}起，累计至少 2 条可见内容才进入热点；已隐藏内容不参与。</p>
   </div>
 </header>
 
@@ -46,7 +46,7 @@
 {% else %}
 <div class="empty-state weekly-topic-empty">
   <span class="empty-state-icon">{{ icon('trending') }}</span><h2>本周暂无热点话题</h2>
-  <p>后台完成摘要、事件筛选和话题归并后，这里会按内容条数展示本周可见热点。</p>
+  <p>后台完成摘要、事件筛选和话题归并后，累计至少 2 条可见内容的话题会显示在这里。</p>
 </div>
 {% endif %}
 {% endblock %}

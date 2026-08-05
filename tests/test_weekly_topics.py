@@ -8,6 +8,7 @@ import unittest
 from app.config import Settings
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FeedItem, SourceDraft, SourceKind
+from app.domain.weekly_topics import WeeklyTopicGroup
 from app.services.llm_connection import LLMRuntimeConfig
 from app.services.weekly_topics import WeeklyTopicService
 from app.storage.database import Database
@@ -203,7 +204,12 @@ class WeeklyTopicTests(unittest.TestCase):
             )
             now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
             self._create_event(
-                repository, source_id, "first", "MiniMax-M3 发布", now - timedelta(minutes=1)
+                repository,
+                source_id,
+                "first",
+                "MiniMax-M3 发布",
+                now - timedelta(minutes=1),
+                item_count=2,
             )
 
             client = TopicClient()
@@ -231,6 +237,143 @@ class WeeklyTopicTests(unittest.TestCase):
             self.assertTrue(failed.failed)
             self.assertEqual([(topic["id"], topic["display_name"]) for topic in after], [(topic["id"], topic["display_name"]) for topic in before])
             self.assertEqual(after[0]["event_count"], 1)
+
+    def test_single_content_is_not_shown_until_topic_coverage_reaches_two(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
+            self._create_event(
+                repository,
+                source_id,
+                "first",
+                "MiniMax-M3 发布",
+                now - timedelta(minutes=1),
+            )
+
+            client = TopicClient()
+            service = WeeklyTopicService(
+                repository,
+                settings,
+                llm_connections=FixedConnection(),  # type: ignore[arg-type]
+                client_factory=lambda _config: client,  # type: ignore[arg-type]
+            )
+            first = service.refresh_current_week(now=now)
+            self.assertTrue(first.refreshed)
+            self.assertEqual(first.topics, 0)
+            self.assertEqual(len(client.calls), 0)
+
+            window = service.current_window(now)
+            self.assertEqual(
+                repository.list_weekly_topics(
+                    week_start=window.week_start, start=window.start, end=window.end
+                ),
+                [],
+            )
+            self.assertTrue(
+                service.refresh_current_week(now=now + timedelta(seconds=30)).skipped
+            )
+
+            self._create_event(
+                repository,
+                source_id,
+                "review",
+                "MiniMax-M3 实测",
+                now + timedelta(seconds=30),
+            )
+            promoted = service.refresh_current_week(now=now + timedelta(minutes=1))
+            self.assertTrue(promoted.refreshed)
+            self.assertEqual(promoted.topics, 1)
+            self.assertEqual(len(client.calls), 1)
+
+            topics = repository.list_weekly_topics(
+                week_start=window.week_start,
+                start=window.start,
+                end=now + timedelta(minutes=1),
+            )
+            self.assertEqual(len(topics), 1)
+            self.assertEqual(topics[0]["content_count"], 2)
+            self.assertEqual(topics[0]["event_count"], 2)
+
+    def test_changed_candidates_wait_five_minutes_before_next_topic_model_call(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
+            self._create_event(
+                repository,
+                source_id,
+                "release",
+                "MiniMax-M3 发布",
+                now - timedelta(minutes=1),
+                item_count=2,
+            )
+
+            client = TopicClient()
+            service = WeeklyTopicService(
+                repository,
+                settings,
+                llm_connections=FixedConnection(),  # type: ignore[arg-type]
+                client_factory=lambda _config: client,  # type: ignore[arg-type]
+            )
+            self.assertTrue(service.refresh_current_week(now=now).refreshed)
+            self.assertEqual(len(client.calls), 1)
+
+            self._create_event(
+                repository,
+                source_id,
+                "review",
+                "MiniMax-M3 实测",
+                now + timedelta(seconds=30),
+            )
+            delayed = service.refresh_current_week(now=now + timedelta(minutes=1))
+            self.assertTrue(delayed.skipped)
+            self.assertEqual(len(client.calls), 1)
+
+            refreshed = service.refresh_current_week(now=now + timedelta(minutes=5))
+            self.assertTrue(refreshed.refreshed)
+            self.assertEqual(len(client.calls), 2)
+
+    def test_existing_single_content_topic_is_hidden_from_weekly_hot_topics(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
+            event_id = self._create_event(repository, source_id, "single", "单条报道", now)
+            service = WeeklyTopicService(repository, settings)
+            window = service.current_window(now)
+            repository.replace_weekly_topics(
+                week_start=window.week_start,
+                groups=[
+                    WeeklyTopicGroup(
+                        ref="new:1",
+                        display_name="单条报道话题",
+                        event_ids=[event_id],
+                    )
+                ],
+            )
+
+            self.assertEqual(
+                repository.list_weekly_topics(
+                    week_start=window.week_start, start=window.start, end=window.end
+                ),
+                [],
+            )
 
     @staticmethod
     def _create_event(

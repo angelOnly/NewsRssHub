@@ -11,7 +11,11 @@ from typing import Any, Callable, Sequence
 from zoneinfo import ZoneInfo
 
 from app.config import Settings
-from app.domain.weekly_topics import WeeklyTopicGroup, WeeklyTopicOutput
+from app.domain.weekly_topics import (
+    MIN_WEEKLY_TOPIC_CONTENT_COUNT,
+    WeeklyTopicGroup,
+    WeeklyTopicOutput,
+)
 from app.services.llm_client import OpenAICompatibleJsonClient
 from app.services.llm_connection import LLMConnectionService, LLMRuntimeConfig
 from app.services.skill_loader import SkillLoader, SkillUnavailableError
@@ -39,6 +43,7 @@ class WeeklyTopicService:
     """将本周可见事件归入独立话题，不改变既有事件归并结果。"""
 
     REFRESH_STATE_SETTING = "weekly_topics_refresh_state"
+    REFRESH_INTERVAL = timedelta(minutes=5)
 
     def __init__(
         self,
@@ -98,16 +103,70 @@ class WeeklyTopicService:
         return {
             "week_start": str(value.get("week_start") or ""),
             "signature": str(value.get("signature") or ""),
+            "attempted_at": str(value.get("attempted_at") or ""),
         }
 
-    def _save_refresh_state(self, window: WeeklyTopicWindow, signature: str) -> None:
+    @staticmethod
+    def _state_time(value: str) -> datetime | None:
+        """兼容旧状态；无效时间不阻塞下一次归并。"""
+
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _state_matches_window(state: dict[str, str], window: WeeklyTopicWindow) -> bool:
+        return state.get("week_start") == window.week_start.isoformat()
+
+    def _save_refresh_state(
+        self,
+        window: WeeklyTopicWindow,
+        signature: str,
+        *,
+        attempted_at: datetime | None = None,
+    ) -> None:
         self.repository.save_app_setting(
             self.REFRESH_STATE_SETTING,
             json.dumps(
-                {"week_start": window.week_start.isoformat(), "signature": signature},
+                {
+                    "week_start": window.week_start.isoformat(),
+                    "signature": signature,
+                    "attempted_at": attempted_at.astimezone(timezone.utc).isoformat()
+                    if attempted_at
+                    else "",
+                },
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
+        )
+
+    def _save_refresh_attempt(
+        self, window: WeeklyTopicWindow, state: dict[str, str], *, attempted_at: datetime
+    ) -> None:
+        """记录失败或不可用的尝试，避免 worker 每 15 秒重复请求模型。"""
+
+        signature = state.get("signature", "") if self._state_matches_window(state, window) else ""
+        self._save_refresh_state(window, signature, attempted_at=attempted_at)
+
+    @staticmethod
+    def _content_count(candidates: Sequence[dict[str, Any]]) -> int:
+        return sum(max(0, int(candidate.get("content_count") or 0)) for candidate in candidates)
+
+    @staticmethod
+    def _hot_topic_count(
+        groups: Sequence[WeeklyTopicGroup], candidates: Sequence[dict[str, Any]]
+    ) -> int:
+        counts = {int(candidate["id"]): int(candidate.get("content_count") or 0) for candidate in candidates}
+        return sum(
+            sum(counts[event_id] for event_id in group.event_ids)
+            >= MIN_WEEKLY_TOPIC_CONTENT_COUNT
+            for group in groups
         )
 
     @staticmethod
@@ -208,33 +267,46 @@ class WeeklyTopicService:
     def refresh_current_week(
         self, *, now: datetime | None = None, force: bool = False
     ) -> WeeklyTopicRun:
-        """刷新本周话题；失败时绝不改写上一份成功结果。"""
+        """刷新本周话题；模型归并最多每五分钟执行一次。"""
 
-        window = self.current_window(now)
+        reference = now or datetime.now(timezone.utc)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
+        reference = reference.astimezone(timezone.utc)
+        window = self.current_window(reference)
         candidates = self.repository.list_weekly_topic_candidates(start=window.start, end=window.end)
         existing_topics = self.repository.list_weekly_topic_state(window.week_start)
         signature = self._candidate_signature(candidates)
         state = self._refresh_state()
-        if (
-            not force
-            and existing_topics
-            and state.get("week_start") == window.week_start.isoformat()
-            and state.get("signature") == signature
-        ):
+        state_matches_window = self._state_matches_window(state, window)
+        if not force and state_matches_window and state.get("signature") == signature:
             return WeeklyTopicRun(skipped=True, message="本周候选事件未变化。")
 
-        if not candidates:
-            # 本周没有可见事件时同步清空旧快照，不能残留已隐藏或停用的数据。
-            self.repository.replace_weekly_topics(week_start=window.week_start, groups=[])
+        content_count = self._content_count(candidates)
+        if content_count < MIN_WEEKLY_TOPIC_CONTENT_COUNT:
+            # 不写入单条内容的话题关系；已有关系保留，恢复可见后仍可复用稳定 ID。
             self._save_refresh_state(window, signature)
-            return WeeklyTopicRun(refreshed=True, message="本周暂无可统计的可见事件。")
+            return WeeklyTopicRun(
+                refreshed=True,
+                events=len(candidates),
+                message=f"本周可见内容不足 {MIN_WEEKLY_TOPIC_CONTENT_COUNT} 条，暂不生成热点。",
+            )
+
+        attempted_at = self._state_time(state.get("attempted_at", "")) if state_matches_window else None
+        if not force and attempted_at and reference - attempted_at < self.REFRESH_INTERVAL:
+            return WeeklyTopicRun(
+                skipped=True,
+                message="候选事件已更新；本周话题归并最多每五分钟执行一次。",
+            )
 
         runtime = self.llm_connections.runtime_config()
         if not runtime or not runtime.enabled:
+            self._save_refresh_attempt(window, state, attempted_at=reference)
             return WeeklyTopicRun(skipped=True, message="模型不可用，保留上一份本周话题结果。")
         try:
             self.skill_loader.load()
         except SkillUnavailableError as exc:
+            self._save_refresh_attempt(window, state, attempted_at=reference)
             return WeeklyTopicRun(skipped=True, message=str(exc))
 
         try:
@@ -245,9 +317,14 @@ class WeeklyTopicService:
                 existing_topics=existing_topics,
             )
             self.repository.replace_weekly_topics(week_start=window.week_start, groups=groups)
-            self._save_refresh_state(window, signature)
+            self._save_refresh_state(window, signature, attempted_at=reference)
         except Exception:
             logging.getLogger(__name__).exception("本周话题归并失败，保留上一份成功结果")
+            self._save_refresh_attempt(window, state, attempted_at=reference)
             return WeeklyTopicRun(failed=True, message="本周话题归并暂时失败，将在后续处理轮次重试。")
 
-        return WeeklyTopicRun(refreshed=True, topics=len(groups), events=len(candidates))
+        return WeeklyTopicRun(
+            refreshed=True,
+            topics=self._hot_topic_count(groups, candidates),
+            events=len(candidates),
+        )

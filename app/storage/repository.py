@@ -9,7 +9,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FetchPolicy, FeedItem, SourceDraft
-from app.domain.weekly_topics import WeeklyTopicGroup
+from app.domain.weekly_topics import MIN_WEEKLY_TOPIC_CONTENT_COUNT, WeeklyTopicGroup
 from app.storage.database import Database
 
 
@@ -1483,12 +1483,12 @@ class Repository:
                   AND COALESCE(i.published_at, i.fetched_at) >= ?
                   AND COALESCE(i.published_at, i.fetched_at) < ?
                 GROUP BY t.id
-                HAVING COUNT(i.id) > 0
+                HAVING COUNT(i.id) >= ?
                 ORDER BY content_count DESC, event_count DESC, source_count DESC,
                          latest_at DESC, t.id DESC
                 LIMIT ?
                 """,
-                (week_key, start_at, end_at, bounded_limit),
+                (week_key, start_at, end_at, MIN_WEEKLY_TOPIC_CONTENT_COUNT, bounded_limit),
             ).fetchall()
         topics = [_row_to_dict(row) for row in rows]
         for topic in topics:

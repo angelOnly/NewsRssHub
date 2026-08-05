@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _TOPIC_REFERENCE = re.compile(r"(?:existing|new):[1-9]\d*")
 
+# 单条内容仍是正常事件；累计两条可见内容后才属于“热点”。
+MIN_WEEKLY_TOPIC_CONTENT_COUNT = 2
+
 
 class WeeklyTopicGroup(BaseModel):
     """一个本周话题及其事件归属。
