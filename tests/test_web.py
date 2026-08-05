@@ -123,6 +123,8 @@ class WebTests(unittest.TestCase):
         self.assertNotIn('class="mobile-menu"', navigation)
         self.assertIn('data-topic-id="42"', daily_page)
         self.assertIn('id="topic-42"', daily_page)
+        self.assertIn('href="/daily-topics/42"', daily_page)
+        self.assertIn('class="weekly-topic-card weekly-topic-card-link"', daily_page)
         self.assertIn("MiniMax-M3 发布与评测", daily_page)
         self.assertIn('class="daily-topic-content-count">8 条内容</span>', daily_page)
         self.assertIn("围绕 MiniMax-M3 的发布信息与实测结果。", daily_page)
@@ -183,6 +185,40 @@ class WebTests(unittest.TestCase):
                 self.assertNotIn("今日话题暂未更新", response.text)
                 self.assertEqual(old_route.status_code, 307)
                 self.assertEqual(old_route.headers["location"], "/daily-topics")
+            finally:
+                delattr(app.state, "services")
+
+    def test_daily_topic_card_opens_a_detail_page_with_its_events(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            app.state.services = services
+            topic = {
+                "id": 42,
+                "display_name": "MiniMax-M3 发布与评测",
+                "description": "聚焦 MiniMax-M3 的发布信息与实测结果。",
+                "content_count": 8,
+                "event_count": 2,
+                "events": [
+                    {
+                        "id": 11,
+                        "title": "MiniMax-M3 发布",
+                        "summary": "模型发布与核心能力介绍。",
+                        "content_count": 5,
+                        "source_count": 2,
+                        "editorial_tier": "important",
+                    }
+                ],
+            }
+            try:
+                with patch.object(services.repository, "list_daily_topics", return_value=[topic]) as topic_query:
+                    with TestClient(app) as client:
+                        response = client.get("/daily-topics/42")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(topic_query.call_args.kwargs["limit"], 50)
+                self.assertIn("MiniMax-M3 发布与评测", response.text)
+                self.assertIn('href="/events/11?tier=important&period=24h"', response.text)
+                self.assertIn("模型发布与核心能力介绍。", response.text)
             finally:
                 delattr(app.state, "services")
 

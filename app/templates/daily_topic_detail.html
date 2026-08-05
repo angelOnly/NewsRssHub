@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ topic.display_name }} · 今日热点 · NewsRSSHub{% endblock %}
+{% block content %}
+<a class="back-link" href="/daily-topics">{{ icon('arrow-left', 'back-icon') }}<span>返回今日热点</span></a>
+<section class="brief-detail daily-topic-detail">
+  <p class="eyebrow">TODAY'S TOPIC</p>
+  <h1>{{ topic.display_name }}</h1>
+  {% if topic.description %}<p class="detail-lede">{{ topic.description }}</p>{% endif %}
+</section>
+<section class="event-section" aria-label="话题事件">
+  <div class="section-caption"><h2>话题事件</h2><span>{{ topic.content_count }} 条内容 · {{ topic.event_count }} 个事件</span></div>
+  <div class="event-list">
+    {% for event in topic.events %}
+    <a class="event-card" href="/events/{{ event.id }}?tier={{ event.editorial_tier }}&period=24h" aria-label="查看 {{ event.title }} 的详情">
+      <div class="event-main">
+        <div class="event-meta"><span class="tier-pill {{ event.editorial_tier }}">{{ event.editorial_tier|tier_label }}</span><span>{{ event.content_count }} 条内容 · {{ event.source_count }} 个来源</span></div>
+        <h3>{{ event.title }}</h3>
+        {% if event.summary %}<p>{{ event.summary }}</p>{% endif %}
+      </div>
+      <span class="card-arrow">{{ icon('chevron-right') }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

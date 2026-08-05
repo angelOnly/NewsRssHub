@@ -19,12 +19,12 @@
 {% if topics %}
 <section class="weekly-topic-list" aria-label="今日热点话题">
   {% for topic in topics %}
-  <article id="topic-{{ topic.id }}" class="weekly-topic-card" data-topic-id="{{ topic.id }}">
+  <a id="topic-{{ topic.id }}" class="weekly-topic-card weekly-topic-card-link" data-topic-id="{{ topic.id }}" href="/daily-topics/{{ topic.id }}" aria-label="查看话题 {{ topic.display_name }} 的详情">
     <h2 title="{{ topic.display_name }}">{{ topic.display_name }}</h2>
     <p class="daily-topic-description"{% if topic.description %} title="{{ topic.description }}"{% endif %}>
       <span class="daily-topic-content-count">{{ topic.content_count }} 条内容</span>{% if topic.description %} · {{ topic.description }}{% endif %}
     </p>
-  </article>
+  </a>
   {% endfor %}
 </section>
 {% else %}

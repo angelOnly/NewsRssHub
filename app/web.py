@@ -482,6 +482,27 @@ def daily_topics(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/daily-topics/{topic_id}", response_class=HTMLResponse)
+def daily_topic_detail(request: Request, topic_id: int) -> HTMLResponse:
+    """展示一个今日热点下仍可阅读的事件，避免卡片点击后没有去处。"""
+
+    services = get_services(request)
+    window = services.pipeline.daily_topics.current_window()
+    topics = services.repository.list_daily_topics(
+        topic_date=window.topic_date, start=window.start, end=window.end, limit=50
+    )
+    topic = next((item for item in topics if int(item["id"]) == topic_id), None)
+    if not topic:
+        raise HTTPException(status_code=404, detail="未找到该今日热点")
+    return render(
+        request,
+        "daily_topic_detail.html",
+        {
+            "topic": topic,
+        },
+    )
+
+
 @app.get("/events/{event_id}", response_class=HTMLResponse)
 def event_detail(
     request: Request,
