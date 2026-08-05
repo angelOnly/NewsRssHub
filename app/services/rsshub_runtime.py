@@ -44,8 +44,23 @@ class RssHubRuntimeFiles:
             },
         )
 
+    def read_x_credential(self) -> dict[str, str]:
+        """读取唯一的 X Cookie 存储；调用方负责进一步校验 Cookie 字段。"""
+
+        raw = self.x_credential_path.read_text(encoding="utf-8")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("X Cookie 共享文件不是有效 JSON。") from exc
+        if not isinstance(payload, dict) or payload.get("version") != 2:
+            raise ValueError("X Cookie 共享文件版本无效。")
+        cookie_header = payload.get("cookie_header")
+        if not isinstance(cookie_header, str) or not cookie_header.strip():
+            raise ValueError("X Cookie 共享文件缺少完整 Cookie 字符串。")
+        return {"cookie_header": cookie_header.strip()}
+
     def clear_x_credential(self) -> None:
-        """删除已不再由 SQLite 持有的 X 运行时凭据。"""
+        """删除当前 X Cookie 文件，例如候选 Cookie 验证失败且没有可恢复文件时。"""
 
         self.x_credential_path.unlink(missing_ok=True)
 

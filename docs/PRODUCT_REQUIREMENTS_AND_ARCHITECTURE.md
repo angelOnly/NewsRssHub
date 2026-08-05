@@ -109,7 +109,7 @@ flowchart LR
 5. 对误判内容点击“不感兴趣”，或在“已隐藏”中恢复。
 6. 在 Web 中增加、暂停、测试或归档来源。
 7. 在 Web 中更新 X Cookie、模型 API Key、Base URL 和模型名称。
-8. Cookie 或模型连接失效时，在首页和设置页看到明确提醒。
+8. X Cookie 未保存或模型连接失效时，在首页和设置页看到明确提醒；X 抓取错误显示在对应来源中。
 
 ### 3.3 非目标
 
@@ -184,7 +184,7 @@ flowchart LR
 | --- | --- | --- |
 | RSS、X、Reddit 插件 | 已实现 | 保留插件接口，后续可增加 YouTube |
 | 来源添加、测试、启停、归档 | 已实现 | 保留 |
-| X Cookie Web 配置与校验 | 已实现 | 保留，抓取前继续校验 |
+| X Cookie Web 配置与校验 | 已实现 | 保存与手动测试均由 RSSHub 实际访问 X 校验 |
 | 模型连接 Web 配置与测试 | 已实现 | 保留 |
 | SQLite 持久化 | 已实现 | 增加版本化迁移和新字段 |
 | 单帖摘要 | 未完整实现；当前主要是事件初步合并后生成摘要 | 调整为每条帖子在筛选前都有摘要 |
@@ -519,7 +519,7 @@ Web 支持配置和测试：
 - 待生成摘要数量。
 - 待筛选数量。
 - 最近一次 Worker 成功时间。
-- X Cookie 状态。
+- X Cookie 文件是否已保存，以及各 X 来源的抓取状态。
 - 模型连接状态。
 
 如果模型不可用：
@@ -1001,7 +1001,7 @@ flowchart LR
 | 数据 | 保存位置 | 是否需要重启 |
 | --- | --- | --- |
 | 数据目录、RSSHub 地址、日志、加密主密钥 | `config.yml` | 通常需要重启或重建 |
-| X Cookie | SQLite 加密凭据 | 不需要 |
+| X Cookie | RSSHub 只读挂载的运行时文件 | 不需要 |
 | Web 保存的模型 API Key、URL、模型名 | SQLite 加密凭据 | 不需要 |
 | 模型回退配置 | `config.yml` | 需要 |
 | 用户画像 | `sources/user_profile.yml` | 下一轮筛选读取 |
@@ -1015,7 +1015,7 @@ flowchart LR
 
 ### 14.2 凭据安全
 
-- Cookie 和 API Key 使用 `CREDENTIAL_ENCRYPTION_KEY` 加密后写入 SQLite。
+- 模型 API Key、Web Push 等凭据使用 `CREDENTIAL_ENCRYPTION_KEY` 加密后写入 SQLite；X Cookie 仅保存在 RSSHub 只读挂载的运行时文件。
 - 页面和日志只显示指纹，不显示完整凭据。
 - 验证失败的候选凭据不能覆盖当前可用凭据。
 - 用户仓库若包含 `config.yml` 中的真实密钥，必须保持私有。
@@ -1125,7 +1125,7 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 记录安全错误。
 - 不阻塞其他来源。
 - 按下次轮询时间重试。
-- X Cookie 无效时整个 X 批次停止，其他平台继续。
+- X Cookie 未保存时跳过 X 来源，其他平台继续；Cookie 失效或限流时由相应 X 来源记录抓取错误。
 
 ### 17.2 摘要失败
 

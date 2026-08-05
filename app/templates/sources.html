@@ -63,9 +63,9 @@
   <span><strong>统一抓取策略：</strong>每 {{ fetch_policy.interval_minutes }} 分钟一次，来源会额外随机延后 1–5 分钟；同一批请求之间随机等待 2–5 秒。</span>
 </section>
 
-{% if has_x_sources and x_credential.state != 'valid' and selected_source_kind in ('all', 'x_rsshub') %}
+{% if has_x_sources and not x_credential.configured and selected_source_kind in ('all', 'x_rsshub') %}
 <section class="credential-alert {{ x_credential.state }}" aria-label="X 登录状态提醒">
-  <div><strong>X 来源暂不测试或抓取</strong><p>先在“设置与连接”保存并验证 Cookie；账号可以先批量录入，之后再手动点击“测试”。</p></div>
+  <div><strong>X 来源暂不测试或抓取</strong><p>先在“设置与连接”保存完整 Cookie；提交或点击“验证”时会由 RSSHub 实际访问 X。账号可以先批量录入。</p></div>
   <a class="button button-secondary" href="/settings#x">配置 X Cookie</a>
 </section>
 {% endif %}
@@ -78,9 +78,9 @@
   {% endfor %}
 </nav>
 
-{% if selected_source_kind == 'x_rsshub' and x_credential.state != 'valid' %}
+{% if selected_source_kind == 'x_rsshub' and not x_credential.configured %}
 <section class="source-platform-tip">
-  <strong>推荐顺序：先批量添加 X 账号 → 配置并验证 Cookie → 在这里手动测试需要确认的账号。</strong>
+  <strong>推荐顺序：先批量添加 X 账号 → 保存完整 Cookie 并由 RSSHub 验证 → 在这里手动测试需要确认的账号。</strong>
 </section>
 {% elif selected_source_kind == 'youtube' %}
 <section class="source-platform-tip">
@@ -124,8 +124,8 @@
           <small>{{ source.locator }}</small>
           <small>上次检查：{{ source.last_fetch_at|relative_time if source.last_fetch_at else '尚未抓取' }} · 新增 {{ source.last_new_item_count }} 条</small>
           <small>下次抓取：{{ source.next_fetch_at|relative_time if source.next_fetch_at else '等待排期' }}</small>
-          {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
-            <small class="source-state-note">等待 X Cookie 验证</small>
+          {% if source.enabled and source.kind == 'x_rsshub' and not x_credential.configured %}
+            <small class="source-state-note">等待保存完整 X Cookie</small>
           {% elif source.health_status == 'error' and source.last_error %}
             <small class="source-state-note">{{ source.last_error }}</small>
           {% endif %}
@@ -135,13 +135,13 @@
         <td>
           {% if not source.enabled %}
             <span class="status paused">已暂停</span>
-          {% elif source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
+          {% elif source.kind == 'x_rsshub' and not x_credential.configured %}
             <span class="status attention">需登录</span>
           {% else %}
             <span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'抓取异常','unknown':'待测试','archived':'已归档'}.get(source.health_status, source.health_status) }}</span>
           {% endif %}
         </td>
-        <td>{% if source.kind == 'x_rsshub' and x_credential.state != 'valid' and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
+        <td>{% if source.kind == 'x_rsshub' and not x_credential.configured and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
         <td class="table-actions">
           <a class="source-action-icon" href="/sources/{{ source.id }}/edit" aria-label="编辑 {{ source.name }}" title="编辑">{{ icon('edit') }}<span class="sr-only">编辑</span></a>
           <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon" type="submit" aria-label="测试 {{ source.name }}" title="测试">{{ icon('test') }}<span class="sr-only">测试</span></button></form>
@@ -169,7 +169,7 @@
         </div>
         {% if not source.enabled %}
           <span class="status paused">已暂停</span>
-        {% elif source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
+        {% elif source.kind == 'x_rsshub' and not x_credential.configured %}
           <span class="status attention">需登录</span>
         {% else %}
           <span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'抓取异常','unknown':'待测试','archived':'已归档'}.get(source.health_status, source.health_status) }}</span>
@@ -181,10 +181,10 @@
         <div><dt>下次</dt><dd>{{ source.next_fetch_at|compact_relative_time if source.next_fetch_at else '待排期' }}</dd></div>
       </dl>
       {% if source.description %}<p class="source-mobile-description">{{ source.description }}</p>{% endif %}
-      {% if source.enabled and source.kind == 'x_rsshub' and x_credential.state != 'valid' %}
+      {% if source.enabled and source.kind == 'x_rsshub' and not x_credential.configured %}
         <details class="source-mobile-state-details">
           <summary>连接待配置</summary>
-          <p class="source-state-note">等待 X Cookie 验证</p>
+          <p class="source-state-note">等待保存完整 X Cookie</p>
         </details>
       {% elif source.health_status == 'error' and source.last_error %}
         <details class="source-mobile-state-details">

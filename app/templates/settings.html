@@ -168,7 +168,7 @@
         <div class="platform-mobile-item {{ 'is-ready' if connection.usable else 'needs-setup' }}">
           <strong>{{ 'RSS' if connection.key == 'rsshub_rss' else connection.platform }}</strong>
           {% if connection.requires_credentials %}
-            <span>{{ '已连接' if connection.usable else '需配置' }}</span>
+            <span>{{ 'Cookie 已保存' if connection.usable else '需配置' }}</span>
           {% else %}
             <span>{{ '公开可用' if connection.usable else '需 RSSHub' }}</span>
           {% endif %}
@@ -182,7 +182,7 @@
           <strong>平台连接设置</strong>
           <small>配置或更新 X Cookie</small>
         </span>
-        <span class="status {{ 'healthy' if x_credential.state == 'valid' else 'error' }}">{{ '已连接' if x_credential.state == 'valid' else '需配置' }}</span>
+        <span class="status {{ 'attention' if x_credential.configured else 'error' }}">{{ '已保存' if x_credential.configured else '需配置' }}</span>
       </summary>
       <div class="settings-fold-content">
         {% for connection in platform_connections if connection.key == 'x_session' %}
@@ -192,22 +192,16 @@
                 <p class="eyebrow">X CONNECTION</p>
                 <h3>X</h3>
               </div>
-              <span class="status {{ 'healthy' if connection.usable else 'error' }}">
-                {{ '已连接' if connection.usable else '需要登录' }}
+              <span class="status {{ 'attention' if connection.usable else 'error' }}">
+                {{ 'Cookie 已保存' if connection.usable else '需要登录' }}
               </span>
             </div>
             <p>{{ connection.message }}</p>
-            {% if x_credential.last_validated_at %}<p class="credential-meta">上次成功验证：{{ x_credential.last_validated_at|relative_time }}</p>{% endif %}
-            {% if x_credential.updated_at %}<p class="credential-meta">最近更新：{{ x_credential.updated_at|relative_time }}</p>{% endif %}
-
-            {% if x_credential.state == 'needs_key' %}
-              <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是用于加密保存 Cookie 的主密钥，不是 X Cookie；Cookie 更新后无需重启服务。</div>
-            {% else %}
               <form class="source-form credential-form" method="post" action="/settings/x-session" autocomplete="off">
                 <label>
                   X Cookie
                   <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 x.com 的完整 Cookie 字符串">
-                  <small>请粘贴 x.com 请求中的完整 <code>Cookie</code> 字符串，至少包含 <code>auth_token</code> 与 <code>ct0</code>。系统会加密保存并完整同步给 RSSHub；旧版仅 <code>auth_token</code> 的方式已停用。验证失败时不会覆盖当前已保存的完整 Cookie。</small>
+                  <small>请粘贴 x.com 请求中的完整 <code>Cookie</code> 字符串，至少包含 <code>auth_token</code> 与 <code>ct0</code>。它只会保存到 RSSHub 只读挂载的运行时文件，不写入 SQLite；提交时 RSSHub 会实际访问 X 验证，失败会恢复此前文件。</small>
                 </label>
                 <div class="form-actions">
                   <button class="button button-primary" type="submit">验证并更新 X Cookie</button>
@@ -216,11 +210,10 @@
 
               {% if x_credential.configured %}
                 <form class="inline-test-form" method="post" action="/settings/x-session/test">
-                  <span>验证当前 Cookie，并让此前失败的 X 来源在下一轮重新检查。</span>
+                  <span>验证会让 RSSHub 读取当前文件并实际访问 X；此前失败的 X 来源会在下一轮重新检查。</span>
                   <button type="submit">验证并刷新 X 来源</button>
                 </form>
               {% endif %}
-            {% endif %}
           </article>
         {% endfor %}
 

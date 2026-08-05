@@ -11,7 +11,7 @@ from app.services.llm_connection import LLMConnectionService
 from app.services.sources import SourceService
 from app.services.source_backups import SourceBackupService
 from app.services.translator import TranslationService
-from app.services.x_session import XSessionService
+from app.services.x_session import XSessionService, remove_legacy_sqlite_x_credential
 from app.services.web_push import WebPushService
 from app.storage.database import Database
 from app.storage.repository import Repository
@@ -37,7 +37,9 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     database = Database(settings.database_path)
     database.initialize()
     repository = Repository(database)
-    x_sessions = XSessionService(repository, settings)
+    # X Cookie 已迁为 RSSHub 共享文件的唯一存储，部署新版本时清除旧密文副本。
+    remove_legacy_sqlite_x_credential(repository)
+    x_sessions = XSessionService(settings)
     llm_connections = LLMConnectionService(repository, settings)
     connections = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
     registry = build_source_registry()
@@ -50,8 +52,7 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         connections,
         runtime_files=x_sessions.runtime_files,
     )
-    # 进程重启后也要恢复共享文件，并把历史数据库里的直连地址改为 RSSHub 地址。
-    x_sessions.sync_runtime_file()
+    # X Cookie 文件由挂载目录持久化；启动时仅同步 RSS 白名单和历史来源路由。
     source_service.synchronize_rsshub_sources()
     pipeline = IntelligencePipeline(
         repository,

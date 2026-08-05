@@ -23,7 +23,11 @@
     <div class="source-connection-list">
       {% for connection in connections %}
       <div class="source-connection-item {{ connection.state }}">
-        <span class="status {{ 'healthy' if connection.usable else 'error' }}">{{ '已就绪' if connection.usable else '需先配置' }}</span>
+        {% if connection.key == 'x_session' and connection.usable %}
+          <span class="status attention">Cookie 已保存</span>
+        {% else %}
+          <span class="status {{ 'healthy' if connection.usable else 'error' }}">{{ '已就绪' if connection.usable else '需先配置' }}</span>
+        {% endif %}
         <div><strong>{{ connection.platform }}</strong><small>{{ connection.message }}</small></div>
         {% if connection.requires_credentials and not connection.usable %}
           <a href="{{ connection.setup_url }}">{{ connection.setup_label }}</a>

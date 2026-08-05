@@ -5,14 +5,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from requests import HTTPError, Response
-
 from app.config import Settings
 from app.domain.models import FeedItem, SourceDraft, SourceKind
 from app.plugins.base import PluginRegistry, SourcePlugin
 from app.services.collector import Collector
 from app.services.connections import ConnectionCatalog
-from app.services.x_session import XCredentialStatus
 from app.storage.database import Database
 from app.storage.repository import Repository
 
@@ -67,32 +64,6 @@ class RecordingPlugin(SourcePlugin):
                 published_at=datetime.now(timezone.utc),
             )
         ]
-
-
-class RecordingXSession:
-    """仅记录 Collector 交给会话服务的 RSSHub 抓取错误。"""
-
-    def __init__(self) -> None:
-        self.errors: list[Exception] = []
-
-    def status(self) -> XCredentialStatus:
-        return XCredentialStatus("valid", "完整 X Cookie 已验证。", True)
-
-    def record_rsshub_auth_failure(self, error: Exception) -> bool:
-        self.errors.append(error)
-        return True
-
-
-class ErrorPlugin(RecordingPlugin):
-    """为抓取批次保留同一个原始异常，模拟 RSSHub 的 HTTP 失败。"""
-
-    def __init__(self, kind: SourceKind, error: Exception) -> None:
-        super().__init__(kind)
-        self.error = error
-
-    def fetch(self, source: dict[str, object], settings: Settings) -> list[FeedItem]:
-        self.calls.append(int(source["id"]))
-        raise self.error
 
 
 class FetchPolicyRepositoryTests(unittest.TestCase):
@@ -254,39 +225,6 @@ class CollectorSchedulingTests(unittest.TestCase):
                 next_fetch_at = datetime.fromisoformat(str(source["next_fetch_at"]))
                 self.assertGreaterEqual(next_fetch_at, lower_bound)
                 self.assertLessEqual(next_fetch_at, upper_bound)
-
-    def test_x_rsshub_failure_is_forwarded_to_the_session_health_check(self) -> None:
-        with TemporaryDirectory() as directory:
-            settings = build_settings(Path(directory))
-            database = Database(settings.database_path)
-            database.initialize()
-            repository = Repository(database)
-            source_id = repository.create_source(
-                SourceDraft(name="OpenAI", kind=SourceKind.X_RSSHUB, locator="OpenAI"),
-                "https://rsshub.example.test/twitter/user/OpenAI",
-            )
-            due_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).replace(microsecond=0).isoformat()
-            repository.update_source(source_id, {"next_fetch_at": due_at})
-            session = RecordingXSession()
-            response = Response()
-            response.status_code = 503
-            response._content = b"Twitter API error: 403"
-            expected_error = HTTPError("503 Server Error", response=response)
-            plugin = ErrorPlugin(SourceKind.X_RSSHUB, expected_error)
-
-            # 让插件返回带有 RSSHub 鉴权特征的原始异常，验证 Collector 不会丢失它。
-            summary = Collector(
-                repository,
-                PluginRegistry([plugin]),
-                settings,
-                ConnectionCatalog(session, settings.rsshub_base_url),
-                sleeper=lambda _seconds: None,
-                delay_provider=lambda: 0.0,
-            ).collect_due_sources()
-
-            self.assertEqual(summary.sources_failed, 1)
-            self.assertEqual(session.errors, [expected_error])
-
 
 if __name__ == "__main__":
     unittest.main()
