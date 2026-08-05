@@ -226,6 +226,5 @@ class CollectorSchedulingTests(unittest.TestCase):
                 self.assertGreaterEqual(next_fetch_at, lower_bound)
                 self.assertLessEqual(next_fetch_at, upper_bound)
 
-
 if __name__ == "__main__":
     unittest.main()

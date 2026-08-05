@@ -779,10 +779,10 @@ def x_session_settings_redirect(request: Request, notice: str = "", error: str =
 def save_x_session(request: Request, cookie_value: str = Form(...)) -> RedirectResponse:
     try:
         services = get_services(request)
-        status = services.x_sessions.save_from_web(cookie_value)
+        services.x_sessions.save_from_web(cookie_value)
         retried = services.sources.requeue_failed_platform_sources(SourceKind.X_RSSHUB)
         suffix = f"已安排 {retried} 个此前失败的 X 来源重新抓取。" if retried else ""
-        return x_session_redirect(notice=f"X 登录 Cookie 已验证并更新（指纹 {status.fingerprint}）。{suffix}")
+        return x_session_redirect(notice=f"RSSHub 已使用新 Cookie 完成 X 抓取验证。{suffix}")
     except XSessionError as exc:
         return x_session_redirect(error=str(exc))
     except Exception:
@@ -793,10 +793,10 @@ def save_x_session(request: Request, cookie_value: str = Form(...)) -> RedirectR
 def test_x_session(request: Request) -> RedirectResponse:
     try:
         services = get_services(request)
-        status = services.x_sessions.test_saved()
+        services.x_sessions.test_saved()
         retried = services.sources.requeue_failed_platform_sources(SourceKind.X_RSSHUB)
         suffix = f"已安排 {retried} 个此前失败的 X 来源重新抓取。" if retried else ""
-        return x_session_redirect(notice=f"X 登录 Cookie 当前可用（指纹 {status.fingerprint}）。{suffix}")
+        return x_session_redirect(notice=f"RSSHub 已使用当前 Cookie 完成 X 抓取验证。{suffix}")
     except XSessionError as exc:
         return x_session_redirect(error=str(exc))
     except Exception:

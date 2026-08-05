@@ -14,9 +14,12 @@ RUN apt-get update \
     && git -C /app checkout --detach "$RSSHUB_COMMIT"
 
 COPY patches/newsrsshub-routes.patch /tmp/newsrsshub-routes.patch
+COPY patches/newsrsshub-full-cookie.patch /tmp/newsrsshub-full-cookie.patch
 
 RUN git -C /app apply --check /tmp/newsrsshub-routes.patch \
-    && git -C /app apply /tmp/newsrsshub-routes.patch
+    && git -C /app apply /tmp/newsrsshub-routes.patch \
+    && git -C /app apply --check /tmp/newsrsshub-full-cookie.patch \
+    && git -C /app apply /tmp/newsrsshub-full-cookie.patch
 
 # Chromium 单独下载，防止 pnpm install 在不同平台上隐式改变依赖内容。
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true \

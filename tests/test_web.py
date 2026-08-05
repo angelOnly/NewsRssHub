@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -10,7 +9,6 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -61,10 +59,7 @@ class WebTests(unittest.TestCase):
         """设置页保存成功后，RSSHub 可立即读取同一数据卷中的最小凭据文件。"""
 
         with TemporaryDirectory() as directory:
-            settings = replace(
-                build_settings(Path(directory)),
-                credential_encryption_key=Fernet.generate_key().decode("ascii"),
-            )
+            settings = build_settings(Path(directory))
             services = build_services(settings)
             app.state.services = services
             try:
@@ -76,14 +71,24 @@ class WebTests(unittest.TestCase):
                             data={"cookie_value": "auth_token=web-test-token; ct0=csrf-token"},
                             follow_redirects=False,
                         )
+                    settings_page = client.get("/settings")
 
                 self.assertEqual(response.status_code, 303)
+                self.assertIn("Cookie 已保存", settings_page.text)
+                self.assertIn("不写入 SQLite", settings_page.text)
                 payload = json.loads(
                     (settings.data_dir / "rsshub-runtime" / "x-twitter.json").read_text(
                         encoding="utf-8"
                     )
                 )
-                self.assertEqual(payload, {"version": 1, "auth_token": "web-test-token"})
+                self.assertEqual(
+                    payload,
+                    {
+                        "version": 2,
+                        "cookie_header": "auth_token=web-test-token; ct0=csrf-token",
+                    },
+                )
+                self.assertIsNone(services.repository.get_connector_credential("x_session"))
             finally:
                 delattr(app.state, "services")
 

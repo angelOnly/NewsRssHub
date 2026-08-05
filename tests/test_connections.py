@@ -4,8 +4,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from cryptography.fernet import Fernet
-
 from app.config import Settings
 from app.domain.models import SourceDraft, SourceKind
 from app.plugins.registry import build_source_registry
@@ -30,19 +28,19 @@ def build_settings(root: Path) -> Settings:
         openai_api_key=None,
         openai_base_url="https://api.example.test/v1",
         openai_model_name="test-model",
-        credential_encryption_key=Fernet.generate_key().decode("ascii"),
+        credential_encryption_key=None,
         timezone="Asia/Shanghai",
         rsshub_base_url="https://rsshub.example.test",
     )
 
 
 class ConnectionCatalogTests(unittest.TestCase):
-    def test_x_source_is_blocked_until_a_verified_connection_exists(self) -> None:
+    def test_x_source_is_blocked_until_a_complete_cookie_file_exists(self) -> None:
         with TemporaryDirectory() as directory:
             settings = build_settings(Path(directory))
             repository = Repository(Database(settings.database_path))
             repository.database.initialize()
-            x_sessions = XSessionService(repository, settings, validator=lambda: None)
+            x_sessions = XSessionService(settings, validator=lambda: None)
             catalog = ConnectionCatalog(x_sessions, settings.rsshub_base_url)
             sources = SourceService(
                 repository,
@@ -56,7 +54,7 @@ class ConnectionCatalogTests(unittest.TestCase):
                 sources.add_source(draft, validate=False)
             self.assertEqual(repository.count_sources(), 0)
 
-            x_sessions.save_from_web("auth_token=known-good-cookie")
+            x_sessions.save_from_web("auth_token=known-good-cookie; ct0=known-good-csrf")
             connection = catalog.ensure_source_ready(SourceKind.X_RSSHUB)
             self.assertTrue(connection.usable)
             source, _ = sources.add_source(draft, validate=False)

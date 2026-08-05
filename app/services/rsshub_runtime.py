@@ -31,21 +31,36 @@ class RssHubRuntimeFiles:
         return self._directory / self._RSS_FEEDS_FILENAME
 
     def write_x_credential(self, cookies: Mapping[str, str]) -> None:
-        """同步 X 的 auth_token，不把完整浏览器 Cookie 暴露给 RSSHub。"""
+        """同步完整 X Cookie，供 RSSHub 原样建立登录会话。"""
 
-        auth_token = str(cookies.get("auth_token") or "").strip()
-        if not auth_token:
-            raise ValueError("X Cookie 中缺少 auth_token，无法同步到 RSSHub。")
+        cookie_header = str(cookies.get("cookie_header") or "").strip()
+        if not cookie_header:
+            raise ValueError("X Cookie 缺少完整 Cookie 字符串，无法同步到 RSSHub。")
         self._write_private_json(
             self.x_credential_path,
             {
-                "version": 1,
-                "auth_token": auth_token,
+                "version": 2,
+                "cookie_header": cookie_header,
             },
         )
 
+    def read_x_credential(self) -> dict[str, str]:
+        """读取唯一的 X Cookie 存储；调用方负责进一步校验 Cookie 字段。"""
+
+        raw = self.x_credential_path.read_text(encoding="utf-8")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("X Cookie 共享文件不是有效 JSON。") from exc
+        if not isinstance(payload, dict) or payload.get("version") != 2:
+            raise ValueError("X Cookie 共享文件版本无效。")
+        cookie_header = payload.get("cookie_header")
+        if not isinstance(cookie_header, str) or not cookie_header.strip():
+            raise ValueError("X Cookie 共享文件缺少完整 Cookie 字符串。")
+        return {"cookie_header": cookie_header.strip()}
+
     def clear_x_credential(self) -> None:
-        """删除已不再由 SQLite 持有的 X 运行时凭据。"""
+        """删除当前 X Cookie 文件，例如候选 Cookie 验证失败且没有可恢复文件时。"""
 
         self.x_credential_path.unlink(missing_ok=True)
 
