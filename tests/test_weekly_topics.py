@@ -37,10 +37,14 @@ class TopicClient:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.options: list[dict[str, object]] = []
         self.fail = False
 
-    def complete_json(self, *, system: str, user: dict[str, object]) -> dict[str, object]:
+    def complete_json(
+        self, *, system: str, user: dict[str, object], **options: object
+    ) -> dict[str, object]:
         self.calls.append(user)
+        self.options.append(options)
         if self.fail:
             raise RuntimeError("temporary topic model failure")
         events = user["new_events"]
@@ -145,6 +149,7 @@ class DailyTopicTests(unittest.TestCase):
             self.assertEqual(first.events, 2)
             self.assertEqual(first.topics, 1)
             self.assertEqual(len(client.calls), 1)
+            self.assertEqual(client.options[0], {"stream": True, "read_timeout": None})
             model_events = client.calls[0]["new_events"]
             assert isinstance(model_events, list)
             self.assertEqual(
