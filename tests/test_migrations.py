@@ -309,6 +309,8 @@ class MigrationTests(unittest.TestCase):
             connection = sqlite3.connect(path)
             try:
                 apply_v7_migration(connection)
+                connection.execute("DROP TABLE daily_topic_events")
+                connection.execute("DROP TABLE daily_topics")
                 connection.execute("DROP TABLE weekly_topic_events")
                 connection.execute("DROP TABLE weekly_topics")
                 connection.execute("PRAGMA user_version = 9")
@@ -344,7 +346,7 @@ class MigrationTests(unittest.TestCase):
             finally:
                 connection.close()
 
-    def test_complete_v9_database_adds_weekly_topic_tables_without_rebuilding_content(self) -> None:
+    def test_complete_v9_database_adds_topic_tables_without_rebuilding_content(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "v9.db"
             create_v6_database(path)
@@ -352,6 +354,8 @@ class MigrationTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             try:
                 apply_v7_migration(connection)
+                connection.execute("DROP TABLE daily_topic_events")
+                connection.execute("DROP TABLE daily_topics")
                 connection.execute("DROP TABLE weekly_topic_events")
                 connection.execute("DROP TABLE weekly_topics")
                 connection.execute("PRAGMA user_version = 9")
@@ -375,6 +379,50 @@ class MigrationTests(unittest.TestCase):
                 }
                 self.assertIn("weekly_topics", tables)
                 self.assertIn("weekly_topic_events", tables)
+                self.assertIn("daily_topics", tables)
+                self.assertIn("daily_topic_events", tables)
+            finally:
+                connection.close()
+
+    def test_complete_v10_database_adds_daily_tables_and_preserves_weekly_snapshot(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "v10.db"
+            create_v6_database(path)
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            try:
+                apply_v7_migration(connection)
+                connection.execute(
+                    """
+                    INSERT INTO weekly_topics (week_start, display_name, created_at, updated_at)
+                    VALUES ('2026-08-03', '旧周话题', '2026-08-05T00:00:00+00:00',
+                            '2026-08-05T00:00:00+00:00')
+                    """
+                )
+                weekly_topic_id = int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
+                connection.execute(
+                    """
+                    INSERT INTO weekly_topic_events (week_start, topic_id, event_id)
+                    VALUES ('2026-08-03', ?, 1)
+                    """,
+                    (weekly_topic_id,),
+                )
+                connection.execute("DROP TABLE daily_topic_events")
+                connection.execute("DROP TABLE daily_topics")
+                connection.execute("PRAGMA user_version = 10")
+                connection.commit()
+
+                report = inspect_migration(connection)
+                self.assertTrue(report.can_apply)
+                self.assertEqual(report.current_version, 10)
+                verified = apply_v10_migration(connection, report)
+                self.assertTrue(verified.is_current)
+                self.assertEqual(
+                    connection.execute("SELECT display_name FROM weekly_topics").fetchone()[0],
+                    "旧周话题",
+                )
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM daily_topics").fetchone()[0], 0)
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             finally:
                 connection.close()
 

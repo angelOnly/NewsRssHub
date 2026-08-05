@@ -15,7 +15,7 @@ from app.services.sources import SourceService
 from app.services.summarizer import SummaryService
 from app.services.translator import TranslationService
 from app.services.web_push import WebPushService
-from app.services.weekly_topics import WeeklyTopicService
+from app.services.weekly_topics import DailyTopicService
 from app.storage.repository import Repository
 
 
@@ -48,7 +48,7 @@ class IntelligencePipeline:
             repository, settings, self.llm_connections, self.skill_loader
         )
         self.translator = TranslationService(repository, settings, self.llm_connections)
-        self.weekly_topics = WeeklyTopicService(repository, settings, self.llm_connections)
+        self.daily_topics = DailyTopicService(repository, settings, self.llm_connections)
         self.web_push = web_push or WebPushService(repository, settings)
 
     def bootstrap(self) -> int:
@@ -89,10 +89,15 @@ class IntelligencePipeline:
             "web_push": asdict(push_delivery),
         }
 
-    def refresh_weekly_topics_once(self) -> dict[str, object]:
-        """供独立 Worker 调用，避免话题归并被长摘要任务阻塞。"""
+    def refresh_daily_topics_once(self) -> dict[str, object]:
+        """供独立 Worker 调用，避免今日话题归并被长摘要任务阻塞。"""
 
-        return {"weekly_topics": asdict(self.weekly_topics.refresh_current_week())}
+        return {"daily_topics": asdict(self.daily_topics.refresh_current_day())}
+
+    def refresh_weekly_topics_once(self) -> dict[str, object]:
+        """兼容旧内部调用；返回键与实际任务已统一为今日热点。"""
+
+        return self.refresh_daily_topics_once()
 
     def run_once(self, force: bool = False) -> dict[str, object]:
         """兼容旧命令：先抓取，再处理积压内容。"""
@@ -100,5 +105,5 @@ class IntelligencePipeline:
         return {
             **self.collect_once(force=force),
             **self.process_once(),
-            **self.refresh_weekly_topics_once(),
+            **self.refresh_daily_topics_once(),
         }

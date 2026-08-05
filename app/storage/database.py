@@ -30,7 +30,7 @@ class Database:
         # 服务器数据库产生任何结构或日志模式变更。
         connection = self._open_connection(enable_wal=False)
         try:
-            # 服务启动只允许初始化空库或使用完整 v10；已有库绝不在运行时改表。
+            # 服务启动只允许初始化空库或使用完整 v11；已有库绝不在运行时改表。
             initialize_runtime_schema(connection)
             connection.execute("PRAGMA journal_mode = WAL")
         finally:

@@ -1,29 +1,29 @@
-"""本周话题归并的受限模型输出契约。"""
+"""今日话题增量归并的受限模型输出契约。"""
 
 from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 _TOPIC_REFERENCE = re.compile(r"(?:existing|new):[1-9]\d*")
 
-# 单条内容仍是正常事件；累计两条可见内容后才属于“热点”。
-MIN_WEEKLY_TOPIC_CONTENT_COUNT = 2
+# 单条内容也会先获得当天的话题归属；累计两条可见内容后才在页面展示为热点。
+MIN_DAILY_TOPIC_CONTENT_COUNT = 2
 
 
-class WeeklyTopicGroup(BaseModel):
-    """一个本周话题及其事件归属。
+class DailyTopicGroup(BaseModel):
+    """一组当天新事件的归属。
 
-    ``ref`` 只能引用调用方提供的既有 ID，或使用临时 ``new`` 引用。
-    数据库 ID 始终由服务层创建，不能由模型伪造。
+    ``existing:数字`` 只用于加入当天已有话题，不允许模型改名；
+    ``new:数字`` 是一次请求内的临时分组引用，必须附带新话题名称。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     ref: str = Field(min_length=5, max_length=32)
-    display_name: str = Field(min_length=2, max_length=80)
+    display_name: str | None = Field(default=None, min_length=2, max_length=80)
     event_ids: list[int] = Field(min_length=1, max_length=120)
 
     @field_validator("ref")
@@ -35,11 +35,21 @@ class WeeklyTopicGroup(BaseModel):
 
     @field_validator("display_name")
     @classmethod
-    def compact_display_name(cls, value: str) -> str:
+    def compact_display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = " ".join(value.split())
         if len(normalized) < 2:
             raise ValueError("display_name 不能为空")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_display_name_for_reference(self) -> "DailyTopicGroup":
+        if self.ref.startswith("new:") and not self.display_name:
+            raise ValueError("新建今日话题必须提供 display_name")
+        if self.ref.startswith("existing:") and self.display_name is not None:
+            raise ValueError("已有今日话题不能在增量归并中改名")
+        return self
 
     @field_validator("event_ids")
     @classmethod
@@ -49,9 +59,16 @@ class WeeklyTopicGroup(BaseModel):
         return value
 
 
-class WeeklyTopicOutput(BaseModel):
-    """模型必须完整覆盖当前周所有可见候选事件。"""
+class DailyTopicOutput(BaseModel):
+    """模型必须完整覆盖本次尚未分配的当天事件。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    topics: list[WeeklyTopicGroup] = Field(min_length=1, max_length=120)
+    topics: list[DailyTopicGroup] = Field(min_length=1, max_length=120)
+
+
+# 旧模块名曾随“本周热点”一起发布。保留这几个别名只为让已安装的本地扩展
+# 在升级后不立刻导入失败；应用主链路已经统一使用 DailyTopic* 命名。
+MIN_WEEKLY_TOPIC_CONTENT_COUNT = MIN_DAILY_TOPIC_CONTENT_COUNT
+WeeklyTopicGroup = DailyTopicGroup
+WeeklyTopicOutput = DailyTopicOutput

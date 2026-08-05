@@ -17,7 +17,7 @@ from app.config import get_settings
 from app.storage.migrations import (
     MigrationPreflightError,
     MigrationReport,
-    apply_v10_migration,
+    apply_v11_migration,
     inspect_migration,
 )
 
@@ -111,7 +111,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NewsRSSHub SQLite 安全迁移")
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--check", action="store_true", help="只读预检，不修改数据库")
-    action.add_argument("--apply", action="store_true", help="备份后执行 v10 迁移")
+    action.add_argument("--apply", action="store_true", help="备份后执行 v11 迁移")
     parser.add_argument("--database", help="数据库文件路径；默认读取 config.yml")
     parser.add_argument("--backup-dir", help="备份目录；默认是数据库目录下的 backups")
     args = parser.parse_args(argv)
@@ -141,7 +141,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 print("迁移未执行：请先处理预检问题。", file=sys.stderr)
                 return 2
             if report.is_current:
-                print("无需迁移：数据库已经是 v10，未创建备份也未修改数据。")
+                print("无需迁移：数据库已经是 v11，未创建备份也未修改数据。")
                 return 0
 
             backup_path = _backup_database(connection, database_path, backup_dir)
@@ -153,7 +153,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                 print(_format_report(database_path, refreshed), file=sys.stderr)
                 print("迁移未执行：备份后预检未通过。", file=sys.stderr)
                 return 2
-            verified = apply_v10_migration(connection, refreshed)
+            verified = apply_v11_migration(connection, refreshed)
         finally:
             connection.close()
     except (OSError, sqlite3.DatabaseError, MigrationPreflightError) as exc:

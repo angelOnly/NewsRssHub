@@ -5,12 +5,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from pydantic import ValidationError
+
 from app.config import Settings
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FeedItem, SourceDraft, SourceKind
-from app.domain.weekly_topics import WeeklyTopicGroup
+from app.domain.weekly_topics import DailyTopicOutput
 from app.services.llm_connection import LLMRuntimeConfig
-from app.services.weekly_topics import WeeklyTopicService
+from app.services.weekly_topics import DailyTopicService
 from app.storage.database import Database
 from app.storage.repository import Repository
 
@@ -31,6 +33,8 @@ class FixedConnection:
 
 
 class TopicClient:
+    """模拟严格的新增事件输入与 existing/new 输出协议。"""
+
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
         self.fail = False
@@ -39,21 +43,27 @@ class TopicClient:
         self.calls.append(user)
         if self.fail:
             raise RuntimeError("temporary topic model failure")
-        events = user["events"]
+        events = user["new_events"]
         existing_topics = user["existing_topics"]
         assert isinstance(events, list)
         assert isinstance(existing_topics, list)
         event_ids = [int(event["id"]) for event in events if isinstance(event, dict)]
-        reference = "new:1"
         if existing_topics:
             first = existing_topics[0]
             assert isinstance(first, dict)
-            reference = f"existing:{int(first['id'])}"
+            return {
+                "topics": [
+                    {
+                        "ref": f"existing:{int(first['id'])}",
+                        "event_ids": event_ids,
+                    }
+                ]
+            }
         return {
             "topics": [
                 {
-                    "ref": reference,
-                    "display_name": "MiniMax-M3 发布与评测" if len(event_ids) < 3 else "MiniMax-M3 发布、评测与接入",
+                    "ref": "new:1",
+                    "display_name": "MiniMax-M3 发布与评测",
                     "event_ids": event_ids,
                 }
             ]
@@ -66,7 +76,7 @@ def build_settings(root: Path) -> Settings:
     (source_dir / "user_profile.yml").write_text("identity:\n  description: test\n", encoding="utf-8")
     skill = root / ".agents" / "skills" / "weekly-hot-topics"
     skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# weekly topic test policy\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text("# daily topic test policy\n", encoding="utf-8")
     return Settings(
         root_dir=root,
         source_dir=source_dir,
@@ -83,129 +93,206 @@ def build_settings(root: Path) -> Settings:
     )
 
 
-class WeeklyTopicTests(unittest.TestCase):
-    def test_refresh_interval_defaults_to_thirty_minutes_and_is_bounded(self) -> None:
+class DailyTopicTests(unittest.TestCase):
+    def test_refresh_interval_defaults_to_thirty_minutes_and_migrates_legacy_setting(self) -> None:
         with TemporaryDirectory() as directory:
             settings = build_settings(Path(directory))
             repository = Repository(Database(settings.database_path))
             repository.database.initialize()
 
-            self.assertEqual(repository.get_weekly_topic_refresh_interval_minutes(), 30)
-            self.assertEqual(repository.save_weekly_topic_refresh_interval_minutes("1"), 5)
-            self.assertEqual(repository.get_weekly_topic_refresh_interval_minutes(), 5)
-            self.assertEqual(repository.save_weekly_topic_refresh_interval_minutes("2000"), 1440)
+            self.assertEqual(repository.get_daily_topic_refresh_interval_minutes(), 30)
+            repository.save_app_setting("weekly_topic_refresh_interval_minutes", "45")
+            self.assertEqual(repository.get_daily_topic_refresh_interval_minutes(), 45)
+            self.assertEqual(repository.save_daily_topic_refresh_interval_minutes("1"), 5)
+            self.assertEqual(repository.get_daily_topic_refresh_interval_minutes(), 5)
+            self.assertEqual(repository.save_daily_topic_refresh_interval_minutes("2000"), 1440)
 
-    def test_visible_current_week_events_are_grouped_and_title_can_change_without_new_id(self) -> None:
+    def test_daily_refresh_only_assigns_new_visible_events_and_keeps_existing_names(self) -> None:
         with TemporaryDirectory() as directory:
             settings = build_settings(Path(directory))
             repository = Repository(Database(settings.database_path))
             repository.database.initialize()
-            source_id = repository.create_source(
-                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
-                "https://example.test/feed",
-            )
+            source_id = self._create_source(repository)
             now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
 
             first_event = self._create_event(
-                repository,
-                source_id,
-                "m3-release",
-                "MiniMax-M3 发布",
-                now - timedelta(hours=2),
-                item_count=2,
+                repository, source_id, "m3-release", "MiniMax-M3 发布", now - timedelta(hours=2), item_count=2
             )
             second_event = self._create_event(
-                repository,
-                source_id,
-                "m3-review",
-                "MiniMax-M3 实测",
-                now - timedelta(hours=1),
+                repository, source_id, "m3-review", "MiniMax-M3 实测", now - timedelta(hours=1)
             )
             older_event = self._create_event(
-                repository,
-                source_id,
-                "last-week",
-                "上周的独立事件",
-                now - timedelta(days=3),
+                repository, source_id, "old", "昨天的独立事件", now - timedelta(days=2)
             )
             hidden_event = self._create_event(
                 repository,
                 source_id,
                 "hidden",
-                "不参与话题的隐藏内容",
+                "系统隐藏内容",
                 now - timedelta(minutes=30),
                 tier=EditorialTier.HIDDEN,
             )
             user_hidden_event = self._create_event(
-                repository,
-                source_id,
-                "user-hidden",
-                "用户隐藏的内容",
-                now - timedelta(minutes=20),
+                repository, source_id, "user-hidden", "用户隐藏内容", now - timedelta(minutes=20)
             )
             repository.mark_event_not_interested(user_hidden_event)
 
             client = TopicClient()
-            service = WeeklyTopicService(
-                repository,
-                settings,
-                llm_connections=FixedConnection(),  # type: ignore[arg-type]
-                client_factory=lambda _config: client,  # type: ignore[arg-type]
-            )
-            first = service.refresh_current_week(now=now, force=True)
+            service = self._service(repository, settings, client)
+            first = service.refresh_current_day(now=now, force=True)
 
             self.assertTrue(first.refreshed)
             self.assertEqual(first.events, 2)
             self.assertEqual(first.topics, 1)
             self.assertEqual(len(client.calls), 1)
-            model_events = client.calls[0]["events"]
+            model_events = client.calls[0]["new_events"]
             assert isinstance(model_events, list)
-            self.assertEqual({int(event["id"]) for event in model_events if isinstance(event, dict)}, {first_event, second_event})
-            self.assertTrue(
-                all(
-                    set(event) == {"id", "title", "summary"}
-                    for event in model_events
-                    if isinstance(event, dict)
-                )
+            self.assertEqual(
+                {int(event["id"]) for event in model_events if isinstance(event, dict)},
+                {first_event, second_event},
             )
-            model_event_ids = {int(event["id"]) for event in model_events if isinstance(event, dict)}
-            self.assertNotIn(hidden_event, model_event_ids)
-            self.assertNotIn(user_hidden_event, model_event_ids)
-            self.assertNotIn(older_event, model_event_ids)
+            self.assertTrue(
+                all(set(event) == {"id", "title", "summary"} for event in model_events if isinstance(event, dict))
+            )
+            self.assertNotIn(older_event, {int(event["id"]) for event in model_events if isinstance(event, dict)})
+            self.assertNotIn(hidden_event, {int(event["id"]) for event in model_events if isinstance(event, dict)})
+            self.assertNotIn(user_hidden_event, {int(event["id"]) for event in model_events if isinstance(event, dict)})
 
             window = service.current_window(now)
-            topics = repository.list_weekly_topics(
-                week_start=window.week_start, start=window.start, end=window.end
+            topics = repository.list_daily_topics(
+                topic_date=window.topic_date, start=window.start, end=window.end
             )
             self.assertEqual(len(topics), 1)
             topic_id = int(topics[0]["id"])
             self.assertEqual(topics[0]["display_name"], "MiniMax-M3 发布与评测")
             self.assertEqual(topics[0]["content_count"], 3)
             self.assertEqual(topics[0]["event_count"], 2)
-            self.assertEqual({int(event["id"]) for event in topics[0]["events"]}, {first_event, second_event})
 
             third_event = self._create_event(
-                repository,
-                source_id,
-                "m3-access",
-                "MiniMax-M3 接入方式",
-                now + timedelta(minutes=5),
+                repository, source_id, "m3-access", "MiniMax-M3 接入方式", now + timedelta(minutes=5)
             )
-            second = service.refresh_current_week(now=now + timedelta(minutes=10), force=True)
+            second = service.refresh_current_day(now=now + timedelta(minutes=10), force=True)
             self.assertTrue(second.refreshed)
-            updated = repository.list_weekly_topics(
-                week_start=window.week_start,
+            self.assertEqual(second.events, 1)
+            self.assertEqual(len(client.calls), 2)
+            existing_topics = client.calls[1]["existing_topics"]
+            assert isinstance(existing_topics, list)
+            self.assertEqual(existing_topics, [{"id": topic_id, "display_name": "MiniMax-M3 发布与评测"}])
+
+            updated = repository.list_daily_topics(
+                topic_date=window.topic_date,
                 start=window.start,
                 end=now + timedelta(minutes=10),
             )
             self.assertEqual(int(updated[0]["id"]), topic_id)
-            self.assertEqual(updated[0]["display_name"], "MiniMax-M3 发布、评测与接入")
+            self.assertEqual(updated[0]["display_name"], "MiniMax-M3 发布与评测")
             self.assertEqual(updated[0]["content_count"], 4)
             self.assertEqual(updated[0]["event_count"], 3)
             self.assertEqual({int(event["id"]) for event in updated[0]["events"]}, {first_event, second_event, third_event})
+            self.assertTrue(service.refresh_current_day(now=now + timedelta(minutes=20)).skipped)
+            self.assertEqual(len(client.calls), 2)
 
-    def test_skill_events_only_keep_compact_semantic_facts(self) -> None:
-        events = WeeklyTopicService._skill_events(
+    def test_single_content_is_assigned_before_becoming_visible_hotspot(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = self._create_source(repository)
+            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
+            self._create_event(repository, source_id, "first", "MiniMax-M3 发布", now - timedelta(minutes=1))
+
+            client = TopicClient()
+            service = self._service(repository, settings, client)
+            first = service.refresh_current_day(now=now)
+            self.assertTrue(first.refreshed)
+            self.assertEqual(len(client.calls), 1)
+
+            window = service.current_window(now)
+            self.assertEqual(len(repository.list_daily_topic_state(window.topic_date)), 1)
+            self.assertEqual(
+                repository.list_daily_topics(
+                    topic_date=window.topic_date, start=window.start, end=window.end
+                ),
+                [],
+            )
+
+            self._create_event(repository, source_id, "review", "MiniMax-M3 实测", now + timedelta(seconds=30))
+            second = service.refresh_current_day(now=now + timedelta(minutes=6))
+            self.assertTrue(second.refreshed)
+            topics = repository.list_daily_topics(
+                topic_date=window.topic_date, start=window.start, end=now + timedelta(minutes=6)
+            )
+            self.assertEqual(len(topics), 1)
+            self.assertEqual(topics[0]["content_count"], 2)
+            self.assertEqual(topics[0]["event_count"], 2)
+
+    def test_failed_increment_keeps_existing_assignments_and_retries_only_unassigned_events(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = self._create_source(repository)
+            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
+            first_event = self._create_event(
+                repository, source_id, "first", "MiniMax-M3 发布", now - timedelta(minutes=1), item_count=2
+            )
+
+            client = TopicClient()
+            service = self._service(repository, settings, client)
+            self.assertTrue(service.refresh_current_day(now=now, force=True).refreshed)
+            window = service.current_window(now)
+            topic_id = int(repository.list_daily_topic_state(window.topic_date)[0]["id"])
+
+            second_event = self._create_event(
+                repository, source_id, "second", "MiniMax-M3 新评测", now + timedelta(minutes=1)
+            )
+            client.fail = True
+            failed = service.refresh_current_day(now=now + timedelta(minutes=2), force=True)
+            self.assertTrue(failed.failed)
+            topics_after_failure = repository.list_daily_topics(
+                topic_date=window.topic_date, start=window.start, end=now + timedelta(minutes=2)
+            )
+            self.assertEqual(int(topics_after_failure[0]["id"]), topic_id)
+            self.assertEqual({int(event["id"]) for event in topics_after_failure[0]["events"]}, {first_event})
+
+            client.fail = False
+            retried = service.refresh_current_day(now=now + timedelta(minutes=8))
+            self.assertTrue(retried.refreshed)
+            topics_after_retry = repository.list_daily_topics(
+                topic_date=window.topic_date, start=window.start, end=now + timedelta(minutes=8)
+            )
+            self.assertEqual(
+                {int(event["id"]) for event in topics_after_retry[0]["events"]},
+                {first_event, second_event},
+            )
+
+    def test_daily_window_is_local_natural_day_not_rolling_twenty_four_hours(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            source_id = self._create_source(repository)
+            # 17:00 UTC 是上海时间 8 月 5 日 01:00；前一天 23:30 的内容不能进入今日。
+            now = datetime(2026, 8, 4, 17, tzinfo=timezone.utc)
+            yesterday_event = self._create_event(
+                repository, source_id, "yesterday", "昨天深夜的内容", datetime(2026, 8, 4, 15, 30, tzinfo=timezone.utc)
+            )
+            today_event = self._create_event(
+                repository, source_id, "today", "今日凌晨的内容", datetime(2026, 8, 4, 16, 10, tzinfo=timezone.utc)
+            )
+            client = TopicClient()
+            service = self._service(repository, settings, client)
+
+            result = service.refresh_current_day(now=now, force=True)
+            self.assertTrue(result.refreshed)
+            model_events = client.calls[0]["new_events"]
+            assert isinstance(model_events, list)
+            event_ids = {int(event["id"]) for event in model_events if isinstance(event, dict)}
+            self.assertEqual(event_ids, {today_event})
+            self.assertNotIn(yesterday_event, event_ids)
+
+    def test_compact_input_and_strict_output_contract(self) -> None:
+        events = DailyTopicService._skill_events(
             [
                 {
                     "id": 7,
@@ -213,233 +300,66 @@ class WeeklyTopicTests(unittest.TestCase):
                     "summary": "要" * 101,
                     "content_count": 99,
                     "source_count": 8,
-                    "latest_at": "2026-08-05T12:00:00+00:00",
                     "content": "这是不能传给话题模型的原始正文。",
                 }
             ]
         )
-
-        self.assertEqual(
-            events,
-            [{"id": 7, "title": "题" * 29 + "…", "summary": "要" * 99 + "…"}],
+        self.assertEqual(events, [{"id": 7, "title": "题" * 29 + "…", "summary": "要" * 99 + "…"}])
+        existing = DailyTopicService._skill_existing_topics(
+            [{"id": 42, "display_name": "MiniMax-M3 发布与评测", "event_ids": [1, 2]}]
         )
+        self.assertEqual(existing, [{"id": 42, "display_name": "MiniMax-M3 发布与评测"}])
 
-    def test_candidate_signature_ignores_live_heat_statistics(self) -> None:
-        base = {
-            "id": 7,
-            "title": "MiniMax-M3 发布",
-            "summary": "模型发布并开放测试。",
-            "content_count": 2,
-            "source_count": 1,
-            "latest_at": "2026-08-05T12:00:00+00:00",
-        }
-        changed_statistics = {
-            **base,
-            "content_count": 99,
-            "source_count": 8,
-            "latest_at": "2026-08-05T15:00:00+00:00",
-        }
+        with self.assertRaises(ValidationError):
+            DailyTopicOutput.model_validate(
+                {"topics": [{"ref": "existing:42", "display_name": "不允许改名", "event_ids": [1]}]}
+            )
+        with self.assertRaises(ValidationError):
+            DailyTopicOutput.model_validate(
+                {"topics": [{"ref": "new:1", "event_ids": [1]}]}
+            )
 
-        self.assertEqual(
-            WeeklyTopicService._candidate_signature([base]),
-            WeeklyTopicService._candidate_signature([changed_statistics]),
-        )
-
-    def test_candidate_signature_changes_when_content_crosses_display_threshold(self) -> None:
-        base = {
-            "id": 7,
-            "title": "MiniMax-M3 发布",
-            "summary": "模型发布并开放测试。",
-            "content_count": 1,
-        }
-        promoted = {**base, "content_count": 2}
-
-        self.assertNotEqual(
-            WeeklyTopicService._candidate_signature([base]),
-            WeeklyTopicService._candidate_signature([promoted]),
-        )
-
-    def test_failed_refresh_keeps_last_successful_topic_snapshot(self) -> None:
+    def test_batch_limit_leaves_remaining_events_for_the_next_increment(self) -> None:
         with TemporaryDirectory() as directory:
             settings = build_settings(Path(directory))
             repository = Repository(Database(settings.database_path))
             repository.database.initialize()
-            source_id = repository.create_source(
-                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
-                "https://example.test/feed",
-            )
+            source_id = self._create_source(repository)
             now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
-            self._create_event(
-                repository,
-                source_id,
-                "first",
-                "MiniMax-M3 发布",
-                now - timedelta(minutes=1),
-                item_count=2,
-            )
+            for index in range(3):
+                self._create_event(
+                    repository,
+                    source_id,
+                    f"event-{index}",
+                    f"MiniMax-M3 更新 {index}",
+                    now - timedelta(minutes=3 - index),
+                )
 
             client = TopicClient()
-            service = WeeklyTopicService(
-                repository,
-                settings,
-                llm_connections=FixedConnection(),  # type: ignore[arg-type]
-                client_factory=lambda _config: client,  # type: ignore[arg-type]
-            )
-            self.assertTrue(service.refresh_current_week(now=now, force=True).refreshed)
-            window = service.current_window(now)
-            before = repository.list_weekly_topics(
-                week_start=window.week_start, start=window.start, end=window.end
-            )
+            service = self._service(repository, settings, client)
+            service.MAX_EVENTS_PER_REQUEST = 2
+            first = service.refresh_current_day(now=now, force=True)
+            second = service.refresh_current_day(now=now + timedelta(minutes=1), force=True)
 
-            self._create_event(
-                repository, source_id, "second", "MiniMax-M3 新评测", now + timedelta(minutes=1)
-            )
-            client.fail = True
-            failed = service.refresh_current_week(now=now + timedelta(minutes=2), force=True)
-            after = repository.list_weekly_topics(
-                week_start=window.week_start, start=window.start, end=now + timedelta(minutes=2)
-            )
+            self.assertEqual(first.events, 2)
+            self.assertEqual(second.events, 1)
+            self.assertEqual([len(call["new_events"]) for call in client.calls], [2, 1])
 
-            self.assertTrue(failed.failed)
-            self.assertEqual([(topic["id"], topic["display_name"]) for topic in after], [(topic["id"], topic["display_name"]) for topic in before])
-            self.assertEqual(after[0]["event_count"], 1)
+    @staticmethod
+    def _create_source(repository: Repository) -> int:
+        return repository.create_source(
+            SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+            "https://example.test/feed",
+        )
 
-    def test_single_content_is_not_shown_until_topic_coverage_reaches_two(self) -> None:
-        with TemporaryDirectory() as directory:
-            settings = build_settings(Path(directory))
-            repository = Repository(Database(settings.database_path))
-            repository.database.initialize()
-            source_id = repository.create_source(
-                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
-                "https://example.test/feed",
-            )
-            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
-            self._create_event(
-                repository,
-                source_id,
-                "first",
-                "MiniMax-M3 发布",
-                now - timedelta(minutes=1),
-            )
-
-            client = TopicClient()
-            service = WeeklyTopicService(
-                repository,
-                settings,
-                llm_connections=FixedConnection(),  # type: ignore[arg-type]
-                client_factory=lambda _config: client,  # type: ignore[arg-type]
-            )
-            first = service.refresh_current_week(now=now)
-            self.assertTrue(first.refreshed)
-            self.assertEqual(first.topics, 0)
-            self.assertEqual(len(client.calls), 0)
-
-            window = service.current_window(now)
-            self.assertEqual(
-                repository.list_weekly_topics(
-                    week_start=window.week_start, start=window.start, end=window.end
-                ),
-                [],
-            )
-            self.assertTrue(
-                service.refresh_current_week(now=now + timedelta(seconds=30)).skipped
-            )
-
-            self._create_event(
-                repository,
-                source_id,
-                "review",
-                "MiniMax-M3 实测",
-                now + timedelta(seconds=30),
-            )
-            promoted = service.refresh_current_week(now=now + timedelta(minutes=1))
-            self.assertTrue(promoted.refreshed)
-            self.assertEqual(promoted.topics, 1)
-            self.assertEqual(len(client.calls), 1)
-
-            topics = repository.list_weekly_topics(
-                week_start=window.week_start,
-                start=window.start,
-                end=now + timedelta(minutes=1),
-            )
-            self.assertEqual(len(topics), 1)
-            self.assertEqual(topics[0]["content_count"], 2)
-            self.assertEqual(topics[0]["event_count"], 2)
-
-    def test_changed_candidates_wait_five_minutes_before_next_topic_model_call(self) -> None:
-        with TemporaryDirectory() as directory:
-            settings = build_settings(Path(directory))
-            repository = Repository(Database(settings.database_path))
-            repository.database.initialize()
-            source_id = repository.create_source(
-                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
-                "https://example.test/feed",
-            )
-            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
-            self._create_event(
-                repository,
-                source_id,
-                "release",
-                "MiniMax-M3 发布",
-                now - timedelta(minutes=1),
-                item_count=2,
-            )
-
-            client = TopicClient()
-            service = WeeklyTopicService(
-                repository,
-                settings,
-                llm_connections=FixedConnection(),  # type: ignore[arg-type]
-                client_factory=lambda _config: client,  # type: ignore[arg-type]
-            )
-            self.assertTrue(service.refresh_current_week(now=now).refreshed)
-            self.assertEqual(len(client.calls), 1)
-
-            self._create_event(
-                repository,
-                source_id,
-                "review",
-                "MiniMax-M3 实测",
-                now + timedelta(seconds=30),
-            )
-            delayed = service.refresh_current_week(now=now + timedelta(minutes=1))
-            self.assertTrue(delayed.skipped)
-            self.assertEqual(len(client.calls), 1)
-
-            refreshed = service.refresh_current_week(now=now + timedelta(minutes=5))
-            self.assertTrue(refreshed.refreshed)
-            self.assertEqual(len(client.calls), 2)
-
-    def test_existing_single_content_topic_is_hidden_from_weekly_hot_topics(self) -> None:
-        with TemporaryDirectory() as directory:
-            settings = build_settings(Path(directory))
-            repository = Repository(Database(settings.database_path))
-            repository.database.initialize()
-            source_id = repository.create_source(
-                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
-                "https://example.test/feed",
-            )
-            now = datetime(2026, 8, 5, 12, tzinfo=timezone.utc)
-            event_id = self._create_event(repository, source_id, "single", "单条报道", now)
-            service = WeeklyTopicService(repository, settings)
-            window = service.current_window(now)
-            repository.replace_weekly_topics(
-                week_start=window.week_start,
-                groups=[
-                    WeeklyTopicGroup(
-                        ref="new:1",
-                        display_name="单条报道话题",
-                        event_ids=[event_id],
-                    )
-                ],
-            )
-
-            self.assertEqual(
-                repository.list_weekly_topics(
-                    week_start=window.week_start, start=window.start, end=window.end
-                ),
-                [],
-            )
+    @staticmethod
+    def _service(repository: Repository, settings: Settings, client: TopicClient) -> DailyTopicService:
+        return DailyTopicService(
+            repository,
+            settings,
+            llm_connections=FixedConnection(),  # type: ignore[arg-type]
+            client_factory=lambda _config: client,  # type: ignore[arg-type]
+        )
 
     @staticmethod
     def _create_event(
@@ -473,7 +393,7 @@ class WeeklyTopicTests(unittest.TestCase):
                     item_ids=item_ids,
                     primary_item_id=item_ids[0],
                     tier=tier,
-                    reason="测试本周话题",
+                    reason="测试今日话题",
                     order=1,
                 )
             ]

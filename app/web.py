@@ -290,8 +290,8 @@ def fetch_settings_redirect(*, notice: str = "", error: str = "") -> RedirectRes
     return settings_redirect(anchor="fetch", notice=notice, error=error)
 
 
-def weekly_topics_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
-    return settings_redirect(anchor="weekly-topics", notice=notice, error=error)
+def daily_topics_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="daily-topics", notice=notice, error=error)
 
 
 def push_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
@@ -410,11 +410,11 @@ def dashboard(
         tier=selected_tier, period=period, limit=50, offset=(page - 1) * 50
     )
     total_events = services.repository.count_events(tier=selected_tier, period=period)
-    topic_service = services.pipeline.weekly_topics
+    topic_service = services.pipeline.daily_topics
     topic_window = topic_service.current_window()
-    # 首页只取少量话题作导航入口，完整事件清单仍在“本周热点”页展示。
-    weekly_topics = services.repository.list_weekly_topics(
-        week_start=topic_window.week_start,
+    # 首页只取少量话题作导航入口，完整事件清单仍在“今日热点”页展示。
+    daily_topics = services.repository.list_daily_topics(
+        topic_date=topic_window.topic_date,
         start=topic_window.start,
         end=topic_window.end,
         limit=5,
@@ -431,7 +431,7 @@ def dashboard(
             "period": period,
             "page": page,
             "has_more": page * 50 < total_events,
-            "weekly_topics": weekly_topics,
+            "daily_topics": daily_topics,
         },
     )
 
@@ -454,21 +454,28 @@ def saved_events(request: Request, page: int = 1, notice: str = "") -> HTMLRespo
     )
 
 
-@app.get("/weekly-topics", response_class=HTMLResponse)
-def weekly_topics(request: Request) -> HTMLResponse:
+@app.get("/weekly-topics", include_in_schema=False)
+def weekly_topics_legacy_redirect() -> RedirectResponse:
+    """保留旧书签入口，页面统一切换到今日热点。"""
+
+    return RedirectResponse("/daily-topics", status_code=307)
+
+
+@app.get("/daily-topics", response_class=HTMLResponse)
+def daily_topics(request: Request) -> HTMLResponse:
     services = get_services(request)
-    topic_service = services.pipeline.weekly_topics
+    topic_service = services.pipeline.daily_topics
     window = topic_service.current_window()
-    topics = services.repository.list_weekly_topics(
-        week_start=window.week_start, start=window.start, end=window.end
+    topics = services.repository.list_daily_topics(
+        topic_date=window.topic_date, start=window.start, end=window.end
     )
     return render(
         request,
-        "weekly_topics.html",
+        "daily_topics.html",
         {
             "topics": topics,
-            "week_start": window.week_start,
-            "week_end": window.end,
+            "topic_date": window.topic_date,
+            "day_end": window.end,
             "topic_skill_status": topic_service.skill_loader.status(),
         },
     )
@@ -735,8 +742,8 @@ def settings(request: Request, notice: str = "", error: str = "") -> HTMLRespons
             "notice": notice,
             "error": error,
             "fetch_policy": services.repository.get_fetch_policy(),
-            "weekly_topic_refresh_interval_minutes": (
-                services.repository.get_weekly_topic_refresh_interval_minutes()
+            "daily_topic_refresh_interval_minutes": (
+                services.repository.get_daily_topic_refresh_interval_minutes()
             ),
             "web_push_window_hours": services.repository.get_web_push_window_hours(),
         },
@@ -760,21 +767,22 @@ def save_fetch_policy(
         return fetch_settings_redirect(error="抓取策略保存失败，请输入 5 到 1440 的整数分钟数。")
 
 
-@app.post("/settings/weekly-topics-interval")
-def save_weekly_topics_interval(
+@app.post("/settings/daily-topics-interval")
+@app.post("/settings/weekly-topics-interval", include_in_schema=False)
+def save_daily_topics_interval(
     request: Request,
     interval_minutes: int = Form(...),
 ) -> RedirectResponse:
     try:
-        minutes = get_services(request).repository.save_weekly_topic_refresh_interval_minutes(
+        minutes = get_services(request).repository.save_daily_topic_refresh_interval_minutes(
             interval_minutes
         )
-        return weekly_topics_settings_redirect(
-            notice=f"本周热点归并已设为每 {minutes} 分钟执行一次。"
+        return daily_topics_settings_redirect(
+            notice=f"今日热点归并已设为每 {minutes} 分钟执行一次。"
         )
     except Exception:
-        return weekly_topics_settings_redirect(
-            error="本周热点间隔保存失败，请输入 5 到 1440 的整数分钟数。"
+        return daily_topics_settings_redirect(
+            error="今日热点间隔保存失败，请输入 5 到 1440 的整数分钟数。"
         )
 
 

@@ -9,7 +9,7 @@
 - 来源可在网页中添加、测试、启停、编辑和归档；
 - 来源管理可导出全部来源，并会每 3 天自动保存一份可下载快照；导出和快照均可直接回传到“批量添加”恢复来源；
 - 同一事件的多条内容会合并，避免信息流重复轰炸。
-- “本周热点”只扫描本周周一至今的可见事件；累计至少 2 条真实内容才展示为热点，按内容条数排序，并同时展示独立事件数和来源数；系统隐藏及用户隐藏内容不参与话题归并。
+- “今日热点”只扫描配置时区当天 00:00 至今的可见事件；事件一旦归属当天话题便不再重排，累计至少 2 条真实内容才展示为热点，按内容条数排序，并同时展示独立事件数和来源数；系统隐藏及用户隐藏内容不参与话题归并。
 - 所有启用来源共用一套抓取策略；首次、新增、重新启用和策略变更都会在 1–5 分钟内随机错峰，单批请求之间再等待 2–5 秒。
 - 资讯详情可预览已验证的图片、直链视频和受信任平台嵌入；收藏可在来源暂停或归档后继续阅读。
 - 来源保存名称、账号简介、平台、地址、官方标记和启用状态；历史的单来源抓取间隔仅为旧数据兼容保留，不再参与调度。
@@ -31,13 +31,13 @@
 
 ### SQLite 结构升级
 
-当前数据库结构为 v10。v9 → v10 会新增周话题及其事件关系表，不修改既有 `items`、`events` 或日报数据；但为了避免 Web 与 Worker 并发改表，仍必须先停止服务，再使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check` 和 `--apply`。
+当前数据库结构为 v11。v10 → v11 只会新增今日话题及其事件关系表，保留旧周话题、`items`、`events` 与日报数据；但为了避免 Web 与 Worker 并发改表，仍必须先停止服务，再使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check` 和 `--apply`。
 
 更早的历史结构同样不会在运行服务中重建。维护命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理、Portainer 步骤与回滚方式见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
 
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 **x.com 的完整 Cookie 字符串**（至少应包含 `auth_token` 与 `ct0`）。系统会先让 RSSHub 实际抓取验证，成功后才保留共享运行时文件；仅 `auth_token` 的旧方式已停用。
 
-Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → 事件筛选 → 正文译文与过期内容清理，`topics` Worker 专门归并本周热点，因此不会被摘要积压阻塞。热点任务启动后立即执行，默认每 30 分钟扫描一次，可在“设置与连接 → 本周热点刷新”中调整；候选发生变化时模型仍最多每 5 分钟调用一次。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 与 `.agents/skills/weekly-hot-topics/SKILL.md` 会一并复制到镜像；话题 Skill 缺失或模型暂不可用时，系统保留上一份成功的本周话题结果，不退回关键词统计。
+Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → 事件筛选 → 正文译文与过期内容清理，`topics` Worker 专门归并今日热点，因此不会被摘要积压阻塞。热点任务启动后立即执行，默认每 30 分钟扫描一次，可在“设置与连接 → 今日热点刷新”中调整；每次只处理当天尚未归属的一批事件。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 与 `.agents/skills/weekly-hot-topics/SKILL.md` 会一并复制到镜像；话题 Skill 缺失或模型暂不可用时，已成功归属的今日话题保留，未归属事件会在后续轮次重试，不退回关键词统计。
 
 ## iPhone 手机通知
 
@@ -76,16 +76,16 @@ uvicorn app.web:app --reload
 
 Worker 首次运行会创建一份来源快照，之后每 3 天最多创建一份。快照保存到容器的 `/app/data/source_backups/`，因 Compose 已挂载数据目录，服务器实际位置为 `/home/jzb/docker/rss-hub/data/source_backups/`。系统仅保留最新 5 份；Cookie、API Key、抓取状态、错误记录和连接器缓存都不会写入这些 YAML 文件。
 
-本次 SQLite v10 与本周话题实现说明见 [本周热点迭代记录](docs/ITERATION_2026-08-05_WEEKLY_TOPICS.md)；此前 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)。
+本次 SQLite v11 与今日话题实现说明见 [今日热点迭代记录](docs/ITERATION_2026-08-05_DAILY_TOPICS.md)；此前 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)。
 
 ## 内容处理顺序
 
 ```text
 原始帖子 → 中文标题、摘要、重点 → 事件 Skill（合并 / 去重 / 四层判断） → 必看/重要正文中文译文 → SQLite → 四层 Tab
-已完成的本周可见事件 → 独立 topics Worker → 本周话题 Skill → SQLite → 本周热点
+当天尚未归属的可见事件 → 独立 topics Worker → 今日话题 Skill → SQLite → 今日热点
 ```
 
-事件筛选模型只收到用户自然语言画像及每条帖子的 `id`、原始标题、中文摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。本周话题模型对每个本周可见事件只收到 `id`、最多 30 字的标题和最多 100 字的事实摘要；另收到既有话题 ID、短名称与归属事件 ID，用于复用稳定身份。它不会收到原始正文、内容数、来源数或时间，热度始终由 SQLite 从真实事件关系实时统计。正文翻译是详情页展示缓存：后台只预翻译“必看”和“重要更新”的主来源，其他来源可在详情页按需生成。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。
+事件筛选模型只收到用户自然语言画像及每条帖子的 `id`、原始标题、中文摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。今日话题模型每次只收到最多 80 个当天尚未归属事件的 `id`、最多 30 字的标题和最多 100 字的事实摘要，以及当天既有话题的 `id` 和短名称；不会再传既有话题的全部事件关系。它不会收到原始正文、内容数、来源数或时间，热度始终由 SQLite 从真实事件关系实时统计。正文翻译是详情页展示缓存：后台只预翻译“必看”和“重要更新”的主来源，其他来源可在详情页按需生成。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。
 
 ## 安全提示
 

@@ -65,21 +65,21 @@
     </details>
   </section>
 
-  <section class="settings-section settings-section-compact" id="weekly-topics">
+  <section class="settings-section settings-section-compact" id="daily-topics">
     <details class="settings-fold compact-settings-fold weekly-topics-settings-fold">
       <summary>
         <span class="settings-fold-copy">
-          <strong>本周热点刷新</strong>
+          <strong>今日热点刷新</strong>
           <small>独立归并任务，不等待摘要积压处理完毕</small>
         </span>
-        <span class="settings-fold-value">{{ weekly_topic_refresh_interval_minutes }} 分钟</span>
+        <span class="settings-fold-value">{{ daily_topic_refresh_interval_minutes }} 分钟</span>
       </summary>
       <div class="settings-fold-content">
-        <p class="settings-fold-intro">任务启动时会立即扫描本周已完成筛选的可见事件，之后按此间隔再次归并。候选未变化时不会请求模型；即使手动或异常重试，模型调用仍最多每 5 分钟一次。</p>
-        <form class="source-form credential-form" method="post" action="/settings/weekly-topics-interval">
+        <p class="settings-fold-intro">任务启动时会立即扫描今天已完成筛选、尚未归属的话题事件，之后按此间隔继续追加。当天已归属的事件不会重新分组；异常重试最多每 5 分钟请求一次模型。</p>
+        <form class="source-form credential-form" method="post" action="/settings/daily-topics-interval">
           <label>
             归并间隔（分钟）
-            <input name="interval_minutes" type="number" min="5" max="1440" step="1" required value="{{ weekly_topic_refresh_interval_minutes }}">
+            <input name="interval_minutes" type="number" min="5" max="1440" step="1" required value="{{ daily_topic_refresh_interval_minutes }}">
             <small>默认 30 分钟。保存后，独立任务会在当前等待周期结束后按新间隔继续执行。</small>
           </label>
           <div class="form-actions"><button class="button button-primary" type="submit">保存热点间隔</button></div>

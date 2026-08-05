@@ -92,12 +92,12 @@ class WebTests(unittest.TestCase):
             finally:
                 delattr(app.state, "services")
 
-    def test_mobile_navigation_and_weekly_topic_markup_are_present(self) -> None:
-        navigation = templates.get_template("base.html").render(request=object(), active_path="/weekly-topics")
-        weekly_page = templates.get_template("weekly_topics.html").render(
+    def test_mobile_navigation_and_daily_topic_markup_are_present(self) -> None:
+        navigation = templates.get_template("base.html").render(request=object(), active_path="/daily-topics")
+        daily_page = templates.get_template("daily_topics.html").render(
             request=object(),
-            active_path="/weekly-topics",
-            week_start=datetime(2026, 8, 3).date(),
+            active_path="/daily-topics",
+            topic_date=datetime(2026, 8, 5).date(),
             topic_skill_status=SimpleNamespace(available=True, message=""),
             topics=[
                 {
@@ -120,15 +120,15 @@ class WebTests(unittest.TestCase):
         )
 
         self.assertIn('class="mobile-primary-nav"', navigation)
-        self.assertIn('href="/weekly-topics" aria-current="page"', navigation)
+        self.assertIn('href="/daily-topics" aria-current="page"', navigation)
         self.assertNotIn('href="/briefs"', navigation)
         self.assertNotIn('class="mobile-menu"', navigation)
-        self.assertIn('data-topic-id="42"', weekly_page)
-        self.assertIn('id="topic-42"', weekly_page)
-        self.assertIn("MiniMax-M3 发布与评测", weekly_page)
-        self.assertIn("8<small>条内容</small>", weekly_page)
+        self.assertIn('data-topic-id="42"', daily_page)
+        self.assertIn('id="topic-42"', daily_page)
+        self.assertIn("MiniMax-M3 发布与评测", daily_page)
+        self.assertIn("8<small>条内容</small>", daily_page)
 
-    def test_dashboard_shows_weekly_topic_strip_above_time_filters(self) -> None:
+    def test_dashboard_shows_daily_topic_strip_above_time_filters(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))
             app.state.services = services
@@ -141,7 +141,7 @@ class WebTests(unittest.TestCase):
             }
             try:
                 with patch.object(
-                    services.repository, "list_weekly_topics", return_value=[topic]
+                    services.repository, "list_daily_topics", return_value=[topic]
                 ) as topic_query:
                     with TestClient(app) as client:
                         response = client.get("/?tier=must_read&period=24h")
@@ -149,25 +149,28 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(topic_query.call_args.kwargs["limit"], 5)
                 self.assertIn('class="dashboard-topic-strip"', response.text)
-                self.assertIn('href="/weekly-topics#topic-42"', response.text)
+                self.assertIn('href="/daily-topics#topic-42"', response.text)
                 self.assertIn('data-topic-id="42"', response.text)
                 self.assertIn("MiniMax-M3 发布与评测", response.text)
-                self.assertIn("本周热点", response.text)
+                self.assertIn("今日热点", response.text)
             finally:
                 delattr(app.state, "services")
 
-    def test_weekly_topics_route_renders_the_current_week_empty_state(self) -> None:
+    def test_daily_topics_route_renders_the_current_day_empty_state_and_old_route_redirects(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))
             app.state.services = services
             try:
                 with TestClient(app) as client:
-                    response = client.get("/weekly-topics")
+                    response = client.get("/daily-topics")
+                    old_route = client.get("/weekly-topics", follow_redirects=False)
 
                 self.assertEqual(response.status_code, 200)
-                self.assertIn("本周热点", response.text)
-                self.assertIn("本周暂无热点话题", response.text)
-                self.assertNotIn("本周话题暂未更新", response.text)
+                self.assertIn("今日热点", response.text)
+                self.assertIn("今日暂无热点话题", response.text)
+                self.assertNotIn("今日话题暂未更新", response.text)
+                self.assertEqual(old_route.status_code, 307)
+                self.assertEqual(old_route.headers["location"], "/daily-topics")
             finally:
                 delattr(app.state, "services")
 
@@ -607,8 +610,8 @@ sources:
                     self.assertEqual(settings.status_code, 200)
                     self.assertIn("统一抓取策略", settings.text)
                     self.assertIn('name="interval_minutes"', settings.text)
-                    self.assertIn("本周热点刷新", settings.text)
-                    self.assertIn('action="/settings/weekly-topics-interval"', settings.text)
+                    self.assertIn("今日热点刷新", settings.text)
+                    self.assertIn('action="/settings/daily-topics-interval"', settings.text)
                     self.assertIn("通知统计范围", settings.text)
                     self.assertIn('name="window_hours"', settings.text)
 
@@ -621,15 +624,15 @@ sources:
                     self.assertIn("#fetch", policy.headers["location"])
                     self.assertEqual(services.repository.get_fetch_policy().interval_minutes, 30)
 
-                    weekly_topics_interval = client.post(
-                        "/settings/weekly-topics-interval",
+                    daily_topics_interval = client.post(
+                        "/settings/daily-topics-interval",
                         data={"interval_minutes": "45"},
                         follow_redirects=False,
                     )
-                    self.assertEqual(weekly_topics_interval.status_code, 303)
-                    self.assertIn("#weekly-topics", weekly_topics_interval.headers["location"])
+                    self.assertEqual(daily_topics_interval.status_code, 303)
+                    self.assertIn("#daily-topics", daily_topics_interval.headers["location"])
                     self.assertEqual(
-                        services.repository.get_weekly_topic_refresh_interval_minutes(), 45
+                        services.repository.get_daily_topic_refresh_interval_minutes(), 45
                     )
 
                     push_window = client.post(

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from app.config import Settings
 from app.services.pipeline import IntelligencePipeline
-from app.services.weekly_topics import WeeklyTopicRun
+from app.services.weekly_topics import DailyTopicRun
 from app.storage.database import Database
 from app.storage.repository import Repository
 
@@ -45,7 +45,7 @@ class PipelineTests(unittest.TestCase):
             cleanup.assert_called_once_with()
             self.assertEqual(outcome["cleanup"], cleanup_result)
 
-    def test_weekly_topics_refresh_runs_outside_the_content_processor(self) -> None:
+    def test_daily_topics_refresh_runs_outside_the_content_processor(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             source_dir = root / "sources"
@@ -69,17 +69,17 @@ class PipelineTests(unittest.TestCase):
             pipeline = IntelligencePipeline(repository, Mock(), settings)
 
             with patch.object(
-                pipeline.weekly_topics,
-                "refresh_current_week",
-                return_value=WeeklyTopicRun(refreshed=True, topics=1, events=2),
+                pipeline.daily_topics,
+                "refresh_current_day",
+                return_value=DailyTopicRun(refreshed=True, topics=1, events=2),
             ) as refresh:
                 processor_outcome = pipeline.process_once()
                 refresh.assert_not_called()
 
-                topic_outcome = pipeline.refresh_weekly_topics_once()
+                topic_outcome = pipeline.refresh_daily_topics_once()
 
-            self.assertNotIn("weekly_topics", processor_outcome)
+            self.assertNotIn("daily_topics", processor_outcome)
             self.assertEqual(
                 topic_outcome,
-                {"weekly_topics": {"refreshed": True, "topics": 1, "events": 2, "skipped": False, "failed": False, "message": ""}},
+                {"daily_topics": {"refreshed": True, "topics": 1, "events": 2, "skipped": False, "failed": False, "message": ""}},
             )

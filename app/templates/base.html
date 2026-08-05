@@ -12,7 +12,7 @@
     <title>{% block title %}NewsRSSHub{% endblock %}</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/newsrsshub-icon.svg">
-    <link rel="stylesheet" href="/static/app.css?v=20260805-weeklytopics2">
+    <link rel="stylesheet" href="/static/app.css?v=20260805-dailytopics1">
     <link rel="stylesheet" href="/static/x-session.css?v=20260804-push4">
     <script src="/static/scroll-restore.js?v=20260805-feedback1" defer></script>
     <script src="/static/read-state.js?v=20260804-1" defer></script>
@@ -32,8 +32,8 @@
           <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved" {% if active_path.startswith('/saved') %}aria-current="page"{% endif %}>
             <span class="nav-icon">{{ icon('bookmark') }}</span><span class="nav-label">收藏</span>
           </a>
-          <a class="nav-link {% if active_path.startswith('/weekly-topics') %}active{% endif %}" href="/weekly-topics" {% if active_path.startswith('/weekly-topics') %}aria-current="page"{% endif %}>
-            <span class="nav-icon">{{ icon('brief') }}</span><span class="nav-label">本周热点</span>
+          <a class="nav-link {% if active_path.startswith('/daily-topics') or active_path.startswith('/weekly-topics') %}active{% endif %}" href="/daily-topics" {% if active_path.startswith('/daily-topics') or active_path.startswith('/weekly-topics') %}aria-current="page"{% endif %}>
+            <span class="nav-icon">{{ icon('brief') }}</span><span class="nav-label">今日热点</span>
           </a>
           <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources" {% if active_path.startswith('/sources') %}aria-current="page"{% endif %}>
             <span class="nav-icon">{{ icon('sources') }}</span><span class="nav-label">来源管理</span>
@@ -49,7 +49,7 @@
         <nav class="mobile-primary-nav" aria-label="主导航">
           <a class="nav-link {% if active_path == '/' %}active{% endif %}" href="/" {% if active_path == '/' %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('trending') }}</span><span class="nav-label">热点</span></a>
           <a class="nav-link {% if active_path.startswith('/saved') %}active{% endif %}" href="/saved" {% if active_path.startswith('/saved') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('bookmark') }}</span><span class="nav-label">收藏</span></a>
-          <a class="nav-link {% if active_path.startswith('/weekly-topics') %}active{% endif %}" href="/weekly-topics" {% if active_path.startswith('/weekly-topics') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('brief') }}</span><span class="nav-label">本周</span></a>
+          <a class="nav-link {% if active_path.startswith('/daily-topics') or active_path.startswith('/weekly-topics') %}active{% endif %}" href="/daily-topics" {% if active_path.startswith('/daily-topics') or active_path.startswith('/weekly-topics') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('brief') }}</span><span class="nav-label">今日</span></a>
           <a class="nav-link {% if active_path.startswith('/sources') %}active{% endif %}" href="/sources" {% if active_path.startswith('/sources') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('sources') }}</span><span class="nav-label">来源</span></a>
           <a class="nav-link {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}active{% endif %}" href="/settings" {% if active_path.startswith('/settings') or active_path.startswith('/connections') %}aria-current="page"{% endif %}><span class="nav-icon">{{ icon('settings') }}</span><span class="nav-label">设置</span></a>
         </nav>

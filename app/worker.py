@@ -26,7 +26,7 @@ def run() -> int:
         "--role",
         choices=("collector", "processor", "topics", "all"),
         default="all",
-        help="collector 仅抓取；processor 仅处理内容；topics 仅归并本周热点",
+        help="collector 仅抓取；processor 仅处理内容；topics 仅归并今日热点",
     )
     parser.add_argument("--interval", type=int, default=30, help="两轮检查之间的秒数")
     args = parser.parse_args()
@@ -45,7 +45,7 @@ def run() -> int:
             elif args.role == "processor":
                 outcome = services.pipeline.process_once()
             elif args.role == "topics":
-                outcome = services.pipeline.refresh_weekly_topics_once()
+                outcome = services.pipeline.refresh_daily_topics_once()
             else:
                 outcome = services.pipeline.run_once(force=args.force)
             logging.getLogger(__name__).info(
@@ -59,7 +59,7 @@ def run() -> int:
             return 0
         if args.role == "topics":
             # 热点任务使用网页中的持久化设置；启动后先执行一轮，再按该间隔等待。
-            interval_seconds = services.repository.get_weekly_topic_refresh_interval_minutes() * 60
+            interval_seconds = services.repository.get_daily_topic_refresh_interval_minutes() * 60
         else:
             interval_seconds = max(15, args.interval)
         time.sleep(interval_seconds)

@@ -9,7 +9,12 @@ from typing import Any, Callable, Iterable, Sequence
 
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FetchPolicy, FeedItem, SourceDraft
-from app.domain.weekly_topics import MIN_WEEKLY_TOPIC_CONTENT_COUNT, WeeklyTopicGroup
+from app.domain.weekly_topics import (
+    MIN_DAILY_TOPIC_CONTENT_COUNT,
+    MIN_WEEKLY_TOPIC_CONTENT_COUNT,
+    DailyTopicGroup,
+    WeeklyTopicGroup,
+)
 from app.storage.database import Database
 
 
@@ -30,6 +35,12 @@ def _utc_iso(value: datetime) -> str:
 
 
 def _week_start_key(value: date | str) -> str:
+    return value.isoformat() if isinstance(value, date) else str(value)
+
+
+def _topic_date_key(value: date | str) -> str:
+    """将今日话题的自然日键统一为 SQLite 使用的 ISO 日期。"""
+
     return value.isoformat() if isinstance(value, date) else str(value)
 
 
@@ -112,10 +123,12 @@ class Repository:
     DEFAULT_WEB_PUSH_WINDOW_HOURS = 2
     MIN_WEB_PUSH_WINDOW_HOURS = 1
     MAX_WEB_PUSH_WINDOW_HOURS = 24
-    WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING = "weekly_topic_refresh_interval_minutes"
-    DEFAULT_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES = 30
-    MIN_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES = 5
-    MAX_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES = 1440
+    DAILY_TOPIC_REFRESH_INTERVAL_SETTING = "daily_topic_refresh_interval_minutes"
+    # 已部署 v10 的设置值不丢失；用户第一次保存今日热点设置后会写入新键。
+    LEGACY_WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING = "weekly_topic_refresh_interval_minutes"
+    DEFAULT_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES = 30
+    MIN_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES = 5
+    MAX_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES = 1440
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -173,33 +186,41 @@ class Repository:
         return hours
 
     @classmethod
-    def _normalize_weekly_topic_refresh_interval(cls, value: int | str | None) -> int:
+    def _normalize_daily_topic_refresh_interval(cls, value: int | str | None) -> int:
         try:
             minutes = (
                 int(value)
                 if value is not None
-                else cls.DEFAULT_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES
+                else cls.DEFAULT_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES
             )
         except (TypeError, ValueError):
-            minutes = cls.DEFAULT_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES
+            minutes = cls.DEFAULT_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES
         return max(
-            cls.MIN_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES,
-            min(minutes, cls.MAX_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES),
+            cls.MIN_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES,
+            min(minutes, cls.MAX_DAILY_TOPIC_REFRESH_INTERVAL_MINUTES),
         )
 
+    def get_daily_topic_refresh_interval_minutes(self) -> int:
+        """读取独立今日话题任务的执行间隔，默认每 30 分钟。"""
+
+        value = self.get_app_setting(self.DAILY_TOPIC_REFRESH_INTERVAL_SETTING)
+        if value is None:
+            value = self.get_app_setting(self.LEGACY_WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING)
+        return self._normalize_daily_topic_refresh_interval(value)
+
+    def save_daily_topic_refresh_interval_minutes(self, value: int | str) -> int:
+        """保存今日热点任务的间隔，供网页和独立 Worker 共用。"""
+
+        minutes = self._normalize_daily_topic_refresh_interval(value)
+        self.save_app_setting(self.DAILY_TOPIC_REFRESH_INTERVAL_SETTING, str(minutes))
+        return minutes
+
+    # 兼容已有本地调用；新页面和 Worker 统一走 daily 命名。
     def get_weekly_topic_refresh_interval_minutes(self) -> int:
-        """读取独立话题任务的执行间隔，默认每 30 分钟。"""
-
-        return self._normalize_weekly_topic_refresh_interval(
-            self.get_app_setting(self.WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING)
-        )
+        return self.get_daily_topic_refresh_interval_minutes()
 
     def save_weekly_topic_refresh_interval_minutes(self, value: int | str) -> int:
-        """保存本周热点任务的间隔，供网页和独立 Worker 共用。"""
-
-        minutes = self._normalize_weekly_topic_refresh_interval(value)
-        self.save_app_setting(self.WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING, str(minutes))
-        return minutes
+        return self.save_daily_topic_refresh_interval_minutes(value)
 
     def get_app_setting(self, key: str) -> str | None:
         """读取少量应用级状态；调用方负责解析具体值的格式。"""
@@ -1568,6 +1589,222 @@ class Repository:
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 
+    # 今日话题 ---------------------------------------------------------------
+    def list_daily_topic_candidates(
+        self, *, start: datetime, end: datetime, limit: int
+    ) -> list[dict[str, Any]]:
+        """读取当天尚未归属的话题事件；同一事件只会被模型处理一次。"""
+
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        if end_at <= start_at:
+            raise ValueError("今日话题的结束时间必须晚于开始时间。")
+        # 调用方传入的 start 已经是配置时区的当天零点，不能再转换为宿主机时区。
+        day_key = _topic_date_key(start.date())
+        bounded_limit = max(1, min(int(limit), 200))
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    e.id,
+                    e.title,
+                    e.summary,
+                    COUNT(i.id) AS content_count,
+                    COUNT(DISTINCT i.source_id) AS source_count,
+                    MAX(COALESCE(i.published_at, i.fetched_at)) AS latest_at
+                FROM events e
+                JOIN items i ON i.event_id = e.id
+                JOIN sources s ON s.id = i.source_id
+                WHERE e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND NOT {_user_hidden_clause('e')}
+                  AND {_source_is_live_clause('s')}
+                  AND COALESCE(i.published_at, i.fetched_at) >= ?
+                  AND COALESCE(i.published_at, i.fetched_at) < ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM daily_topic_events assigned
+                      WHERE assigned.topic_date = ? AND assigned.event_id = e.id
+                  )
+                GROUP BY e.id
+                ORDER BY latest_at ASC, e.id ASC
+                LIMIT ?
+                """,
+                (start_at, end_at, day_key, bounded_limit),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def list_daily_topic_state(self, topic_date: date | str) -> list[dict[str, Any]]:
+        """返回当天已有话题的稳定 ID 与名称，不重复读取其全部事件关系。"""
+
+        day_key = _topic_date_key(topic_date)
+        with self.database.read() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, topic_date, display_name, created_at, updated_at
+                FROM daily_topics
+                WHERE topic_date = ?
+                ORDER BY id ASC
+                """,
+                (day_key,),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def assign_daily_topics(
+        self, *, topic_date: date | str, groups: Sequence[DailyTopicGroup]
+    ) -> list[int]:
+        """原子追加当天事件归属，绝不删除或改写此前已经成功的关系。"""
+
+        day_key = _topic_date_key(topic_date)
+        references: set[str] = set()
+        event_ids = [event_id for group in groups for event_id in group.event_ids]
+        if len(event_ids) != len(set(event_ids)):
+            raise ValueError("同一事件不能被追加到多个今日话题中。")
+        for group in groups:
+            if group.ref in references:
+                raise ValueError("同一个今日话题引用不能重复。")
+            references.add(group.ref)
+
+        now = iso_now()
+        with self.database.transaction() as conn:
+            existing_rows = conn.execute(
+                "SELECT id FROM daily_topics WHERE topic_date = ?", (day_key,)
+            ).fetchall()
+            existing_ids = {int(row["id"]) for row in existing_rows}
+            topic_ids_by_ref: dict[str, int] = {}
+
+            for group in groups:
+                if group.ref.startswith("existing:"):
+                    topic_id = int(group.ref.removeprefix("existing:"))
+                    if topic_id not in existing_ids:
+                        raise ValueError("模型引用了不属于当天的既有话题。")
+                    # 增量模式下，已有话题名称和已归属事件都是不可变的。
+                    if group.display_name is not None:
+                        raise ValueError("已有今日话题不能在增量归并中改名。")
+                else:
+                    if not group.display_name:
+                        raise ValueError("新建今日话题必须提供展示名称。")
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO daily_topics (topic_date, display_name, created_at, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (day_key, group.display_name, now, now),
+                    )
+                    topic_id = int(cursor.lastrowid)
+                topic_ids_by_ref[group.ref] = topic_id
+
+            if event_ids:
+                placeholders = ", ".join("?" for _ in event_ids)
+                assigned_rows = conn.execute(
+                    f"""
+                    SELECT event_id FROM daily_topic_events
+                    WHERE topic_date = ? AND event_id IN ({placeholders})
+                    """,
+                    (day_key, *event_ids),
+                ).fetchall()
+                if assigned_rows:
+                    raise ValueError("存在已归属的今日事件，拒绝覆盖已有话题关系。")
+
+            for group in groups:
+                topic_id = topic_ids_by_ref[group.ref]
+                conn.executemany(
+                    """
+                    INSERT INTO daily_topic_events (topic_date, topic_id, event_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    [(day_key, topic_id, event_id) for event_id in group.event_ids],
+                )
+        return list(topic_ids_by_ref.values())
+
+    def list_daily_topics(
+        self, *, topic_date: date | str, start: datetime, end: datetime, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """读取当天仍可见的热点，热度始终由当天真实内容实时计算。"""
+
+        day_key = _topic_date_key(topic_date)
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        bounded_limit = max(1, min(int(limit), 50))
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    t.id,
+                    t.topic_date,
+                    t.display_name,
+                    t.created_at,
+                    t.updated_at,
+                    COUNT(i.id) AS content_count,
+                    COUNT(DISTINCT dte.event_id) AS event_count,
+                    COUNT(DISTINCT i.source_id) AS source_count,
+                    MAX(COALESCE(i.published_at, i.fetched_at)) AS latest_at
+                FROM daily_topics t
+                JOIN daily_topic_events dte
+                  ON dte.topic_id = t.id AND dte.topic_date = t.topic_date
+                JOIN events e ON e.id = dte.event_id
+                JOIN items i ON i.event_id = e.id
+                JOIN sources s ON s.id = i.source_id
+                WHERE t.topic_date = ?
+                  AND e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND NOT {_user_hidden_clause('e')}
+                  AND {_source_is_live_clause('s')}
+                  AND COALESCE(i.published_at, i.fetched_at) >= ?
+                  AND COALESCE(i.published_at, i.fetched_at) < ?
+                GROUP BY t.id
+                HAVING COUNT(i.id) >= ?
+                ORDER BY content_count DESC, event_count DESC, source_count DESC,
+                         latest_at DESC, t.id DESC
+                LIMIT ?
+                """,
+                (day_key, start_at, end_at, MIN_DAILY_TOPIC_CONTENT_COUNT, bounded_limit),
+            ).fetchall()
+        topics = [_row_to_dict(row) for row in rows]
+        for topic in topics:
+            topic["events"] = self.list_daily_topic_events(
+                topic_id=int(topic["id"]), topic_date=day_key, start=start, end=end
+            )
+        return topics
+
+    def list_daily_topic_events(
+        self, *, topic_id: int, topic_date: date | str, start: datetime, end: datetime
+    ) -> list[dict[str, Any]]:
+        """返回当天话题下仍可阅读的事件，不把隐藏内容带回页面。"""
+
+        day_key = _topic_date_key(topic_date)
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    e.id,
+                    e.title,
+                    e.summary,
+                    e.editorial_tier,
+                    COUNT(i.id) AS content_count,
+                    COUNT(DISTINCT i.source_id) AS source_count,
+                    MAX(COALESCE(i.published_at, i.fetched_at)) AS latest_at
+                FROM daily_topic_events dte
+                JOIN events e ON e.id = dte.event_id
+                JOIN items i ON i.event_id = e.id
+                JOIN sources s ON s.id = i.source_id
+                WHERE dte.topic_date = ?
+                  AND dte.topic_id = ?
+                  AND e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND NOT {_user_hidden_clause('e')}
+                  AND {_source_is_live_clause('s')}
+                  AND COALESCE(i.published_at, i.fetched_at) >= ?
+                  AND COALESCE(i.published_at, i.fetched_at) < ?
+                GROUP BY e.id
+                ORDER BY content_count DESC, latest_at DESC, e.id DESC
+                """,
+                (day_key, int(topic_id), start_at, end_at),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
     # 日报与清理 -------------------------------------------------------------
     def list_briefs(self) -> list[dict[str, Any]]:
         with self.database.read() as conn:
@@ -1627,8 +1864,9 @@ class Repository:
             deleted_briefs = conn.execute(
                 "DELETE FROM briefs WHERE brief_date <= ?", (brief_cutoff,)
             ).rowcount
-            # 周话题只服务短期浏览；过期话题及其关联会由外键一起清理。
+            # 旧周话题与当前今日话题都只服务短期浏览；关联会由外键一起清理。
             conn.execute("DELETE FROM weekly_topics WHERE week_start <= ?", (brief_cutoff,))
+            conn.execute("DELETE FROM daily_topics WHERE topic_date <= ?", (brief_cutoff,))
 
             protected_event_ids: set[int] = set()
             has_unknown_brief_references = False
