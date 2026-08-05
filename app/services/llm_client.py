@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import requests
 
@@ -31,6 +31,7 @@ class OpenAICompatibleJsonClient:
         user: dict[str, Any],
         stream: bool = False,
         read_timeout: float | None = None,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """请求 OpenAI 兼容 JSON。
 
@@ -40,13 +41,15 @@ class OpenAICompatibleJsonClient:
 
         request_payload = {
             "model": self.config.model_name,
-            "temperature": 0.1,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
             ],
         }
+        # 部分兼容网关通过请求体扩展字段控制思考模式；调用方显式决定是否传入。
+        if extra_body:
+            request_payload.update(extra_body)
         if stream:
             request_payload["stream"] = True
         # 非流式请求沿用通用上限。流式话题归并没有读超时；模型只要持续输出，
@@ -79,7 +82,7 @@ class OpenAICompatibleJsonClient:
         if status_code == 429:
             raise LLMRequestError("模型服务暂时限流，稍后会自动重试。")
         if status_code < 200 or status_code >= 300:
-            raise LLMRequestError("模型服务暂时无法完成请求，请稍后重试。")
+            raise LLMRequestError(f"模型服务返回 HTTP {status_code}，请稍后重试。")
         content = self._streaming_content(response) if stream else self._response_content(response)
         return self._parse_json_content(content)
 
@@ -100,7 +103,9 @@ class OpenAICompatibleJsonClient:
 
         chunks: list[str] = []
         try:
-            lines = response.iter_lines(decode_unicode=True)
+            # 不信任网关的 Content-Type 字符集声明；SSE JSON 统一按 UTF-8 解码，
+            # 否则未带 charset 的 text/event-stream 会把中文话题名解成乱码。
+            lines = response.iter_lines(decode_unicode=False)
             for raw_line in lines:
                 if raw_line is None:
                     continue
@@ -113,8 +118,16 @@ class OpenAICompatibleJsonClient:
                 if data == "[DONE]":
                     break
                 payload = json.loads(data)
-                choice = payload["choices"][0]
-                delta = choice.get("delta") or {}
+                choices = payload.get("choices") if isinstance(payload, dict) else None
+                # 某些兼容网关会插入没有 choices 的控制片段，和官方 SDK 一样跳过即可。
+                if not isinstance(choices, list) or not choices:
+                    continue
+                choice = choices[0]
+                if not isinstance(choice, dict):
+                    continue
+                delta = choice.get("delta")
+                if not isinstance(delta, dict):
+                    continue
                 content = delta.get("content")
                 if content is None:
                     # 少数兼容服务在流片段里仍使用 message 字段。
@@ -138,7 +151,7 @@ class OpenAICompatibleJsonClient:
 
     @staticmethod
     def _stream_line_text(raw_line: Any) -> str:
-        """requests 未识别字符集时仍可能返回 bytes，按 SSE 的 UTF-8 约定解码。"""
+        """按 SSE 的 UTF-8 约定解码；测试桩或兼容适配器也可直接给 str。"""
 
         if isinstance(raw_line, bytes):
             return raw_line.decode("utf-8")

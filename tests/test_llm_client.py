@@ -47,6 +47,8 @@ class OpenAICompatibleJsonClientTests(unittest.TestCase):
     def test_streaming_topic_request_collects_sse_without_read_timeout(self) -> None:
         response = StreamingResponse(
             [
+                'data: {"choices":[{"delta":{"reasoning_content":"先判断事件关系"}}]}',
+                'data: {"choices":[]}',
                 b'data: {"choices":[{"delta":{"content":"{\\"topics\\":"}}]}',
                 'data: {"choices":[{"delta":{"content":"[]}"}}]}',
                 "",
@@ -60,14 +62,23 @@ class OpenAICompatibleJsonClientTests(unittest.TestCase):
             return response
 
         client = OpenAICompatibleJsonClient(build_config(), request_post=post)
-        result = client.complete_json(system="system", user={"events": []}, stream=True)
+        result = client.complete_json(
+            system="system",
+            user={"events": []},
+            stream=True,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
 
         self.assertEqual(result, {"topics": []})
         self.assertEqual(len(requests_seen), 1)
         self.assertEqual(requests_seen[0]["timeout"], (30, None))
         self.assertTrue(requests_seen[0]["stream"])
         self.assertTrue(requests_seen[0]["json"]["stream"])
-        self.assertTrue(response.decode_unicode)
+        self.assertEqual(requests_seen[0]["json"]["thinking"], {"type": "disabled"})
+        self.assertNotIn("temperature", requests_seen[0]["json"])
+        self.assertNotIn("top_p", requests_seen[0]["json"])
+        self.assertNotIn("max_tokens", requests_seen[0]["json"])
+        self.assertFalse(response.decode_unicode)
         self.assertTrue(response.closed)
 
     def test_regular_request_keeps_original_bounded_timeout(self) -> None:
@@ -84,6 +95,9 @@ class OpenAICompatibleJsonClientTests(unittest.TestCase):
         self.assertEqual(requests_seen[0]["timeout"], 60)
         self.assertNotIn("stream", requests_seen[0])
         self.assertNotIn("stream", requests_seen[0]["json"])
+        self.assertNotIn("temperature", requests_seen[0]["json"])
+        self.assertNotIn("top_p", requests_seen[0]["json"])
+        self.assertNotIn("max_tokens", requests_seen[0]["json"])
 
     def test_stream_interruption_is_reported_as_safe_error(self) -> None:
         class BrokenResponse:

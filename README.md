@@ -16,11 +16,11 @@
 
 ## Docker 启动
 
-1. 在 `config.yml` 中填写 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 与 `OPENAI_MODEL_NAME`。GitHub/Docker 部署会直接使用这份配置。
+1. 在 `config.yml` 中填写 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 与 `OPENAI_MODEL_NAME`。所有 Worker 只读取这份模型配置，SQLite 中的历史模型连接记录不会覆盖它。
    所有来源都需要在 `app.rsshub_base_url` 填入 **NewsRSSHub 容器可访问** 的自定义 RSSHub 地址，例如同一 Docker 网络中的 `http://rsshub:1200`。先按 [RSSHub 全平台部署说明](docs/RSSHUB_ALL_SOURCES_DEPLOYMENT.md) 构建自定义镜像并挂载运行时目录。
 
    YouTube 的 Cookie 不由 NewsRSSHub 读取或转发。不要在这里添加 `YouTube_Cookie = "..."` 这类 `.env` 写法：它不是 YAML，会让应用无法启动；当前 RSSHub 的频道路由通常不需要 Cookie。若你部署的特定 RSSHub 版本明确要求 Cookie，请按该 RSSHub 的部署文档把它配置在 **RSSHub 自己的容器** 中，而不是 NewsRSSHub 的 `config.yml`。
-2. 如果要在网页中维护模型连接或 Web Push 密钥，为它设置一次加密主密钥：
+2. 如果要使用 Web Push，为它设置一次加密主密钥：
 
    ```bash
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

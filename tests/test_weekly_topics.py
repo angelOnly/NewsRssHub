@@ -149,7 +149,14 @@ class DailyTopicTests(unittest.TestCase):
             self.assertEqual(first.events, 2)
             self.assertEqual(first.topics, 1)
             self.assertEqual(len(client.calls), 1)
-            self.assertEqual(client.options[0], {"stream": True, "read_timeout": None})
+            self.assertEqual(
+                client.options[0],
+                {
+                    "stream": True,
+                    "read_timeout": None,
+                    "extra_body": {"thinking": {"type": "disabled"}},
+                },
+            )
             model_events = client.calls[0]["new_events"]
             assert isinstance(model_events, list)
             self.assertEqual(

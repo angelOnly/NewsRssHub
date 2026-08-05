@@ -135,42 +135,16 @@
           {% if llm_credential.updated_at %}<p class="credential-meta">最近更新：{{ llm_credential.updated_at|relative_time }}</p>{% endif %}
         </section>
 
-        {% if llm_credential.state == 'needs_key' %}
-          <div class="notice error">请先在 <code>config.yml</code> 中设置 <code>CREDENTIAL_ENCRYPTION_KEY</code>。这是加密保存 API Key 的主密钥，不是模型 API Key 本身。</div>
-        {% else %}
-          <form class="source-form credential-form" method="post" action="/settings/llm" autocomplete="off">
-            <label>
-              API Key
-              <input name="api_key_value" type="password" {% if not llm_credential.configured %}required{% endif %} autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="{{ '留空即可保留当前 Key' if llm_credential.configured else '粘贴模型 API Key' }}">
-              <small>密钥不会显示在网页中，会以加密形式保存到 SQLite。已配置后留空，即保留当前 Key。</small>
-            </label>
-            <div class="two-col">
-              <label>
-                Base URL
-                <input name="base_url" type="url" required value="{{ llm_credential.base_url }}" autocomplete="url" spellcheck="false" placeholder="https://api.openai.com/v1">
-                <small>填写服务商提供的 OpenAI 兼容 API 根地址。</small>
-              </label>
-              <label>
-                模型名称
-                <input name="model_name" required value="{{ llm_credential.model_name }}" autocomplete="off" spellcheck="false" placeholder="gpt-4.1-mini">
-                <small>会用该模型做连接测试、单帖摘要和资讯语义筛选。</small>
-              </label>
-            </div>
-            <label class="setting-check">
-              <input name="enabled" type="checkbox" value="true" {% if llm_credential.enabled %}checked{% endif %}>
-              <span>启用大模型摘要与语义筛选；关闭时长内容会保持待处理，不会使用旧关键词规则。</span>
-            </label>
-            <div class="form-actions">
-              <button class="button button-primary" type="submit">测试并保存模型</button>
-            </div>
+        <div class="notice">
+          模型连接只从 <code>config.yml</code> 读取；网页不会读取或写入 SQLite 中的模型配置。修改文件后，请按现有部署方式重新构建或重启使用它的服务。
+        </div>
+        {% if llm_credential.configured %}
+          <form class="inline-test-form" method="post" action="/settings/llm/test">
+            <span>不改配置，只确认 <code>config.yml</code> 当前模型是否可用？</span>
+            <button type="submit">测试当前模型连接</button>
           </form>
-
-          {% if llm_credential.configured %}
-            <form class="inline-test-form" method="post" action="/settings/llm/test">
-              <span>不改配置，只确认当前模型是否可用？</span>
-              <button type="submit">测试当前模型连接</button>
-            </form>
-          {% endif %}
+        {% else %}
+          <div class="notice error">请在 <code>config.yml</code> 中设置 <code>OPENAI_API_KEY</code>、<code>OPENAI_BASE_URL</code> 与 <code>OPENAI_MODEL_NAME</code>。</div>
         {% endif %}
       </div>
     </details>

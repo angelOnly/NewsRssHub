@@ -241,6 +241,8 @@ class DailyTopicService:
             user=request,
             stream=True,
             read_timeout=None,
+            # 当前模型支持此扩展字段；关闭思考可让它直接输出可校验的话题 JSON。
+            extra_body={"thinking": {"type": "disabled"}},
         )
         output = DailyTopicOutput.model_validate(payload)
         return self._validate_output(
