@@ -1,0 +1,203 @@
+diff --git a/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts b/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts
+index 53100125a..1915a724e 100644
+--- a/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts
++++ b/lib/routes/twitter/api/web-api/newsrsshub-runtime.ts
+@@ -6,9 +6,31 @@ import ConfigNotFoundError from '@/errors/types/config-not-found';
+ const RUNTIME_DIRECTORY_ENV = 'NEWSRSSHUB_RUNTIME_DIR';
+ const X_CREDENTIAL_FILENAME = 'x-twitter.json';
+
++export type NewsRssHubRuntimeCredential = {
++    authToken: string;
++    cookieHeader: string;
++};
++
+ export const hasNewsRssHubRuntimeToken = () => Boolean(process.env[RUNTIME_DIRECTORY_ENV]?.trim());
+
+-export async function getNewsRssHubRuntimeToken(): Promise<string | undefined> {
++const getCookieValue = (cookieHeader: string, expectedName: string) => {
++    let value = '';
++    for (const rawPart of cookieHeader.split(';')) {
++        const part = rawPart.trim();
++        const separator = part.indexOf('=');
++        if (separator <= 0) {
++            continue;
++        }
++        const name = part.slice(0, separator).trim();
++        const candidate = part.slice(separator + 1).trim();
++        if (name === expectedName && candidate) {
++            value = candidate;
++        }
++    }
++    return value;
++};
++
++export async function getNewsRssHubRuntimeCredential(): Promise<NewsRssHubRuntimeCredential | undefined> {
+     const directory = process.env[RUNTIME_DIRECTORY_ENV]?.trim();
+     if (!directory) {
+         return undefined;
+@@ -23,13 +45,19 @@ export async function getNewsRssHubRuntimeToken(): Promise<string | undefined> {
+     }
+
+     try {
+-        const document = JSON.parse(raw) as { auth_token?: unknown };
+-        const authToken = typeof document.auth_token === 'string' ? document.auth_token.trim() : '';
+-        if (!authToken) {
+-            throw new Error('missing auth_token');
++        const document = JSON.parse(raw) as { version?: unknown; cookie_header?: unknown };
++        const cookieHeader = typeof document.cookie_header === 'string' ? document.cookie_header.trim() : '';
++        const authToken = getCookieValue(cookieHeader, 'auth_token');
++        const csrfToken = getCookieValue(cookieHeader, 'ct0');
++        if (document.version !== 2 || !cookieHeader || !authToken || !csrfToken) {
++            throw new Error('missing complete cookie');
+         }
+-        return authToken;
++        return { authToken, cookieHeader };
+     } catch {
+-        throw new ConfigNotFoundError('NewsRSSHub X 凭据文件格式无效');
++        throw new ConfigNotFoundError('NewsRSSHub X 完整 Cookie 文件格式无效');
+     }
+ }
++
++export async function getNewsRssHubRuntimeToken(): Promise<string | undefined> {
++    return (await getNewsRssHubRuntimeCredential())?.authToken;
++}
+diff --git a/lib/routes/twitter/api/web-api/utils.ts b/lib/routes/twitter/api/web-api/utils.ts
+index 801217dc4..a045a7f89 100644
+--- a/lib/routes/twitter/api/web-api/utils.ts
++++ b/lib/routes/twitter/api/web-api/utils.ts
+@@ -14,7 +14,7 @@ import proxy from '@/utils/proxy';
+
+ import { baseUrl, bearerToken, gqlFeatures, gqlMap, thirdPartySupportedAPI } from './constants';
+ // import login from './login';
+-import { getNewsRssHubRuntimeToken } from './newsrsshub-runtime';
++import { getNewsRssHubRuntimeCredential } from './newsrsshub-runtime';
+
+ let authTokenIndex = 0;
+
+@@ -23,12 +23,32 @@ const tokenFingerprint = (token?: string) =>
+
+ const displayToken = (token?: string) => (token ? `#${tokenFingerprint(token).slice(0, 12)}` : 'guest');
+
+-const token2Cookie = async (token) => {
+-    const cacheKey = tokenFingerprint(token);
++const cookieHeaderToJar = async (cookieHeader: string) => {
++    const jar = new CookieJar();
++    for (const rawPart of cookieHeader.split(';')) {
++        const parsed = Cookie.parse(rawPart.trim());
++        if (!parsed) {
++            throw new ConfigNotFoundError('NewsRSSHub X 完整 Cookie 无法解析');
++        }
++        await jar.setCookie(parsed, 'https://x.com');
++    }
++    return jar;
++};
++
++const token2Cookie = async (auth?: { token: string; fingerprint: string }) => {
++    const runtimeCredential = await getNewsRssHubRuntimeCredential();
++    const cacheKey = runtimeCredential ? tokenFingerprint(runtimeCredential.cookieHeader) : auth?.fingerprint || 'guest';
+     const c = await cache.get(`twitter:cookie:${cacheKey}`);
+     if (c) {
+         return c;
+     }
++    if (runtimeCredential) {
++        const cookie = JSON.stringify((await cookieHeaderToJar(runtimeCredential.cookieHeader)).serializeSync());
++        await cache.set(`twitter:cookie:${cacheKey}`, cookie);
++        return cookie;
++    }
++
++    const token = auth?.token;
+     const jar = new CookieJar();
+     await jar.setCookie(`auth_token=${token}`, 'https://x.com');
+     try {
+@@ -61,12 +81,12 @@ const token2Cookie = async (token) => {
+
+ const lockPrefix = 'twitter:lock-token1:';
+
+-const availableAuthTokens = async (): Promise<string[]> => {
+-    const runtimeToken = await getNewsRssHubRuntimeToken();
+-    if (runtimeToken) {
+-        return [runtimeToken];
++const availableAuthTokens = async (): Promise<Array<{ token: string; fingerprint: string }>> => {
++    const runtimeCredential = await getNewsRssHubRuntimeCredential();
++    if (runtimeCredential) {
++        return [{ token: runtimeCredential.authToken, fingerprint: tokenFingerprint(runtimeCredential.cookieHeader) }];
+     }
+-    return config.twitter.authToken || [];
++    return (config.twitter.authToken || []).map((token) => ({ token, fingerprint: tokenFingerprint(token) }));
+ };
+
+ const getAuth = async (retry: number) => {
+@@ -75,22 +95,16 @@ const getAuth = async (retry: number) => {
+         return;
+     }
+     const index = authTokenIndex++ % tokens.length;
+-    const token = tokens[index];
+-    const fingerprint = tokenFingerprint(token);
+-    const lock = await cache.get(`${lockPrefix}${fingerprint}`, false);
++    const selected = tokens[index];
++    const lock = await cache.get(`${lockPrefix}${selected.fingerprint}`, false);
+     if (lock) {
+-        logger.debug(`twitter debug: twitter cookie for token ${displayToken(token)} is locked, retry: ${retry}`);
++        logger.debug(`twitter debug: twitter cookie for token ${displayToken(selected.token)} is locked, retry: ${retry}`);
+         await new Promise((resolve) => setTimeout(resolve, Math.random() * 500 + 500));
+         return await getAuth(retry - 1);
+     }
+-    logger.debug(`twitter debug: lock twitter cookie for token ${displayToken(token)}`);
+-    await cache.set(`${lockPrefix}${fingerprint}`, '1', 20);
+-    return {
+-        token,
++    logger.debug(`twitter debug: lock twitter cookie for token ${displayToken(selected.token)}`);
++    await cache.set(`${lockPrefix}${selected.fingerprint}`, '1', 20);
++    return selected;
+-        // username: config.twitter.username?.[index],
+-        // password: config.twitter.password?.[index],
+-        // authenticationSecret: config.twitter.authenticationSecret?.[index],
+-    };
+ };
+
+ export const twitterGot = async (
+@@ -108,7 +122,7 @@ export const twitterGot = async (
+
+     const requestUrl = `${url}?${queryString.stringify(params)}`;
+
+-    let cookie: string | Record<string, any> | null | undefined = await token2Cookie(auth?.token);
++    let cookie: string | Record<string, any> | null | undefined = await token2Cookie(auth);
+     // if (!cookie && auth) {
+     //     cookie = await login({
+     //         username: auth.username,
+@@ -209,10 +223,10 @@ export const twitterGot = async (
+             const resetTime = new Date(Number.parseInt(reset) * 1000);
+             const delay = (resetTime.getTime() - Date.now()) / 1000;
+             logger.debug(`twitter debug: rate limit exceeded for token ${displayToken(auth.token)} with status ${response.status}, will unlock after ${delay}s`);
+-            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '1', Math.ceil(delay) * 2);
++            await cache.set(`${lockPrefix}${auth.fingerprint}`, '1', Math.ceil(delay) * 2);
+         } else if (response.status === 429 || JSON.stringify(responseData?.data) === '{"user":{}}') {
+             logger.debug(`twitter debug: rate limit exceeded for token ${displayToken(auth.token)} with status ${response.status}`);
+-            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '1', 2000);
++            await cache.set(`${lockPrefix}${auth.fingerprint}`, '1', 2000);
+         } else if (response.status === 403 || response.status === 401) {
+             // const newCookie = await login({
+             //     username: auth.username,
+@@ -241,11 +255,11 @@ export const twitterGot = async (
+             //     }
+             // }
+             logger.debug(`twitter debug: delete twitter cookie for token ${displayToken(auth.token)} with status ${response.status}, remaining tokens: ${config.twitter.authToken?.length}`);
+-            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '1', 3600);
++            await cache.set(`${lockPrefix}${auth.fingerprint}`, '1', 3600);
+             // }
+         } else {
+             logger.debug(`twitter debug: unlock twitter cookie with success for token ${displayToken(auth.token)}`);
+-            await cache.set(`${lockPrefix}${tokenFingerprint(auth.token)}`, '', 1);
++            await cache.set(`${lockPrefix}${auth.fingerprint}`, '', 1);
+         }
+     }
+
+@@ -255,7 +269,7 @@ export const twitterGot = async (
+
+     if (auth?.token) {
+         logger.debug(`twitter debug: update twitter cookie for token ${displayToken(auth.token)}`);
+-        await cache.set(`twitter:cookie:${tokenFingerprint(auth.token)}`, JSON.stringify(dispatchers?.jar.serializeSync()), config.cache.contentExpire);
++        await cache.set(`twitter:cookie:${auth.fingerprint}`, JSON.stringify(dispatchers?.jar.serializeSync()), config.cache.contentExpire);
+     }
+
+     return responseData;

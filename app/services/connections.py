@@ -2,7 +2,7 @@
 
 Sources never contain a Cookie or API key themselves.  A source points at a
 platform, while this catalog tells the UI and service layer whether that
-platform is public or must first have a verified shared connection.
+platform is public or has the shared access it needs.
 """
 
 from __future__ import annotations
@@ -123,12 +123,8 @@ class ConnectionCatalog:
             source_kind=SourceKind.X_RSSHUB,
             requires_credentials=True,
             state=status.state,
-            usable=status.state == "valid",
-            message=(
-                "X Cookie 已验证，可添加多个 X 账号来源。"
-                if status.state == "valid"
-                else status.message
-            ),
+            usable=status.configured,
+            message=status.message,
             setup_url="/settings#x",
             setup_label="配置并测试 X Cookie",
         )

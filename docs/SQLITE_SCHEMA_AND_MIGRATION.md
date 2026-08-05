@@ -40,14 +40,14 @@ flowchart LR
     T["weekly_topics：本周话题的稳定 ID 与可变展示名"] --> R["weekly_topic_events：话题与事件关系"]
     R -. "关联事件" .-> E
     B["briefs：历史每日简报"] -. "按顺序引用事件" .-> E
-    C["connector_credentials：平台 Cookie / API Key"] -. "按连接器共享" .-> S
+    C["connector_credentials：模型连接 / Web Push 密钥"] -. "按连接器共享" .-> S
 ```
 
 | 表 | 职责 | 关键约束 |
 | --- | --- | --- |
 | `sources` | 来源身份、账号简介、全局调度下的下次抓取时间、启停、归档与当前健康状态 | `UNIQUE(kind, locator)`；`next_fetch_at` 用于持久化错峰排期；`config_json` 只存非敏感连接器缓存，例如 X 的 `x_user_id` |
 | `app_settings` | 应用级设置 | 当前保存 `global_fetch_interval_minutes`，所有启用来源共用该间隔 |
-| `connector_credentials` | 每个平台一份加密 Cookie、API Key 或模型连接配置 | 凭证按 `connector` 主键保存，不绑定单个来源 |
+| `connector_credentials` | 模型连接、Web Push 等需要加密持久化的凭据 | 凭证按 `connector` 主键保存，不绑定单个来源；X Cookie 不保存于此表 |
 | `items` | 原文、链接、作者、摘要、高亮、翻译、媒体预览及重试状态 | `UNIQUE(source_id, guid)`；`media_json` 只保存已验证的媒体地址；通过 `event_id` 归入零或一个事件 |
 | `events` | 合并后的阅读主题、内容层级、排序和主条目 | `primary_item_id` 指向该事件的主条目 |
 | `feedback` | 用户对事件的持久状态 | 复合主键 `(event_id, action)`，支持 `read`、`not_interested`、`saved` |
@@ -167,7 +167,7 @@ docker compose up -d --build
 
 1. `/health` 可访问。
 2. 来源数量、内容数量、事件数量、历史日报数量与迁移前预检输出一致；v9 → v10 后两张周话题表存在且初始可为空。
-3. X Cookie、模型连接仍显示已配置，但页面和日志绝不显示密文。
+3. 模型连接仍显示已配置且页面和日志绝不显示密文；X Cookie 仅检查受限运行时文件是否存在，实际可用性由 RSSHub 验证与来源抓取结果确认。
 4. 来源管理、事件详情、摘要展开、已读和“不感兴趣”正常。
 5. Worker 能正常完成一轮抓取、摘要、筛选、翻译和本周话题刷新；本周热点页只显示周一零点至今的可见内容统计。
 
