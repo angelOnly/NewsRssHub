@@ -406,6 +406,15 @@ def dashboard(
         tier=selected_tier, period=period, limit=50, offset=(page - 1) * 50
     )
     total_events = services.repository.count_events(tier=selected_tier, period=period)
+    topic_service = services.pipeline.weekly_topics
+    topic_window = topic_service.current_window()
+    # 首页只取少量话题作导航入口，完整事件清单仍在“本周热点”页展示。
+    weekly_topics = services.repository.list_weekly_topics(
+        week_start=topic_window.week_start,
+        start=topic_window.start,
+        end=topic_window.end,
+        limit=5,
+    )
     return render(
         request,
         "dashboard.html",
@@ -418,6 +427,7 @@ def dashboard(
             "period": period,
             "page": page,
             "has_more": page * 50 < total_events,
+            "weekly_topics": weekly_topics,
         },
     )
 
@@ -436,6 +446,26 @@ def saved_events(request: Request, page: int = 1, notice: str = "") -> HTMLRespo
             "page": page,
             "notice": notice,
             "has_more": page * 50 < total_events,
+        },
+    )
+
+
+@app.get("/weekly-topics", response_class=HTMLResponse)
+def weekly_topics(request: Request) -> HTMLResponse:
+    services = get_services(request)
+    topic_service = services.pipeline.weekly_topics
+    window = topic_service.current_window()
+    topics = services.repository.list_weekly_topics(
+        week_start=window.week_start, start=window.start, end=window.end
+    )
+    return render(
+        request,
+        "weekly_topics.html",
+        {
+            "topics": topics,
+            "week_start": window.week_start,
+            "week_end": window.end,
+            "topic_skill_status": topic_service.skill_loader.status(),
         },
     )
 

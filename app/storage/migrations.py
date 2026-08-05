@@ -1,4 +1,4 @@
-"""SQLite v9 结构，以及显式迁移的安全校验。
+"""SQLite v10 结构，以及显式迁移的安全校验。
 
 普通应用启动只初始化空数据库或接受已经是目标版本的数据库。已有数据库的
 重建只能由 ``python -m app.migrate`` 执行，避免部署服务启动时悄悄删列。
@@ -11,13 +11,15 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 TARGET_TABLES = (
     "sources",
     "events",
     "items",
     "briefs",
+    "weekly_topics",
+    "weekly_topic_events",
     "feedback",
     "connector_credentials",
     "app_settings",
@@ -124,6 +126,30 @@ CREATE TABLE briefs (
 """
 
 
+WEEKLY_TOPICS_TABLE = """
+CREATE TABLE weekly_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_start TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(week_start, id)
+)
+"""
+
+
+WEEKLY_TOPIC_EVENTS_TABLE = """
+CREATE TABLE weekly_topic_events (
+    week_start TEXT NOT NULL,
+    topic_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    PRIMARY KEY(week_start, event_id),
+    FOREIGN KEY(week_start, topic_id)
+        REFERENCES weekly_topics(week_start, id) ON DELETE CASCADE
+) WITHOUT ROWID
+"""
+
+
 FEEDBACK_TABLE = """
 CREATE TABLE feedback (
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -162,6 +188,8 @@ TABLE_DEFINITIONS = (
     EVENTS_TABLE,
     ITEMS_TABLE,
     BRIEFS_TABLE,
+    WEEKLY_TOPICS_TABLE,
+    WEEKLY_TOPIC_EVENTS_TABLE,
     FEEDBACK_TABLE,
     CONNECTOR_CREDENTIALS_TABLE,
     APP_SETTINGS_TABLE,
@@ -177,6 +205,13 @@ INDEX_DEFINITIONS = (
         "curation_status, editorial_tier, curation_order, last_seen_at DESC, id DESC)"
     ),
     "CREATE INDEX idx_events_curation ON events(curation_status, last_seen_at DESC, id DESC)",
+    "CREATE INDEX idx_weekly_topics_week ON weekly_topics(week_start, id DESC)",
+    "CREATE INDEX idx_weekly_topic_events_topic ON weekly_topic_events(topic_id, event_id)",
+)
+
+WEEKLY_TOPIC_INDEX_DEFINITIONS = (
+    "CREATE INDEX idx_weekly_topics_week ON weekly_topics(week_start, id DESC)",
+    "CREATE INDEX idx_weekly_topic_events_topic ON weekly_topic_events(topic_id, event_id)",
 )
 
 TARGET_INDEX_NAMES = frozenset(
@@ -187,6 +222,8 @@ TARGET_INDEX_NAMES = frozenset(
         "idx_sources_due",
         "idx_events_reader",
         "idx_events_curation",
+        "idx_weekly_topics_week",
+        "idx_weekly_topic_events_topic",
     }
 )
 
@@ -196,6 +233,11 @@ TARGET_FOREIGN_KEYS = {
         ("event_id", "events", "SET NULL"),
     },
     "events": {("primary_item_id", "items", "SET NULL")},
+    "weekly_topic_events": {
+        ("week_start", "weekly_topics", "CASCADE"),
+        ("topic_id", "weekly_topics", "CASCADE"),
+        ("event_id", "events", "CASCADE"),
+    },
     "feedback": {("event_id", "events", "CASCADE")},
 }
 
@@ -261,6 +303,8 @@ TARGET_COLUMNS = {
         "media_json",
     },
     "briefs": {"id", "brief_date", "title", "intro", "event_ids_json", "generated_at"},
+    "weekly_topics": {"id", "week_start", "display_name", "created_at", "updated_at"},
+    "weekly_topic_events": {"week_start", "topic_id", "event_id"},
     "feedback": {"event_id", "action", "created_at"},
     "connector_credentials": {
         "connector",
@@ -275,10 +319,26 @@ TARGET_COLUMNS = {
     "app_settings": {"key", "value", "updated_at"},
 }
 
-# v8 到 v9 只有 sources.description 一个带默认值的新字段，可在运行时安全补齐。
+# v9 是本次新增周话题表之前的完整结构。它不能由运行中服务自动升级，
+# 必须通过维护命令在停止 Worker 后执行显式迁移。
+V9_TARGET_TABLES = tuple(table for table in TARGET_TABLES if not table.startswith("weekly_"))
+V9_TARGET_COLUMNS = {
+    table: columns for table, columns in TARGET_COLUMNS.items() if not table.startswith("weekly_")
+}
+V9_TARGET_INDEX_NAMES = frozenset(
+    name for name in TARGET_INDEX_NAMES if not name.startswith("idx_weekly_")
+)
+V9_TARGET_FOREIGN_KEYS = {
+    table: foreign_keys
+    for table, foreign_keys in TARGET_FOREIGN_KEYS.items()
+    if not table.startswith("weekly_")
+}
+
+# v8 到 v9 只有 sources.description 一个带默认值的新字段。保留该结构定义，
+# 以便旧库通过显式维护命令完整升级到 v10。
 V8_TARGET_COLUMNS = {
-    **TARGET_COLUMNS,
-    "sources": TARGET_COLUMNS["sources"] - {"description"},
+    **V9_TARGET_COLUMNS,
+    "sources": V9_TARGET_COLUMNS["sources"] - {"description"},
 }
 
 
@@ -401,12 +461,15 @@ def _brief_missing_event_reference_count(conn: sqlite3.Connection) -> int:
 def _schema_issues(
     conn: sqlite3.Connection,
     *,
+    target_tables: tuple[str, ...] = TARGET_TABLES,
     target_columns: dict[str, set[str]] = TARGET_COLUMNS,
+    target_index_names: frozenset[str] = TARGET_INDEX_NAMES,
+    target_foreign_keys: dict[str, set[tuple[str, str, str]]] = TARGET_FOREIGN_KEYS,
     schema_label: str = f"v{SCHEMA_VERSION}",
 ) -> list[str]:
     issues: list[str] = []
     tables = _table_names(conn)
-    expected = set(TARGET_TABLES)
+    expected = set(target_tables)
     missing = sorted(expected - tables)
     unknown = sorted(tables - expected)
     if missing:
@@ -424,10 +487,10 @@ def _schema_issues(
             if extra_columns:
                 details.append(f"多出 {', '.join(extra_columns)}")
             issues.append(f"{table} 字段不匹配（{'；'.join(details)}）")
-    missing_indexes = sorted(TARGET_INDEX_NAMES - _index_names(conn))
+    missing_indexes = sorted(target_index_names - _index_names(conn))
     if missing_indexes:
         issues.append(f"缺少目标索引：{', '.join(missing_indexes)}")
-    for table, expected_foreign_keys in TARGET_FOREIGN_KEYS.items():
+    for table, expected_foreign_keys in target_foreign_keys.items():
         if _table_exists(conn, table) and _foreign_keys(conn, table) != expected_foreign_keys:
             issues.append(f"{table} 外键定义不匹配")
     if _table_exists(conn, "feedback") and _primary_key_columns(conn, "feedback") != (
@@ -617,6 +680,36 @@ def inspect_migration(conn: sqlite3.Connection) -> MigrationReport:
             issues=tuple(issues),
         )
 
+    if current_version == 9:
+        issues.extend(
+            _schema_issues(
+                conn,
+                target_tables=V9_TARGET_TABLES,
+                target_columns=V9_TARGET_COLUMNS,
+                target_index_names=V9_TARGET_INDEX_NAMES,
+                target_foreign_keys=V9_TARGET_FOREIGN_KEYS,
+                schema_label="v9",
+            )
+        )
+        if brief_missing_event_references:
+            issues.append(
+                f"日报引用了 {brief_missing_event_references} 个不存在的事件；"
+                "请先修复当前 v9 数据后再升级"
+            )
+        return MigrationReport(
+            current_version=current_version,
+            target_version=SCHEMA_VERSION,
+            is_empty=False,
+            is_current=False,
+            row_counts=row_counts,
+            feedback_target_rows=row_counts["feedback"],
+            discarded_rows={},
+            raw_json_bytes=0,
+            fallback_url_rows=0,
+            brief_missing_event_references=brief_missing_event_references,
+            issues=tuple(issues),
+        )
+
     allowed_legacy = set(LEGACY_TABLES)
     unknown_tables = sorted(tables - allowed_legacy)
     if unknown_tables:
@@ -680,14 +773,21 @@ def _ensure_default_fetch_policy(conn: sqlite3.Connection) -> None:
 
 
 def _upgrade_v8_source_description(conn: sqlite3.Connection) -> bool:
-    """仅对完整 v8 库追加简介列，避免常规 Compose 部署被无损改表阻断。"""
+    """保留 v8 结构校验工具，运行时不再自动调用。"""
 
-    if _schema_issues(conn, target_columns=V8_TARGET_COLUMNS, schema_label="v8"):
+    if _schema_issues(
+        conn,
+        target_tables=V9_TARGET_TABLES,
+        target_columns=V8_TARGET_COLUMNS,
+        target_index_names=V9_TARGET_INDEX_NAMES,
+        target_foreign_keys=V9_TARGET_FOREIGN_KEYS,
+        schema_label="v8",
+    ):
         return False
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute("ALTER TABLE sources ADD COLUMN description TEXT NOT NULL DEFAULT ''")
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.execute("PRAGMA user_version = 9")
         conn.commit()
     except Exception:
         conn.rollback()
@@ -696,7 +796,7 @@ def _upgrade_v8_source_description(conn: sqlite3.Connection) -> bool:
 
 
 def initialize_runtime_schema(conn: sqlite3.Connection) -> None:
-    """初始化新的 v9 数据库；仅自动追加 v8 的无损简介字段。"""
+    """初始化新的 v10 数据库；已有库一律通过维护命令升级。"""
 
     tables = _table_names(conn)
     if not tables:
@@ -705,8 +805,6 @@ def initialize_runtime_schema(conn: sqlite3.Connection) -> None:
         return
 
     current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-    if current_version == 8 and _upgrade_v8_source_description(conn):
-        current_version = SCHEMA_VERSION
     if current_version != SCHEMA_VERSION:
         raise MigrationRequiredError(
             "检测到旧版 SQLite 结构；请停止 web 和 worker 后运行 "
@@ -905,8 +1003,10 @@ def _repair_brief_missing_event_references(conn: sqlite3.Connection) -> int:
     return missing_count
 
 
-def apply_v9_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
-    """将已通过预检的旧结构重建为精简后的 v9。
+def _apply_legacy_rebuild_to_v10(
+    conn: sqlite3.Connection, report: MigrationReport | None = None
+) -> MigrationReport:
+    """将 v8 及更早的旧结构重建为精简后的 v10。
 
     调用方必须在停掉 web/worker 后执行。这里使用单个显式事务；任何校验
     或复制失败都会回滚，不会留下半完成的表结构。
@@ -935,7 +1035,7 @@ def apply_v9_migration(conn: sqlite3.Connection, report: MigrationReport | None 
                 )
 
         # 旧的命名索引在遗留表真正删除前仍占用名称，先只建表；旧表删除
-        # 后再创建 v9 索引，避免发生同名索引冲突。
+        # 后再创建 v10 索引，避免发生同名索引冲突。
         _create_target_schema(conn, include_indexes=False)
         _copy_columns(
             conn,
@@ -1021,13 +1121,62 @@ def apply_v9_migration(conn: sqlite3.Connection, report: MigrationReport | None 
     return verified
 
 
-def apply_v8_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
-    """兼容旧导入名；当前维护命令会执行目标 v9 迁移。"""
+def _apply_v9_to_v10_additive(
+    conn: sqlite3.Connection, report: MigrationReport
+) -> MigrationReport:
+    """在完整 v9 数据库上原子追加周话题表，不重建已有业务数据。"""
 
-    return apply_v9_migration(conn, report)
+    if report.current_version != 9 or report.issues:
+        raise MigrationPreflightError("v9 → v10 预检未通过：" + "；".join(report.issues))
+
+    try:
+        conn.execute("BEGIN EXCLUSIVE")
+        conn.execute(WEEKLY_TOPICS_TABLE)
+        conn.execute(WEEKLY_TOPIC_EVENTS_TABLE)
+        for statement in WEEKLY_TOPIC_INDEX_DEFINITIONS:
+            conn.execute(statement)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    verified = inspect_migration(conn)
+    if not verified.is_current or not verified.can_apply:
+        raise MigrationPreflightError("迁移后校验失败：" + "；".join(verified.issues))
+    return verified
+
+
+def apply_v10_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """将已通过预检的数据库安全迁移到 v10。"""
+
+    report = report or inspect_migration(conn)
+    if not report.can_apply:
+        raise MigrationPreflightError("预检未通过：" + "；".join(report.issues))
+    if report.is_current:
+        return report
+    if report.is_empty:
+        _create_target_schema(conn)
+        conn.commit()
+        return inspect_migration(conn)
+    if report.current_version == 9:
+        return _apply_v9_to_v10_additive(conn, report)
+    return _apply_legacy_rebuild_to_v10(conn, report)
+
+
+def apply_v9_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """兼容旧导入名；当前维护命令会执行目标 v10 迁移。"""
+
+    return apply_v10_migration(conn, report)
+
+
+def apply_v8_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
+    """兼容旧导入名；当前维护命令会执行目标 v10 迁移。"""
+
+    return apply_v10_migration(conn, report)
 
 
 def apply_v7_migration(conn: sqlite3.Connection, report: MigrationReport | None = None) -> MigrationReport:
-    """兼容更早的导入名；当前维护命令会执行目标 v9 迁移。"""
+    """兼容更早的导入名；当前维护命令会执行目标 v10 迁移。"""
 
-    return apply_v9_migration(conn, report)
+    return apply_v10_migration(conn, report)

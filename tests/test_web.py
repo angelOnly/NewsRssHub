@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -28,6 +29,9 @@ def build_settings(root: Path) -> Settings:
     skill = root / ".agents" / "skills" / "curate-personal-news"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("# policy\n", encoding="utf-8")
+    topic_skill = root / ".agents" / "skills" / "weekly-hot-topics"
+    topic_skill.mkdir(parents=True)
+    (topic_skill / "SKILL.md").write_text("# weekly topic policy\n", encoding="utf-8")
     return Settings(
         root_dir=root,
         source_dir=source_dir,
@@ -83,24 +87,84 @@ class WebTests(unittest.TestCase):
             finally:
                 delattr(app.state, "services")
 
-    def test_mobile_navigation_and_compact_brief_markup_are_present(self) -> None:
-        navigation = templates.get_template("base.html").render(request=object(), active_path="/briefs")
-        brief_page = templates.get_template("briefs.html").render(
+    def test_mobile_navigation_and_weekly_topic_markup_are_present(self) -> None:
+        navigation = templates.get_template("base.html").render(request=object(), active_path="/weekly-topics")
+        weekly_page = templates.get_template("weekly_topics.html").render(
             request=object(),
-            active_path="/briefs",
-            briefs=[
+            active_path="/weekly-topics",
+            week_start=datetime(2026, 8, 3).date(),
+            topic_skill_status=SimpleNamespace(available=True, message=""),
+            topics=[
                 {
-                    "brief_date": "2026-08-04",
-                    "title": "2026年08月04日 每日情报",
-                    "intro": "过去 24 小时收录重要更新。",
+                    "id": 42,
+                    "display_name": "MiniMax-M3 发布与评测",
+                    "content_count": 8,
+                    "event_count": 3,
+                    "source_count": 4,
+                    "latest_at": "2026-08-05T12:00:00+00:00",
+                    "events": [
+                        {
+                            "id": 11,
+                            "title": "MiniMax-M3 发布",
+                            "content_count": 4,
+                            "editorial_tier": "important",
+                        }
+                    ],
                 }
             ],
         )
 
         self.assertIn('class="mobile-primary-nav"', navigation)
-        self.assertIn('href="/briefs" aria-current="page"', navigation)
+        self.assertIn('href="/weekly-topics" aria-current="page"', navigation)
+        self.assertNotIn('href="/briefs"', navigation)
         self.assertNotIn('class="mobile-menu"', navigation)
-        self.assertIn('class="brief-title-mobile">每日情报</span>', brief_page)
+        self.assertIn('data-topic-id="42"', weekly_page)
+        self.assertIn('id="topic-42"', weekly_page)
+        self.assertIn("MiniMax-M3 发布与评测", weekly_page)
+        self.assertIn("8<small>条内容</small>", weekly_page)
+
+    def test_dashboard_shows_weekly_topic_strip_above_time_filters(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            app.state.services = services
+            topic = {
+                "id": 42,
+                "display_name": "MiniMax-M3 发布与评测",
+                "content_count": 8,
+                "event_count": 3,
+                "source_count": 4,
+            }
+            try:
+                with patch.object(
+                    services.repository, "list_weekly_topics", return_value=[topic]
+                ) as topic_query:
+                    with TestClient(app) as client:
+                        response = client.get("/?tier=must_read&period=24h")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(topic_query.call_args.kwargs["limit"], 5)
+                self.assertIn('class="dashboard-topic-strip"', response.text)
+                self.assertIn('href="/weekly-topics#topic-42"', response.text)
+                self.assertIn('data-topic-id="42"', response.text)
+                self.assertIn("MiniMax-M3 发布与评测", response.text)
+                self.assertIn("本周热点", response.text)
+            finally:
+                delattr(app.state, "services")
+
+    def test_weekly_topics_route_renders_the_current_week_empty_state(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    response = client.get("/weekly-topics")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("本周热点", response.text)
+                self.assertIn("本周暂无热点话题", response.text)
+                self.assertNotIn("本周话题暂未更新", response.text)
+            finally:
+                delattr(app.state, "services")
 
     def test_single_source_add_shows_a_clear_result_and_prevents_repeat_submit(self) -> None:
         with TemporaryDirectory() as directory:

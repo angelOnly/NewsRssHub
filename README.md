@@ -9,6 +9,7 @@
 - 来源可在网页中添加、测试、启停、编辑和归档；
 - 来源管理可导出全部来源，并会每 3 天自动保存一份可下载快照；导出和快照均可直接回传到“批量添加”恢复来源；
 - 同一事件的多条内容会合并，避免信息流重复轰炸。
+- “本周热点”只扫描本周周一至今的可见事件，以真实内容条数排序，并同时展示独立事件数和来源数；系统隐藏及用户隐藏内容不参与话题归并。
 - 所有启用来源共用一套抓取策略；首次、新增、重新启用和策略变更都会在 1–5 分钟内随机错峰，单批请求之间再等待 2–5 秒。
 - 资讯详情可预览已验证的图片、直链视频和受信任平台嵌入；收藏可在来源暂停或归档后继续阅读。
 - 来源保存名称、账号简介、平台、地址、官方标记和启用状态；历史的单来源抓取间隔仅为旧数据兼容保留，不再参与调度。
@@ -30,13 +31,13 @@
 
 ### SQLite 结构升级
 
-当前数据库结构为 v9。v8 升级到 v9 仅新增 `sources.description` 且有默认空值，Web 服务启动时会在单个 SQLite 事务中自动完成；常规 Git Stack 或 `docker compose up -d --build` 部署不需要单独构建或运行迁移镜像。
+当前数据库结构为 v10。v9 → v10 会新增周话题及其事件关系表，不修改既有 `items`、`events` 或日报数据；但为了避免 Web 与 Worker 并发改表，仍必须先停止服务，再使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check` 和 `--apply`。
 
-更早的历史结构仍不会在运行服务中重建。只有部署前遗留在 v7 或更早版本的数据库，才需要停掉服务后使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check` 和 `--apply`。维护命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理与回滚步骤见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
+更早的历史结构同样不会在运行服务中重建。维护命令会先用 SQLite backup API 在持久化数据目录创建备份，再进行单事务迁移和完整性校验；不要手工复制正在 WAL 模式运行的数据库文件。详细原理、Portainer 步骤与回滚方式见 [docs/SQLITE_SCHEMA_AND_MIGRATION.md](docs/SQLITE_SCHEMA_AND_MIGRATION.md)。
 
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 `auth_token` 值或完整 Cookie 片段。系统会先经 RSSHub 验证，成功后才加密保存并同步运行时文件。
 
-Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → Skill 筛选 → 正文译文 → 每日简报与过期内容清理。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 会一并复制到镜像，缺失时系统会明确显示筛选不可用，而不会退回旧关键词评分。
+Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → 事件筛选 → 正文译文 → 本周话题归并与过期内容清理。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 与 `.agents/skills/weekly-hot-topics/SKILL.md` 会一并复制到镜像；话题 Skill 缺失或模型暂不可用时，系统保留上一份成功的本周话题结果，不退回关键词统计。
 
 ## iPhone 手机通知
 
@@ -75,15 +76,15 @@ uvicorn app.web:app --reload
 
 Worker 首次运行会创建一份来源快照，之后每 3 天最多创建一份。快照保存到容器的 `/app/data/source_backups/`，因 Compose 已挂载数据目录，服务器实际位置为 `/home/jzb/docker/rss-hub/data/source_backups/`。系统仅保留最新 5 份；Cookie、API Key、抓取状态、错误记录和连接器缓存都不会写入这些 YAML 文件。
 
-本次 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)；此前 SQLite v7、来源备份恢复和筛选合并规则调整的背景见 [2026-08-04 迭代记录](docs/ITERATION_2026-08-04_SQLITE_AND_SOURCE_BACKUP.md)。
+本次 SQLite v10 与本周话题实现说明见 [本周热点迭代记录](docs/ITERATION_2026-08-05_WEEKLY_TOPICS.md)；此前 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)。
 
 ## 内容处理顺序
 
 ```text
-原始帖子 → 中文标题、摘要、重点 → 项目 Skill（合并 / 去重 / 四层判断） → 必看/重要正文中文译文 → SQLite → 四层 Tab
+原始帖子 → 中文标题、摘要、重点 → 事件 Skill（合并 / 去重 / 四层判断） → 必看/重要正文中文译文 → 本周话题 Skill（仅可见事件） → SQLite → 四层 Tab / 本周热点
 ```
 
-筛选模型只收到用户自然语言画像及每条帖子的 `id`、原始标题、中文摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。正文翻译是详情页展示缓存：后台只预翻译“必看”和“重要更新”的主来源，其他来源可在详情页按需生成。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。
+事件筛选模型只收到用户自然语言画像及每条帖子的 `id`、原始标题、中文摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。本周话题模型只收到本周可见事件的标题、事实摘要、内容数、来源数与既有话题 ID，不能修改事件或自行编造热度数字。正文翻译是详情页展示缓存：后台只预翻译“必看”和“重要更新”的主来源，其他来源可在详情页按需生成。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。
 
 ## 安全提示
 

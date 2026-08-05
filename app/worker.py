@@ -26,7 +26,7 @@ def run() -> int:
         "--role",
         choices=("collector", "processor", "all"),
         default="all",
-        help="collector 仅抓取；processor 仅摘要、筛选、翻译和生成简报",
+        help="collector 仅抓取；processor 仅摘要、筛选、翻译和更新本周话题",
     )
     parser.add_argument("--interval", type=int, default=30, help="两轮检查之间的秒数")
     args = parser.parse_args()

@@ -20,32 +20,39 @@ class SkillStatus:
 
 
 class SkillLoader:
-    def __init__(self, settings: Settings) -> None:
-        self.path = settings.root_dir / ".agents" / "skills" / "curate-personal-news" / "SKILL.md"
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        skill_name: str = "curate-personal-news",
+        display_name: str = "项目筛选",
+    ) -> None:
+        self.path = settings.root_dir / ".agents" / "skills" / skill_name / "SKILL.md"
+        self.display_name = display_name
         self._cached_mtime_ns: int | None = None
         self._cached_content: str | None = None
 
     def status(self) -> SkillStatus:
         if not self.path.exists():
-            return SkillStatus(False, self.path, "项目筛选 Skill 缺失，资讯不会进入语义筛选。")
+            return SkillStatus(False, self.path, f"{self.display_name} Skill 缺失，无法安全完成语义判断。")
         try:
             self.load()
         except SkillUnavailableError as exc:
             return SkillStatus(False, self.path, str(exc))
-        return SkillStatus(True, self.path, "项目筛选 Skill 已加载。")
+        return SkillStatus(True, self.path, f"{self.display_name} Skill 已加载。")
 
     def load(self) -> str:
         if not self.path.exists():
-            raise SkillUnavailableError("项目筛选 Skill 缺失，无法安全执行资讯筛选。")
+            raise SkillUnavailableError(f"{self.display_name} Skill 缺失，无法安全执行语义判断。")
         try:
             mtime_ns = self.path.stat().st_mtime_ns
             if self._cached_content is not None and self._cached_mtime_ns == mtime_ns:
                 return self._cached_content
             content = self.path.read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise SkillUnavailableError("项目筛选 Skill 无法读取。") from exc
+            raise SkillUnavailableError(f"{self.display_name} Skill 无法读取。") from exc
         if not content:
-            raise SkillUnavailableError("项目筛选 Skill 为空，无法安全执行资讯筛选。")
+            raise SkillUnavailableError(f"{self.display_name} Skill 为空，无法安全执行语义判断。")
         self._cached_mtime_ns = mtime_ns
         self._cached_content = content
         return content

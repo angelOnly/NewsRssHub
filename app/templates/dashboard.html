@@ -26,6 +26,28 @@
   {% endfor %}
 </nav>
 
+{% if weekly_topics %}
+<section class="dashboard-topic-strip" aria-label="本周热点话题">
+  <header class="dashboard-topic-strip-head">
+    <div class="dashboard-topic-title">
+      <span class="dashboard-topic-icon">{{ icon('trending') }}</span><strong>本周热点</strong><small>按内容条数</small>
+    </div>
+    <a class="dashboard-topic-all" href="/weekly-topics">查看全部</a>
+  </header>
+  <div class="dashboard-topic-list">
+    {% for topic in weekly_topics %}
+    <a class="dashboard-topic-chip" href="/weekly-topics#topic-{{ topic.id }}" data-topic-id="{{ topic.id }}" aria-label="查看话题 {{ topic.display_name }}">
+      <span class="dashboard-topic-chip-copy">
+        <strong>{{ topic.display_name }}</strong>
+        <small>{{ topic.event_count }} 个事件 · {{ topic.source_count }} 个来源</small>
+      </span>
+      <span class="dashboard-topic-chip-count"><b>{{ topic.content_count }}</b><small>条</small></span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <div class="filter-bar dashboard-filter-bar">
   <div class="filter-group" aria-label="时间范围">
     {% for value, label in [('24h', '24 小时'), ('7d', '7 天'), ('30d', '30 天'), ('all', '全部')] %}

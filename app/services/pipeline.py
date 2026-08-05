@@ -5,7 +5,6 @@ from dataclasses import asdict
 
 from app.config import Settings
 from app.plugins.base import PluginRegistry
-from app.services.briefs import BriefService
 from app.services.collector import Collector
 from app.services.connections import ConnectionCatalog
 from app.services.curator import CurationService
@@ -16,6 +15,7 @@ from app.services.sources import SourceService
 from app.services.summarizer import SummaryService
 from app.services.translator import TranslationService
 from app.services.web_push import WebPushService
+from app.services.weekly_topics import WeeklyTopicService
 from app.storage.repository import Repository
 
 
@@ -48,7 +48,7 @@ class IntelligencePipeline:
             repository, settings, self.llm_connections, self.skill_loader
         )
         self.translator = TranslationService(repository, settings, self.llm_connections)
-        self.briefs = BriefService(repository, settings)
+        self.weekly_topics = WeeklyTopicService(repository, settings, self.llm_connections)
         self.web_push = web_push or WebPushService(repository, settings)
 
     def bootstrap(self) -> int:
@@ -77,7 +77,7 @@ class IntelligencePipeline:
         # 只在新闻已经完成摘要和筛选、首页可见后才进入通知队列。
         push_queued = self.web_push.record_ready_items(curated.completed)
         translated = self.translator.translate_visible_primary_items(limit=12)
-        brief = self.briefs.generate_today()
+        weekly_topics = self.weekly_topics.refresh_current_week()
         cleanup = self.repository.purge_expired_content()
         # 处理完成后再提醒，用户点开首页时能直接看到本轮已落库的内容。
         push_delivery = self.web_push.deliver_pending()
@@ -85,7 +85,7 @@ class IntelligencePipeline:
             "summary": asdict(summarized),
             "curation": asdict(curated),
             "translation": asdict(translated),
-            "brief": brief,
+            "weekly_topics": asdict(weekly_topics),
             "cleanup": cleanup,
             "push_queued": push_queued,
             "web_push": asdict(push_delivery),

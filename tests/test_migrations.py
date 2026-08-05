@@ -16,6 +16,7 @@ from app.storage.migrations import (
     MigrationPreflightError,
     MigrationRequiredError,
     apply_v7_migration,
+    apply_v10_migration,
     initialize_runtime_schema,
     inspect_migration,
 )
@@ -301,24 +302,27 @@ class MigrationTests(unittest.TestCase):
             finally:
                 check.close()
 
-    def test_current_v9_database_reports_dangling_brief_references_without_rewriting_data(self) -> None:
+    def test_v9_database_with_dangling_brief_references_is_not_mutated(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "current.db"
             create_v6_database(path)
             connection = sqlite3.connect(path)
             try:
                 apply_v7_migration(connection)
+                connection.execute("DROP TABLE weekly_topic_events")
+                connection.execute("DROP TABLE weekly_topics")
+                connection.execute("PRAGMA user_version = 9")
                 connection.execute("UPDATE briefs SET event_ids_json = '[999]'")
                 connection.commit()
                 report = inspect_migration(connection)
                 self.assertFalse(report.is_current)
                 self.assertFalse(report.can_apply)
                 self.assertEqual(report.brief_missing_event_references, 1)
-                self.assertTrue(any("当前 v9 数据库不自动修改数据" in issue for issue in report.issues))
+                self.assertTrue(any("请先修复当前 v9 数据后再升级" in issue for issue in report.issues))
             finally:
                 connection.close()
 
-    def test_runtime_safely_adds_description_to_a_complete_v8_database(self) -> None:
+    def test_runtime_refuses_v8_database_without_changing_it(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "v8.db"
             create_v6_database(path)
@@ -329,14 +333,48 @@ class MigrationTests(unittest.TestCase):
                 connection.execute("PRAGMA user_version = 8")
                 connection.commit()
 
-                initialize_runtime_schema(connection)
+                with self.assertRaises(MigrationRequiredError):
+                    initialize_runtime_schema(connection)
 
-                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
-                self.assertIn(
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 8)
+                self.assertNotIn(
                     "description",
                     {row[1] for row in connection.execute("PRAGMA table_info(sources)")},
                 )
-                self.assertEqual(connection.execute("SELECT description FROM sources WHERE id = 1").fetchone()[0], "")
+            finally:
+                connection.close()
+
+    def test_complete_v9_database_adds_weekly_topic_tables_without_rebuilding_content(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "v9.db"
+            create_v6_database(path)
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            try:
+                apply_v7_migration(connection)
+                connection.execute("DROP TABLE weekly_topic_events")
+                connection.execute("DROP TABLE weekly_topics")
+                connection.execute("PRAGMA user_version = 9")
+                connection.commit()
+
+                report = inspect_migration(connection)
+                self.assertTrue(report.can_apply)
+                self.assertEqual(report.current_version, 9)
+                verified = apply_v10_migration(connection, report)
+                self.assertTrue(verified.is_current)
+                self.assertEqual(
+                    connection.execute("SELECT title FROM events WHERE id = 1").fetchone()[0], "旧事件"
+                )
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM items").fetchone()[0], 1)
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
+                tables = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                    )
+                }
+                self.assertIn("weekly_topics", tables)
+                self.assertIn("weekly_topic_events", tables)
             finally:
                 connection.close()
 

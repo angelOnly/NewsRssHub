@@ -1,10 +1,10 @@
 # NewsRSSHub 产品需求与目标架构设计
 
-> 2026-08-04 更新：当前实现的数据库精简目标、七表模型、线上预检/备份/显式迁移流程以 [SQLite 结构精简与安全迁移说明](SQLITE_SCHEMA_AND_MIGRATION.md) 为准；本文中与旧 `event_items`、`fetch_runs`、`curation_runs` 或自动重建迁移冲突的描述均由该说明覆盖。
+> 2026-08-05 覆盖说明：当前实现以 SQLite v10 和 [本周热点迭代记录](ITERATION_2026-08-05_WEEKLY_TOPICS.md) 为准。本周热点替代每日简报入口：它仅归并本周可见事件，话题 ID 稳定、展示名可更新，按真实内容条数统计热度。本文中与旧日报生成、`BriefService`、v8/v9 自动迁移或旧表数量冲突的描述均视为历史设计。
 
-> 文档版本：v1.2
+> 文档版本：v1.3
 > 文档状态：已进入实现与验证  
-> 更新时间：2026-08-04
+> 更新时间：2026-08-05
 > 适用范围：单用户、私有部署的 NewsRSSHub
 
 本文档是本阶段实现的需求与架构基线。它同时说明当前系统已经具备什么、哪些旧机制需要删除、目标系统应如何运行。核心代码已按本文档进入实现与自动化验证；部署环境仍需在目标 Docker 主机完成最终验收。
@@ -60,7 +60,7 @@ flowchart LR
     D --> E["合并、去重、四层判断"]
     E --> T["必看/重要主条目正文中文译文"]
     T --> F["SQLite 保存事件结果"]
-    F --> G["Web Tab 与每日简报"]
+    F --> G["Web Tab 与本周热点"]
 ```
 
 ---
@@ -497,17 +497,18 @@ Web 支持配置和测试：
 - Web 保存的配置加密写入 SQLite，不需要重启 Worker。
 - 如果 SQLite 没有运行时配置，可使用 `config.yml` 作为回退。
 
-### FR-10 每日简报（P1）
+### FR-10 本周热点（P1）
 
-每日简报从已完成四层判断的事件中生成：
+本周热点是事件之上的短期阅读组织层，不是永久分类，也不改变既有事件归并结果：
 
-- 优先使用必看。
-- 其次使用重要更新。
-- 默认不加入资讯速览。
-- 不加入隐藏内容。
-- 同一事件只出现一次。
+- 周窗口固定为配置时区内本周周一 00:00 至当前时刻，不使用滚动七天。
+- 只接收筛选完成且属于 `must_read`、`important`、`brief` 的事件；模型隐藏、用户“不感兴趣”、停用或归档来源均不参与归并和统计。
+- 每个本周事件恰好归属一个话题。`weekly_topics.id` 是稳定身份，`display_name` 可以随新增发布、评测或对比信息更新。
+- 热度按窗口内真实内容条数排序，并同时展示独立事件数、来源数和最近更新时间；它表示订阅源中的报道覆盖量，不伪装成全网热搜指数。
+- 话题归并 Skill 只收到事件标题、摘要、内容数、来源数、更新时间及已有话题状态，不接收原始正文；名称应使用“具体对象 + 当前叙事”，不能只用公司名或宽泛领域。
+- 模型、Skill 或输出校验失败时，保留上一份成功快照，等待后续 Worker 轮次重试。
 
-简报不再按旧分数选择事件。
+历史日报记录和路由暂时保留供回看，但 Worker 不再生成新的日报。
 
 ### FR-11 状态与故障提示（P1）
 
@@ -537,7 +538,7 @@ Web 支持配置和测试：
 ### 7.1 主导航
 
 - 最新热点。
-- 每日简报。
+- 本周热点。
 - 来源管理。
 - 设置与连接。
 
@@ -589,7 +590,7 @@ flowchart TB
         SUM["SummaryService"]
         CUR["CurationService"]
         TRANS["TranslationService"]
-        BRIEF["BriefService"]
+        TOPIC["WeeklyTopicService"]
         CONN["Connection Services"]
     end
 
@@ -603,6 +604,7 @@ flowchart TB
     subgraph POLICY["项目策略"]
         PROFILE["user_profile.yml"]
         SKILL["curate-personal-news/SKILL.md"]
+        TOPIC_SKILL["weekly-hot-topics/SKILL.md"]
     end
 
     subgraph DATA["数据层"]
@@ -615,17 +617,18 @@ flowchart TB
     PIPE --> SUM
     PIPE --> CUR
     PIPE --> TRANS
-    PIPE --> BRIEF
+    PIPE --> TOPIC
     COL --> SOURCE
     CUR --> DECISION
     DECISION --> TIER
     CUR --> PROFILE
     CUR --> SKILL
+    TOPIC --> TOPIC_SKILL
     COL --> REPO
     SUM --> REPO
     CUR --> REPO
     TRANS --> REPO
-    BRIEF --> REPO
+    TOPIC --> REPO
     WEB --> REPO
     REPO --> DB
     CONN --> DB
@@ -642,6 +645,8 @@ flowchart TB
 | CurationService | 分批、加载画像和 Skill、调用模型、校验结果 | 页面展示 |
 | TranslationService | 正文中文译文缓存、必看/重要预翻译、详情按需翻译 | 筛选、合并和层级 |
 | 项目 Skill | 合并、去重、四层判断的方法 | 输入组装、JSON、数据库 |
+| WeeklyTopicService | 按本周窗口组织事件、调用话题 Skill、原子更新话题关系 | 改变事件归并、层级或用户偏好 |
+| 本周话题 Skill | 事件到话题的归并、稳定身份复用、可变展示名 | 原始内容阅读、事件合并、热度计算 |
 | EventWriter | 将校验后的分组安全写入事件表 | 自行推测模型意图 |
 | Repository | 查询和事务 | 业务判断 |
 | Web | Tab、分页、表单和展示 | 重新判断层级 |
@@ -653,13 +658,15 @@ flowchart TB
 app/
 ├── domain/
 │   ├── models.py
-│   └── curation.py
+│   ├── curation.py
+│   └── weekly_topics.py
 ├── plugins/
 ├── services/
 │   ├── collector.py
 │   ├── summarizer.py
 │   ├── curator.py
 │   ├── translator.py
+│   ├── weekly_topics.py
 │   ├── skill_loader.py
 │   ├── event_writer.py
 │   └── pipeline.py
@@ -672,7 +679,9 @@ app/
 
 .agents/
 └── skills/
-    └── curate-personal-news/
+    ├── curate-personal-news/
+    │   └── SKILL.md
+    └── weekly-hot-topics/
         └── SKILL.md
 ```
 
@@ -701,8 +710,8 @@ flowchart TD
     CHECK -- "失败" --> CUR_RETRY["本批重试或保持待筛选"]
     CHECK -- "成功" --> APPLY["事务应用合并与层级"]
     APPLY --> TRANSLATE["预翻译必看/重要主条目正文"]
-    TRANSLATE --> BRIEF["更新每日简报"]
-    BRIEF --> DONE["本轮完成"]
+    TRANSLATE --> TOPIC["刷新本周话题快照"]
+    TOPIC --> DONE["本轮完成"]
 ```
 
 ### 9.2 摘要与筛选时序
@@ -831,7 +840,9 @@ flowchart LR
     S["sources：来源与当前健康状态"] --> I["items：原文、摘要、高亮、翻译"]
     I -->|"event_id：一条内容至多归属一个事件"| E["events：合并后的阅读主题"]
     E --> F["feedback：已读、不感兴趣、收藏"]
-    B["briefs：日报的有序事件列表"] -. "引用事件 ID" .-> E
+    T["weekly_topics：本周话题 ID 与展示名"] --> R["weekly_topic_events：本周事件归属"]
+    R -. "关联事件" .-> E
+    B["briefs：历史日报的有序事件列表"] -. "引用事件 ID" .-> E
     C["connector_credentials：加密 Cookie / API Key"] -. "平台共享凭证" .-> S
 ```
 
@@ -867,7 +878,13 @@ flowchart LR
 
 事件的来源数量不再缓存为字段，而是从 `items.event_id` 实时统计，避免事件合并后显示不一致。
 
-### 11.4 用户隐藏与模型隐藏
+### 11.4 本周话题关系
+
+`weekly_topics` 用 `(week_start, id)` 表示某一周内的话题身份，`display_name` 仅用于展示。`weekly_topic_events` 以 `(week_start, event_id)` 为主键，因此同一事件在同一周只会属于一个话题。
+
+话题表不保存热度缓存。页面查询时只计算周窗口内、来源仍启用且未归档、且没有模型或用户隐藏的内容；这样用户刚隐藏一条事件或来源后，不必等待下一次模型调用，统计也不会继续包含它。
+
+### 11.5 用户隐藏与模型隐藏
 
 两种隐藏需要区分：
 
@@ -876,7 +893,7 @@ flowchart LR
 
 “已隐藏”Tab 查询两者的并集，并标明来源。恢复用户隐藏只撤销反馈，不应擅自修改模型层级。
 
-### 11.5 待删除的旧字段和代码
+### 11.6 待删除的旧字段和代码
 
 目标迁移完成后删除或停止使用：
 
@@ -1059,19 +1076,20 @@ Web 端口：
 
 - `web`：FastAPI 页面、配置和健康检查。
 - `collector`：循环检查到期来源、创建来源快照、抓取并重新排期。
-- `processor`：独立执行中文标题/摘要/重点、筛选、正文翻译、简报和过期内容清理。
+- `processor`：独立执行中文标题/摘要/重点、筛选、正文翻译、本周话题刷新和过期内容清理。
 - `web`、`collector` 和 `processor` 共享 `/app/data`。
 - SQLite 使用 WAL 和 busy timeout，适配一个 Web 加两个职责分离 Worker 的单用户负载。
 
 ### 15.3 Skill 打包
 
-当前 Dockerfile 只复制 `app`、`sources` 和 `config.yml`，不会复制项目 Skill。目标 Dockerfile 必须增加：
+当前 Dockerfile 已复制整个 `.agents` 目录，因此事件筛选与本周话题两个项目 Skill 都会进入镜像。若未来缩小镜像复制范围，至少必须保留：
 
 ```dockerfile
 COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
+COPY .agents/skills/weekly-hot-topics ./.agents/skills/weekly-hot-topics
 ```
 
-启动时检查 Skill 是否存在。缺失时 `/health` 应报告筛选策略不可用。
+启动时检查事件筛选 Skill 是否存在；本周热点页也会明确提示话题 Skill 缺失，不会改写已有话题快照。
 
 ### 15.4 数据持久化
 
@@ -1092,29 +1110,17 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 
 ## 16. 数据库迁移策略
 
-当前数据库初始化没有版本化迁移。目标方案使用 `PRAGMA user_version` 或 `schema_migrations`。
+当前使用 `PRAGMA user_version` 管理结构版本，目标为 v10。普通 Web 和 Worker 只能初始化空库或打开完整 v10 库；发现旧版本时会拒绝启动，绝不在运行时改表。
 
-建议步骤：
+远程宿主机已有 SQLite 时，必须执行以下流程：
 
-1. 启动前备份 `data/rss_news.db`。
-2. 增加迁移框架。
-3. 为 `items` 增加摘要状态字段。
-4. 为 `events` 增加四层判断字段。
-5. 来源表单、列表、领域模型和 Repository 停止读写 `sources.category`、`sources.priority`。
-6. 清理 `feeds.yml` 中的 `theme/category/priority`，导入器不再生成这些值。
-7. 通过 SQLite 表重建删除 `sources.category`、`sources.priority`，保留其余来源数据和主键。
-8. 保留内容旧评分字段但停止新写入。
-9. 完成最近 24 小时数据回填并切换 Web。
-10. 验证稳定后回填 7 天和 30 天。
-11. 最后通过 SQLite 表重建删除内容旧评分字段。
+1. 停止 `web` 和 `worker`，防止并发写入或改表。
+2. 使用同一份 Compose 配置执行 `docker compose --profile maintenance run --rm migrate --check`，只读预检完整性、外键、版本和结构。
+3. 确认预检通过后执行 `docker compose --profile maintenance run --rm migrate --apply`。命令会先用 SQLite backup API 创建备份，再在单个事务内升级。
+4. v9 → v10 只新增 `weekly_topics`、`weekly_topic_events` 及索引；v8 及更早结构走已验证的重建路径直接到 v10。
+5. 迁移后再启动服务，检查 `/health`、来源/内容/事件行数和本周热点页面。
 
-迁移期间：
-
-- 未筛选旧事件标记为 `pending`。
-- 不使用旧分数自动映射四层。
-- 旧来源的主题和优先级值直接丢弃，不迁移到其他字段，也不写入用户画像。
-- 模型不可用时不强行完成迁移。
-- 每个迁移步骤可重复执行且不会重复写数据。
+迁移失败会回滚当前事务，已创建的备份保留供人工恢复。详细命令、校验项和回滚方式以 [SQLite 结构精简与安全迁移说明](SQLITE_SCHEMA_AND_MIGRATION.md) 为准。
 
 ---
 
@@ -1154,6 +1160,12 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 没有可用模型时，非中文正文保持待翻译；中文原文可直接作为中文正文缓存。
 - 原文更新后清空译文缓存，确保不会展示旧译文。
 
+### 17.6 本周话题归并失败
+
+- 候选事件没有变化时复用上次成功快照，避免无谓调用模型。
+- 模型不可用、Skill 缺失、JSON 无法通过契约校验或事务写入失败时，不改写已有话题关系。
+- 本周没有可见候选事件时，才原子清空该周旧快照，避免已隐藏或已停用来源残留在热点页。
+
 ---
 
 ## 18. 性能与 Token 控制
@@ -1167,7 +1179,7 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 只处理新条目和发生变化的条目。
 - 全局合并只接收批内事件结果，不重新接收全部原文。
 - 首页使用数据库分页，每次最多 50 条。
-- 日报复用已筛选事件，不再次分析全部帖子。
+- 本周话题复用已筛选事件，只发送精简事件事实；候选未变化时不再次调用模型。
 
 可监控的运行指标：
 
@@ -1255,7 +1267,7 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 3. 同一事件的多条消息只显示一次。
 4. 首页具备必看、重要更新、资讯速览和已隐藏 Tab。
 5. 删除“全部主题”及主题筛选。
-6. 首页、详情和简报不显示任何相关性数字分数。
+6. 首页、详情和本周热点不显示任何相关性数字分数。
 7. 默认进入必看，每页最多 50 条。
 8. 普通 LoRA 不会因“ComfyUI”关键词进入必看。
 9. 顶级模型正式可用、模型下线和会影响 Codex 使用的变化能够进入必看。
@@ -1309,9 +1321,10 @@ COPY .agents/skills/curate-personal-news ./.agents/skills/curate-personal-news
 - 增加已隐藏和恢复。
 - 更新详情页与分页。
 
-### 阶段 5：简报与状态
+### 阶段 5：本周热点与状态
 
-- 简报切换到必看和重要更新。
+- 新增稳定话题 ID、可变展示名与本周事件关系。
+- 本周热点按可见内容条数、事件数和来源数展示。
 - 增加待摘要、待筛选和 Skill 状态。
 - 更新健康检查。
 
@@ -1344,7 +1357,7 @@ app/services/curator.py                 # 新增
 app/services/collector.py
 app/services/events.py
 app/services/pipeline.py
-app/services/briefs.py
+app/services/weekly_topics.py
 app/services/sources.py
 app/storage/database.py
 app/storage/migrations.py               # 新增
@@ -1352,7 +1365,7 @@ app/storage/repository.py
 app/web.py
 app/templates/dashboard.html
 app/templates/event_detail.html
-app/templates/brief_detail.html
+app/templates/weekly_topics.html
 app/templates/source_form.html
 app/templates/sources.html
 app/static/app.css

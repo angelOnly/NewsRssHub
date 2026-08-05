@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}本周热点 · NewsRSSHub{% endblock %}
+{% block content %}
+<header class="page-head compact weekly-topic-head">
+  <div>
+    <p class="eyebrow">WEEKLY TOPICS</p>
+    <h1>本周热点</h1>
+    <p class="subhead">{{ week_start.strftime('%m 月 %d 日') }}起，按可见内容条数统计；已隐藏内容不参与。</p>
+  </div>
+</header>
+
+{% if not topic_skill_status.available %}
+<section class="credential-alert error" aria-label="本周话题状态">
+  <div><strong>本周话题暂未更新</strong><p>{{ topic_skill_status.message }}</p></div>
+</section>
+{% endif %}
+
+{% if topics %}
+<section class="weekly-topic-list" aria-label="本周热点话题">
+  {% for topic in topics %}
+  <article id="topic-{{ topic.id }}" class="weekly-topic-card" data-topic-id="{{ topic.id }}">
+    <header class="weekly-topic-card-head">
+      <div>
+        <span class="weekly-topic-kicker">本周话题</span>
+        <h2>{{ topic.display_name }}</h2>
+      </div>
+      <span class="weekly-topic-count">{{ topic.content_count }}<small>条内容</small></span>
+    </header>
+    <div class="weekly-topic-metrics" aria-label="话题统计">
+      <span>{{ topic.event_count }} 个事件</span><span>{{ topic.source_count }} 个来源</span>
+      {% if topic.latest_at %}<span>更新{{ topic.latest_at|compact_relative_time|replace(' ', '') }}</span>{% endif %}
+    </div>
+    <ul class="weekly-topic-events" aria-label="话题包含的事件">
+      {% for event in topic.events %}
+      <li>
+        <a href="/events/{{ event.id }}?tier={{ event.editorial_tier }}&period=7d" aria-label="查看 {{ event.title }}">
+          <span>{{ event.title }}</span><small>{{ event.content_count }} 条内容</small>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<div class="empty-state weekly-topic-empty">
+  <span class="empty-state-icon">{{ icon('trending') }}</span><h2>本周暂无热点话题</h2>
+  <p>后台完成摘要、事件筛选和话题归并后，这里会按内容条数展示本周可见热点。</p>
+</div>
+{% endif %}
+{% endblock %}

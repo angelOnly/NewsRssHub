@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FetchPolicy, FeedItem, SourceDraft
+from app.domain.weekly_topics import WeeklyTopicGroup
 from app.storage.database import Database
 
 
@@ -18,6 +19,18 @@ def utc_now() -> datetime:
 
 def iso_now() -> str:
     return utc_now().isoformat()
+
+
+def _utc_iso(value: datetime) -> str:
+    """将周窗口统一转换为数据库现有的 UTC ISO 时间格式。"""
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _week_start_key(value: date | str) -> str:
+    return value.isoformat() if isinstance(value, date) else str(value)
 
 
 def _decode_json(value: str | None, fallback: Any) -> Any:
@@ -1091,7 +1104,8 @@ class Repository:
                 ) AS visible_source_count
             FROM events e
             WHERE {where}
-            ORDER BY e.curation_order ASC, e.last_seen_at DESC, e.id DESC
+            -- 已读状态优先参与排序，确保分页时也总是先展示未读事件。
+            ORDER BY user_read ASC, e.curation_order ASC, e.last_seen_at DESC, e.id DESC
             LIMIT ? OFFSET ?
         """
         with self.database.read() as conn:
@@ -1301,7 +1315,226 @@ class Repository:
                 "DELETE FROM feedback WHERE event_id = ? AND action = 'not_interested'", (event_id,)
             )
 
-    # Briefs and dashboard ----------------------------------------------------
+    def list_weekly_topic_candidates(
+        self, *, start: datetime, end: datetime
+    ) -> list[dict[str, Any]]:
+        """返回本周可见事件的精简事实，不向话题 Skill 传递原始正文。"""
+
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        if end_at <= start_at:
+            raise ValueError("本周话题的结束时间必须晚于开始时间。")
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    e.id,
+                    e.title,
+                    e.summary,
+                    e.last_seen_at,
+                    COUNT(i.id) AS content_count,
+                    COUNT(DISTINCT i.source_id) AS source_count,
+                    MAX(COALESCE(i.published_at, i.fetched_at)) AS latest_at
+                FROM events e
+                JOIN items i ON i.event_id = e.id
+                JOIN sources s ON s.id = i.source_id
+                WHERE e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND NOT {_user_hidden_clause('e')}
+                  AND {_source_is_live_clause('s')}
+                  AND COALESCE(i.published_at, i.fetched_at) >= ?
+                  AND COALESCE(i.published_at, i.fetched_at) < ?
+                GROUP BY e.id
+                ORDER BY latest_at DESC, e.id DESC
+                """,
+                (start_at, end_at),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def list_weekly_topic_state(self, week_start: date | str) -> list[dict[str, Any]]:
+        """读取本周已有话题身份及其事件，用于稳定更新展示名称。"""
+
+        week_key = _week_start_key(week_start)
+        with self.database.read() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, week_start, display_name, created_at, updated_at
+                FROM weekly_topics
+                WHERE week_start = ?
+                ORDER BY id
+                """,
+                (week_key,),
+            ).fetchall()
+            links = conn.execute(
+                """
+                SELECT topic_id, event_id
+                FROM weekly_topic_events
+                WHERE week_start = ?
+                ORDER BY topic_id, event_id
+                """,
+                (week_key,),
+            ).fetchall()
+        topics = [_row_to_dict(row) for row in rows]
+        event_ids_by_topic = {int(topic["id"]): [] for topic in topics}
+        for link in links:
+            topic_id = int(link["topic_id"])
+            if topic_id in event_ids_by_topic:
+                event_ids_by_topic[topic_id].append(int(link["event_id"]))
+        for topic in topics:
+            topic["event_ids"] = event_ids_by_topic[int(topic["id"])]
+        return topics
+
+    def replace_weekly_topics(
+        self, *, week_start: date | str, groups: Sequence[WeeklyTopicGroup]
+    ) -> list[int]:
+        """原子更新某一周的话题关系，名称变化不会改变既有话题 ID。"""
+
+        week_key = _week_start_key(week_start)
+        now = iso_now()
+        with self.database.transaction() as conn:
+            existing_rows = conn.execute(
+                "SELECT id FROM weekly_topics WHERE week_start = ?", (week_key,)
+            ).fetchall()
+            existing_ids = {int(row["id"]) for row in existing_rows}
+            topic_ids_by_ref: dict[str, int] = {}
+
+            for group in groups:
+                if group.ref in topic_ids_by_ref:
+                    raise ValueError("同一个本周话题引用不能重复。")
+                if group.ref.startswith("existing:"):
+                    topic_id = int(group.ref.removeprefix("existing:"))
+                    if topic_id not in existing_ids:
+                        raise ValueError("筛选结果引用了不属于本周的既有话题。")
+                    conn.execute(
+                        """
+                        UPDATE weekly_topics
+                        SET display_name = ?, updated_at = ?
+                        WHERE id = ? AND week_start = ?
+                        """,
+                        (group.display_name, now, topic_id, week_key),
+                    )
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO weekly_topics (week_start, display_name, created_at, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (week_key, group.display_name, now, now),
+                    )
+                    topic_id = int(cursor.lastrowid)
+                topic_ids_by_ref[group.ref] = topic_id
+
+            conn.execute("DELETE FROM weekly_topic_events WHERE week_start = ?", (week_key,))
+            for group in groups:
+                topic_id = topic_ids_by_ref[group.ref]
+                conn.executemany(
+                    """
+                    INSERT INTO weekly_topic_events (week_start, topic_id, event_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    [(week_key, topic_id, event_id) for event_id in group.event_ids],
+                )
+
+            retained_ids = list(topic_ids_by_ref.values())
+            if retained_ids:
+                placeholders = ", ".join("?" for _ in retained_ids)
+                conn.execute(
+                    f"DELETE FROM weekly_topics WHERE week_start = ? AND id NOT IN ({placeholders})",
+                    (week_key, *retained_ids),
+                )
+            else:
+                conn.execute("DELETE FROM weekly_topics WHERE week_start = ?", (week_key,))
+        return list(topic_ids_by_ref.values())
+
+    def list_weekly_topics(
+        self, *, week_start: date | str, start: datetime, end: datetime, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """读取本周仍可见的话题，并基于真实条目实时计算热度。"""
+
+        week_key = _week_start_key(week_start)
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        bounded_limit = max(1, min(int(limit), 50))
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    t.id,
+                    t.week_start,
+                    t.display_name,
+                    t.created_at,
+                    t.updated_at,
+                    COUNT(i.id) AS content_count,
+                    COUNT(DISTINCT wte.event_id) AS event_count,
+                    COUNT(DISTINCT i.source_id) AS source_count,
+                    MAX(COALESCE(i.published_at, i.fetched_at)) AS latest_at
+                FROM weekly_topics t
+                JOIN weekly_topic_events wte
+                  ON wte.topic_id = t.id AND wte.week_start = t.week_start
+                JOIN events e ON e.id = wte.event_id
+                JOIN items i ON i.event_id = e.id
+                JOIN sources s ON s.id = i.source_id
+                WHERE t.week_start = ?
+                  AND e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND NOT {_user_hidden_clause('e')}
+                  AND {_source_is_live_clause('s')}
+                  AND COALESCE(i.published_at, i.fetched_at) >= ?
+                  AND COALESCE(i.published_at, i.fetched_at) < ?
+                GROUP BY t.id
+                HAVING COUNT(i.id) > 0
+                ORDER BY content_count DESC, event_count DESC, source_count DESC,
+                         latest_at DESC, t.id DESC
+                LIMIT ?
+                """,
+                (week_key, start_at, end_at, bounded_limit),
+            ).fetchall()
+        topics = [_row_to_dict(row) for row in rows]
+        for topic in topics:
+            topic["events"] = self.list_weekly_topic_events(
+                topic_id=int(topic["id"]), week_start=week_key, start=start, end=end
+            )
+        return topics
+
+    def list_weekly_topic_events(
+        self, *, topic_id: int, week_start: date | str, start: datetime, end: datetime
+    ) -> list[dict[str, Any]]:
+        """返回话题卡片下仍可阅读的事件，不把隐藏事件重新带回页面。"""
+
+        week_key = _week_start_key(week_start)
+        start_at = _utc_iso(start)
+        end_at = _utc_iso(end)
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    e.id,
+                    e.title,
+                    e.summary,
+                    e.editorial_tier,
+                    COUNT(i.id) AS content_count,
+                    COUNT(DISTINCT i.source_id) AS source_count,
+                    MAX(COALESCE(i.published_at, i.fetched_at)) AS latest_at
+                FROM weekly_topic_events wte
+                JOIN events e ON e.id = wte.event_id
+                JOIN items i ON i.event_id = e.id
+                JOIN sources s ON s.id = i.source_id
+                WHERE wte.week_start = ?
+                  AND wte.topic_id = ?
+                  AND e.curation_status = 'complete'
+                  AND e.editorial_tier IN ('must_read', 'important', 'brief')
+                  AND NOT {_user_hidden_clause('e')}
+                  AND {_source_is_live_clause('s')}
+                  AND COALESCE(i.published_at, i.fetched_at) >= ?
+                  AND COALESCE(i.published_at, i.fetched_at) < ?
+                GROUP BY e.id
+                ORDER BY content_count DESC, latest_at DESC, e.id DESC
+                """,
+                (week_key, int(topic_id), start_at, end_at),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    # 日报与清理 -------------------------------------------------------------
     def list_briefs(self) -> list[dict[str, Any]]:
         with self.database.read() as conn:
             rows = conn.execute("SELECT * FROM briefs ORDER BY brief_date DESC LIMIT 90").fetchall()
@@ -1360,6 +1593,7 @@ class Repository:
             deleted_briefs = conn.execute(
                 "DELETE FROM briefs WHERE brief_date <= ?", (brief_cutoff,)
             ).rowcount
+            conn.execute("DELETE FROM weekly_topics WHERE week_start <= ?", (brief_cutoff,))
 
             protected_event_ids: set[int] = set()
             has_unknown_brief_references = False
