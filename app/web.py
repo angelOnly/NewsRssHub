@@ -494,6 +494,11 @@ def daily_topic_detail(request: Request, topic_id: int) -> HTMLResponse:
     topic = next((item for item in topics if int(item["id"]) == topic_id), None)
     if not topic:
         raise HTTPException(status_code=404, detail="未找到该今日热点")
+    if len(topic["events"]) == 1:
+        # 单事件话题没有选择空间，直接进入详情，避免无意义的中转点击。
+        event = topic["events"][0]
+        query = urlencode({"tier": event["editorial_tier"], "period": "24h"})
+        return RedirectResponse(f"/events/{event['id']}?{query}", status_code=307)
     return render(
         request,
         "daily_topic_detail.html",

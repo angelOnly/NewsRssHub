@@ -123,7 +123,7 @@ class WebTests(unittest.TestCase):
         self.assertNotIn('class="mobile-menu"', navigation)
         self.assertIn('data-topic-id="42"', daily_page)
         self.assertIn('id="topic-42"', daily_page)
-        self.assertIn('href="/daily-topics/42"', daily_page)
+        self.assertIn('href="/events/11?tier=important&amp;period=24h"', daily_page)
         self.assertIn('class="weekly-topic-card weekly-topic-card-link"', daily_page)
         self.assertIn("MiniMax-M3 发布与评测", daily_page)
         self.assertIn('class="daily-topic-content-count">8 条内容</span>', daily_page)
@@ -206,7 +206,15 @@ class WebTests(unittest.TestCase):
                         "content_count": 5,
                         "source_count": 2,
                         "editorial_tier": "important",
-                    }
+                    },
+                    {
+                        "id": 12,
+                        "title": "MiniMax-M3 实测",
+                        "summary": "模型实测与使用反馈。",
+                        "content_count": 3,
+                        "source_count": 1,
+                        "editorial_tier": "brief",
+                    },
                 ],
             }
             try:
@@ -219,6 +227,25 @@ class WebTests(unittest.TestCase):
                 self.assertIn("MiniMax-M3 发布与评测", response.text)
                 self.assertIn('href="/events/11?tier=important&period=24h"', response.text)
                 self.assertIn("模型发布与核心能力介绍。", response.text)
+            finally:
+                delattr(app.state, "services")
+
+    def test_single_event_daily_topic_redirects_to_event_detail(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            app.state.services = services
+            topic = {
+                "id": 42,
+                "display_name": "OpenAI 开源 birdingpal 观鸟助手项目",
+                "events": [{"id": 11, "editorial_tier": "must_read"}],
+            }
+            try:
+                with patch.object(services.repository, "list_daily_topics", return_value=[topic]):
+                    with TestClient(app) as client:
+                        response = client.get("/daily-topics/42", follow_redirects=False)
+
+                self.assertEqual(response.status_code, 307)
+                self.assertEqual(response.headers["location"], "/events/11?tier=must_read&period=24h")
             finally:
                 delattr(app.state, "services")
 
