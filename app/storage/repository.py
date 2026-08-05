@@ -1315,6 +1315,7 @@ class Repository:
                 "DELETE FROM feedback WHERE event_id = ? AND action = 'not_interested'", (event_id,)
             )
 
+    # 本周话题 ---------------------------------------------------------------
     def list_weekly_topic_candidates(
         self, *, start: datetime, end: datetime
     ) -> list[dict[str, Any]]:
@@ -1593,6 +1594,7 @@ class Repository:
             deleted_briefs = conn.execute(
                 "DELETE FROM briefs WHERE brief_date <= ?", (brief_cutoff,)
             ).rowcount
+            # 周话题只服务短期浏览；过期话题及其关联会由外键一起清理。
             conn.execute("DELETE FROM weekly_topics WHERE week_start <= ?", (brief_cutoff,))
 
             protected_event_ids: set[int] = set()

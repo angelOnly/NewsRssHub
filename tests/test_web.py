@@ -537,8 +537,12 @@ sources:
                     self.assertIn("原始内容与来源", detail.text)
                     self.assertIn("查看原始正文", detail.text)
                     self.assertIn("中文译文", detail.text)
-                    self.assertIn("原始标题", detail.text)
-                    self.assertIn("OpenAI 发布新模型", detail.text)
+                    self.assertNotIn("原始标题", detail.text)
+                    self.assertNotIn("OpenAI 发布新模型", detail.text)
+                    self.assertIn(
+                        'data-refresh-return="/?tier=must_read&amp;period=all&amp;page=1"',
+                        detail.text,
+                    )
                     self.assertIn("条目 2 · 来源 1", detail.text)
                     self.assertNotIn("模型解读", detail.text)
                     read_dashboard = client.get("/?tier=must_read&period=all")

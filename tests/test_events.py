@@ -342,3 +342,54 @@ class EventTests(unittest.TestCase):
             )
             events = repository.list_events(tier=EditorialTier.BRIEF, period="all")
             self.assertEqual([event["title"] for event in events], ["第一条", "第二条"])
+
+    def test_unread_events_are_listed_before_read_events(self) -> None:
+        directory, repository, source_id = self._repository()
+        with directory:
+            read_first_item = self._item(repository, source_id, "read-first", "已读优先级高")
+            unread_first_item = self._item(repository, source_id, "unread-first", "未读优先级高")
+            read_second_item = self._item(repository, source_id, "read-second", "已读优先级低")
+            unread_second_item = self._item(repository, source_id, "unread-second", "未读优先级低")
+            event_ids = repository.apply_curation_groups(
+                [
+                    CurationGroup(
+                        item_ids=[read_first_item],
+                        primary_item_id=read_first_item,
+                        tier=EditorialTier.BRIEF,
+                        reason="测试已读排序",
+                        order=1,
+                    ),
+                    CurationGroup(
+                        item_ids=[unread_first_item],
+                        primary_item_id=unread_first_item,
+                        tier=EditorialTier.BRIEF,
+                        reason="测试未读排序",
+                        order=1,
+                    ),
+                    CurationGroup(
+                        item_ids=[read_second_item],
+                        primary_item_id=read_second_item,
+                        tier=EditorialTier.BRIEF,
+                        reason="测试已读排序",
+                        order=2,
+                    ),
+                    CurationGroup(
+                        item_ids=[unread_second_item],
+                        primary_item_id=unread_second_item,
+                        tier=EditorialTier.BRIEF,
+                        reason="测试未读排序",
+                        order=2,
+                    ),
+                ]
+            )
+            read_first_event, unread_first_event, read_second_event, unread_second_event = event_ids
+            repository.mark_event_read(read_first_event)
+            repository.mark_event_read(read_second_event)
+
+            events = repository.list_events(tier=EditorialTier.BRIEF, period="all")
+
+            self.assertEqual(
+                [event["id"] for event in events],
+                [unread_first_event, unread_second_event, read_first_event, read_second_event],
+            )
+            self.assertEqual([event["user_read"] for event in events], [False, False, True, True])

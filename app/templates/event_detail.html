@@ -19,7 +19,7 @@
     </section>
     {% endif %}
     {% if event.tier_reason %}<p class="tier-reason detail-reason">筛选说明：{{ event.tier_reason }}</p>{% endif %}
-    <div class="detail-actions" aria-label="文章操作">
+    <div class="detail-actions" aria-label="文章操作" data-refresh-return="{{ return_url }}">
       <form class="event-feedback event-feedback-detail event-save" method="post" action="/events/{{ event.id }}/{% if event.user_saved %}unsave{% else %}save{% endif %}">
         <input type="hidden" name="origin" value="{{ action_origin }}"><input type="hidden" name="tier" value="{{ return_tier }}"><input type="hidden" name="period" value="{{ return_period }}"><input type="hidden" name="page" value="{{ return_page }}">
         <button class="icon-button icon-button-save{% if event.user_saved %} is-saved{% endif %}" type="submit" aria-label="{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}" title="{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}">{{ icon('star', 'is-filled' if event.user_saved else '') }}<span class="sr-only">{% if event.user_saved %}取消收藏{% else %}收藏，稍后阅读{% endif %}</span></button>
@@ -44,7 +44,6 @@
       <article class="source-item">
         <div class="source-item-meta"><span class="source-badge">{{ item.source_name }}</span>{% if item.is_official %}<span class="official-badge">官方</span>{% endif %}{% if item.published_at %}<span>发布 {{ item.published_at|relative_time }}</span>{% else %}<span>发布时间未知</span>{% endif %}<span>抓取 {{ item.fetched_at|relative_time }}</span></div>
         <h3>{{ item.display_title or item.title }}</h3>
-        {% if item.display_title and item.display_title != item.title %}<p class="original-title">原始标题：{{ item.title }}</p>{% endif %}
         {% if item.summary %}<p class="item-summary">{{ item.summary }}</p>{% endif %}
         {% if item.media %}
         <section class="media-preview" aria-label="媒体预览">

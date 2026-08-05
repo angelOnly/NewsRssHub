@@ -7,7 +7,48 @@
  */
 (() => {
   const storageKey = "newsrsshub:pending-scroll-restore";
+  const refreshStorageKey = "newsrsshub:pending-return-refresh";
   const maxAgeMs = 30_000;
+  const refreshMaxAgeMs = 5 * 60_000;
+
+  const markReturnForRefresh = (form) => {
+    const target = form.closest("[data-refresh-return]")?.dataset.refreshReturn;
+    if (!target) return;
+
+    try {
+      const targetUrl = new URL(target, window.location.origin);
+      sessionStorage.setItem(
+        refreshStorageKey,
+        JSON.stringify({ pathname: targetUrl.pathname, createdAt: Date.now() }),
+      );
+    } catch {
+      // 存储不可用时仍按正常 POST + 跳转流程完成收藏操作。
+    }
+  };
+
+  const refreshReturnedList = () => {
+    try {
+      const stored = sessionStorage.getItem(refreshStorageKey);
+      if (!stored) return;
+
+      const pending = JSON.parse(stored);
+      if (
+        !pending.pathname ||
+        !Number.isFinite(pending.createdAt) ||
+        Date.now() - pending.createdAt > refreshMaxAgeMs
+      ) {
+        sessionStorage.removeItem(refreshStorageKey);
+        return;
+      }
+      if (pending.pathname !== window.location.pathname) return;
+
+      // 先清除标记，再刷新从浏览器历史缓存恢复的列表，避免循环刷新。
+      sessionStorage.removeItem(refreshStorageKey);
+      window.location.reload();
+    } catch {
+      // 私密模式等受限环境可能连清理存储也失败，不能影响页面返回。
+    }
+  };
 
   const readPendingPosition = () => {
     try {
@@ -53,6 +94,9 @@
     revealSelectedSourcePlatform();
   });
 
+  // pageshow 同时覆盖正常跳转和从 BFCache 恢复的“返回热点列表”。
+  window.addEventListener("pageshow", refreshReturnedList);
+
   document.addEventListener(
     "submit",
     (event) => {
@@ -64,6 +108,8 @@
       ) {
         return;
       }
+
+      markReturnForRefresh(form);
 
       try {
         sessionStorage.setItem(
