@@ -84,6 +84,17 @@ def build_settings(root: Path) -> Settings:
 
 
 class WeeklyTopicTests(unittest.TestCase):
+    def test_refresh_interval_defaults_to_thirty_minutes_and_is_bounded(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+
+            self.assertEqual(repository.get_weekly_topic_refresh_interval_minutes(), 30)
+            self.assertEqual(repository.save_weekly_topic_refresh_interval_minutes("1"), 5)
+            self.assertEqual(repository.get_weekly_topic_refresh_interval_minutes(), 5)
+            self.assertEqual(repository.save_weekly_topic_refresh_interval_minutes("2000"), 1440)
+
     def test_visible_current_week_events_are_grouped_and_title_can_change_without_new_id(self) -> None:
         with TemporaryDirectory() as directory:
             settings = build_settings(Path(directory))

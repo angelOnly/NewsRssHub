@@ -77,7 +77,6 @@ class IntelligencePipeline:
         # 只在新闻已经完成摘要和筛选、首页可见后才进入通知队列。
         push_queued = self.web_push.record_ready_items(curated.completed)
         translated = self.translator.translate_visible_primary_items(limit=12)
-        weekly_topics = self.weekly_topics.refresh_current_week()
         cleanup = self.repository.purge_expired_content()
         # 处理完成后再提醒，用户点开首页时能直接看到本轮已落库的内容。
         push_delivery = self.web_push.deliver_pending()
@@ -85,13 +84,21 @@ class IntelligencePipeline:
             "summary": asdict(summarized),
             "curation": asdict(curated),
             "translation": asdict(translated),
-            "weekly_topics": asdict(weekly_topics),
             "cleanup": cleanup,
             "push_queued": push_queued,
             "web_push": asdict(push_delivery),
         }
 
+    def refresh_weekly_topics_once(self) -> dict[str, object]:
+        """供独立 Worker 调用，避免话题归并被长摘要任务阻塞。"""
+
+        return {"weekly_topics": asdict(self.weekly_topics.refresh_current_week())}
+
     def run_once(self, force: bool = False) -> dict[str, object]:
         """兼容旧命令：先抓取，再处理积压内容。"""
 
-        return {**self.collect_once(force=force), **self.process_once()}
+        return {
+            **self.collect_once(force=force),
+            **self.process_once(),
+            **self.refresh_weekly_topics_once(),
+        }

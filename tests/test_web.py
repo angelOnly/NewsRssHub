@@ -607,6 +607,8 @@ sources:
                     self.assertEqual(settings.status_code, 200)
                     self.assertIn("统一抓取策略", settings.text)
                     self.assertIn('name="interval_minutes"', settings.text)
+                    self.assertIn("本周热点刷新", settings.text)
+                    self.assertIn('action="/settings/weekly-topics-interval"', settings.text)
                     self.assertIn("通知统计范围", settings.text)
                     self.assertIn('name="window_hours"', settings.text)
 
@@ -618,6 +620,17 @@ sources:
                     self.assertEqual(policy.status_code, 303)
                     self.assertIn("#fetch", policy.headers["location"])
                     self.assertEqual(services.repository.get_fetch_policy().interval_minutes, 30)
+
+                    weekly_topics_interval = client.post(
+                        "/settings/weekly-topics-interval",
+                        data={"interval_minutes": "45"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(weekly_topics_interval.status_code, 303)
+                    self.assertIn("#weekly-topics", weekly_topics_interval.headers["location"])
+                    self.assertEqual(
+                        services.repository.get_weekly_topic_refresh_interval_minutes(), 45
+                    )
 
                     push_window = client.post(
                         "/settings/web-push-window",

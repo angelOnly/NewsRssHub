@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from app.config import Settings
 from app.services.pipeline import IntelligencePipeline
+from app.services.weekly_topics import WeeklyTopicRun
 from app.storage.database import Database
 from app.storage.repository import Repository
 
@@ -43,3 +44,42 @@ class PipelineTests(unittest.TestCase):
 
             cleanup.assert_called_once_with()
             self.assertEqual(outcome["cleanup"], cleanup_result)
+
+    def test_weekly_topics_refresh_runs_outside_the_content_processor(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "sources"
+            source_dir.mkdir()
+            settings = Settings(
+                root_dir=root,
+                source_dir=source_dir,
+                data_dir=root / "data",
+                database_path=root / "data" / "test.db",
+                request_timeout=5,
+                log_level="INFO",
+                llm_enabled=False,
+                openai_api_key=None,
+                openai_base_url="https://llm.example.test/v1",
+                openai_model_name="test-model",
+                credential_encryption_key=None,
+                timezone="Asia/Shanghai",
+            )
+            repository = Repository(Database(settings.database_path))
+            repository.database.initialize()
+            pipeline = IntelligencePipeline(repository, Mock(), settings)
+
+            with patch.object(
+                pipeline.weekly_topics,
+                "refresh_current_week",
+                return_value=WeeklyTopicRun(refreshed=True, topics=1, events=2),
+            ) as refresh:
+                processor_outcome = pipeline.process_once()
+                refresh.assert_not_called()
+
+                topic_outcome = pipeline.refresh_weekly_topics_once()
+
+            self.assertNotIn("weekly_topics", processor_outcome)
+            self.assertEqual(
+                topic_outcome,
+                {"weekly_topics": {"refreshed": True, "topics": 1, "events": 2, "skipped": False, "failed": False, "message": ""}},
+            )

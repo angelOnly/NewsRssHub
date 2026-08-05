@@ -112,6 +112,10 @@ class Repository:
     DEFAULT_WEB_PUSH_WINDOW_HOURS = 2
     MIN_WEB_PUSH_WINDOW_HOURS = 1
     MAX_WEB_PUSH_WINDOW_HOURS = 24
+    WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING = "weekly_topic_refresh_interval_minutes"
+    DEFAULT_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES = 30
+    MIN_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES = 5
+    MAX_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES = 1440
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -167,6 +171,35 @@ class Repository:
         hours = self._normalize_web_push_window_hours(value)
         self.save_app_setting(self.WEB_PUSH_WINDOW_HOURS_SETTING, str(hours))
         return hours
+
+    @classmethod
+    def _normalize_weekly_topic_refresh_interval(cls, value: int | str | None) -> int:
+        try:
+            minutes = (
+                int(value)
+                if value is not None
+                else cls.DEFAULT_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES
+            )
+        except (TypeError, ValueError):
+            minutes = cls.DEFAULT_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES
+        return max(
+            cls.MIN_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES,
+            min(minutes, cls.MAX_WEEKLY_TOPIC_REFRESH_INTERVAL_MINUTES),
+        )
+
+    def get_weekly_topic_refresh_interval_minutes(self) -> int:
+        """读取独立话题任务的执行间隔，默认每 30 分钟。"""
+
+        return self._normalize_weekly_topic_refresh_interval(
+            self.get_app_setting(self.WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING)
+        )
+
+    def save_weekly_topic_refresh_interval_minutes(self, value: int | str) -> int:
+        """保存本周热点任务的间隔，供网页和独立 Worker 共用。"""
+
+        minutes = self._normalize_weekly_topic_refresh_interval(value)
+        self.save_app_setting(self.WEEKLY_TOPIC_REFRESH_INTERVAL_SETTING, str(minutes))
+        return minutes
 
     def get_app_setting(self, key: str) -> str | None:
         """读取少量应用级状态；调用方负责解析具体值的格式。"""

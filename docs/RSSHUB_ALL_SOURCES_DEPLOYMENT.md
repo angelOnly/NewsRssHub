@@ -10,7 +10,7 @@
 └── rss-feeds.json   # 通用 RSS 白名单，权限 0600
 ```
 
-NewsRSSHub 的 Web、collector、processor 已将 `/home/jzb/docker/rss-hub/data` 挂载到 `/app/data`，所以不需要再给应用增加卷。RSSHub 只读挂载上述 `rsshub-runtime` 子目录，无法读取 `rss_news.db`。
+NewsRSSHub 的 Web、collector、processor、topics 已将 `/home/jzb/docker/rss-hub/data` 挂载到 `/app/data`，所以不需要再给应用增加卷。RSSHub 只读挂载上述 `rsshub-runtime` 子目录，无法读取 `rss_news.db`。
 
 ## 1. 部署自定义 RSSHub 镜像
 
@@ -63,7 +63,7 @@ docker compose logs -f --tail=100 rsshub
 更新 NewsRSSHub 到本次代码后重新构建其 Web 和 Worker：
 
 ```bash
-docker compose up -d --build web collector processor
+docker compose up -d --build web collector processor topics
 ```
 
 应用启动时会完成两件事：

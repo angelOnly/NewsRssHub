@@ -37,7 +37,7 @@
 
 4. 打开 `http://localhost:8188`，进入“设置与连接”的 X 区域，粘贴 **x.com 的完整 Cookie 字符串**（至少应包含 `auth_token` 与 `ct0`）。系统会先让 RSSHub 实际抓取验证，成功后才保留共享运行时文件；仅 `auth_token` 的旧方式已停用。
 
-Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → 事件筛选 → 正文译文 → 本周话题归并与过期内容清理。Processor 的处理心跳为 15 秒，但话题模型只在候选变化后最多每 5 分钟调用一次。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 与 `.agents/skills/weekly-hot-topics/SKILL.md` 会一并复制到镜像；话题 Skill 缺失或模型暂不可用时，系统保留上一份成功的本周话题结果，不退回关键词统计。
+Web 服务只负责页面和配置；Compose 中的 `collector` Worker 只负责排期、抓取和来源快照，`processor` Worker 独立完成中文标题/摘要/重点 → 事件筛选 → 正文译文与过期内容清理，`topics` Worker 专门归并本周热点，因此不会被摘要积压阻塞。热点任务启动后立即执行，默认每 30 分钟扫描一次，可在“设置与连接 → 本周热点刷新”中调整；候选发生变化时模型仍最多每 5 分钟调用一次。SQLite 数据保存在 `data/`，重启容器不会丢失。项目策略文件 `.agents/skills/curate-personal-news/SKILL.md` 与 `.agents/skills/weekly-hot-topics/SKILL.md` 会一并复制到镜像；话题 Skill 缺失或模型暂不可用时，系统保留上一份成功的本周话题结果，不退回关键词统计。
 
 ## iPhone 手机通知
 
@@ -81,7 +81,8 @@ Worker 首次运行会创建一份来源快照，之后每 3 天最多创建一�
 ## 内容处理顺序
 
 ```text
-原始帖子 → 中文标题、摘要、重点 → 事件 Skill（合并 / 去重 / 四层判断） → 必看/重要正文中文译文 → 本周话题 Skill（仅可见事件） → SQLite → 四层 Tab / 本周热点
+原始帖子 → 中文标题、摘要、重点 → 事件 Skill（合并 / 去重 / 四层判断） → 必看/重要正文中文译文 → SQLite → 四层 Tab
+已完成的本周可见事件 → 独立 topics Worker → 本周话题 Skill → SQLite → 本周热点
 ```
 
 事件筛选模型只收到用户自然语言画像及每条帖子的 `id`、原始标题、中文摘要、发布时间；不会收到原始正文、账号、Cookie 或链接。本周话题模型只收到本周可见事件的标题、事实摘要、内容数、来源数与既有话题 ID，不能修改事件或自行编造热度数字。正文翻译是详情页展示缓存：后台只预翻译“必看”和“重要更新”的主来源，其他来源可在详情页按需生成。完整产品需求、数据迁移与架构见 `docs/PRODUCT_REQUIREMENTS_AND_ARCHITECTURE.md`。

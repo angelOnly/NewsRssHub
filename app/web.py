@@ -290,6 +290,10 @@ def fetch_settings_redirect(*, notice: str = "", error: str = "") -> RedirectRes
     return settings_redirect(anchor="fetch", notice=notice, error=error)
 
 
+def weekly_topics_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="weekly-topics", notice=notice, error=error)
+
+
 def push_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return settings_redirect(anchor="push", notice=notice, error=error)
 
@@ -731,6 +735,9 @@ def settings(request: Request, notice: str = "", error: str = "") -> HTMLRespons
             "notice": notice,
             "error": error,
             "fetch_policy": services.repository.get_fetch_policy(),
+            "weekly_topic_refresh_interval_minutes": (
+                services.repository.get_weekly_topic_refresh_interval_minutes()
+            ),
             "web_push_window_hours": services.repository.get_web_push_window_hours(),
         },
     )
@@ -751,6 +758,24 @@ def save_fetch_policy(
         )
     except Exception:
         return fetch_settings_redirect(error="抓取策略保存失败，请输入 5 到 1440 的整数分钟数。")
+
+
+@app.post("/settings/weekly-topics-interval")
+def save_weekly_topics_interval(
+    request: Request,
+    interval_minutes: int = Form(...),
+) -> RedirectResponse:
+    try:
+        minutes = get_services(request).repository.save_weekly_topic_refresh_interval_minutes(
+            interval_minutes
+        )
+        return weekly_topics_settings_redirect(
+            notice=f"本周热点归并已设为每 {minutes} 分钟执行一次。"
+        )
+    except Exception:
+        return weekly_topics_settings_redirect(
+            error="本周热点间隔保存失败，请输入 5 到 1440 的整数分钟数。"
+        )
 
 
 @app.post("/settings/web-push-window")

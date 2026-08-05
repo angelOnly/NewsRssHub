@@ -24,9 +24,9 @@ def run() -> int:
     parser.add_argument("--force", action="store_true", help="忽略排期并抓取全部启用来源")
     parser.add_argument(
         "--role",
-        choices=("collector", "processor", "all"),
+        choices=("collector", "processor", "topics", "all"),
         default="all",
-        help="collector 仅抓取；processor 仅摘要、筛选、翻译和更新本周话题",
+        help="collector 仅抓取；processor 仅处理内容；topics 仅归并本周热点",
     )
     parser.add_argument("--interval", type=int, default=30, help="两轮检查之间的秒数")
     args = parser.parse_args()
@@ -44,6 +44,8 @@ def run() -> int:
                 outcome = services.pipeline.collect_once(force=args.force)
             elif args.role == "processor":
                 outcome = services.pipeline.process_once()
+            elif args.role == "topics":
+                outcome = services.pipeline.refresh_weekly_topics_once()
             else:
                 outcome = services.pipeline.run_once(force=args.force)
             logging.getLogger(__name__).info(
@@ -55,7 +57,12 @@ def run() -> int:
                 return 1
         if args.once:
             return 0
-        time.sleep(max(15, args.interval))
+        if args.role == "topics":
+            # 热点任务使用网页中的持久化设置；启动后先执行一轮，再按该间隔等待。
+            interval_seconds = services.repository.get_weekly_topic_refresh_interval_minutes() * 60
+        else:
+            interval_seconds = max(15, args.interval)
+        time.sleep(interval_seconds)
 
 
 if __name__ == "__main__":
