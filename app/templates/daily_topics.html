@@ -29,7 +29,7 @@
   <a id="topic-{{ topic.id }}" class="weekly-topic-card weekly-topic-card-link" data-topic-id="{{ topic.id }}" href="{{ topic_href }}" aria-label="{{ topic_label }}">
     <h2 title="{{ topic.display_name }}">{{ topic.display_name }}</h2>
     <p class="daily-topic-description"{% if topic.description %} title="{{ topic.description }}"{% endif %}>
-      <span class="daily-topic-content-count">{{ topic.content_count }} 条内容</span>{% if topic.description %} · {{ topic.description }}{% endif %}
+      <span class="daily-topic-content-count">{{ topic.content_count }} 条内容</span>{% if topic.description %}<span class="daily-topic-description-separator" aria-hidden="true">·</span><span class="daily-topic-description-copy">{{ topic.description }}</span>{% endif %}
     </p>
   </a>
   {% endfor %}

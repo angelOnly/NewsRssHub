@@ -127,6 +127,7 @@ class WebTests(unittest.TestCase):
         self.assertIn('class="weekly-topic-card weekly-topic-card-link"', daily_page)
         self.assertIn("MiniMax-M3 发布与评测", daily_page)
         self.assertIn('class="daily-topic-content-count">8 条内容</span>', daily_page)
+        self.assertIn('class="daily-topic-description-copy">围绕 MiniMax-M3 的发布信息与实测结果。</span>', daily_page)
         self.assertIn("围绕 MiniMax-M3 的发布信息与实测结果。", daily_page)
         self.assertNotIn("3 个事件", daily_page)
         self.assertNotIn("4 个来源", daily_page)
