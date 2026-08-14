@@ -224,7 +224,8 @@ class BatchSourceImportService:
                     )
                     continue
                 source_id = self.sources.repository.create_source(normalized, feed_url)
-                if normalized.enabled:
+                # 已停用的平台仍可录入来源，但不会产生任何抓取排期。
+                if normalized.enabled and self.sources.repository.platform_fetch_enabled(normalized.kind):
                     self.sources.repository.schedule_initial_fetch(source_id)
                 result.added.append(row)
             except Exception as exc:

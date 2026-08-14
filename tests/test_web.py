@@ -532,6 +532,73 @@ sources:
             finally:
                 delattr(app.state, "services")
 
+    def test_platform_fetch_switch_is_persistent_and_blocks_source_tests(self) -> None:
+        with TemporaryDirectory() as directory:
+            services = build_services(build_settings(Path(directory)))
+            source_id = services.repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            services.repository.update_source(source_id, {"next_fetch_at": "2026-08-04T12:00:00+00:00"})
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    settings = client.get("/settings")
+                    self.assertEqual(settings.status_code, 200)
+                    self.assertIn('action="/settings/platforms/rss/fetch-toggle"', settings.text)
+                    self.assertIn("停用抓取", settings.text)
+
+                    paused = client.post(
+                        "/settings/platforms/rss/fetch-toggle", follow_redirects=False
+                    )
+                    self.assertEqual(paused.status_code, 303)
+                    self.assertIn("#platforms", paused.headers["location"])
+                    self.assertFalse(services.repository.platform_fetch_enabled(SourceKind.RSS))
+
+                    source = services.repository.get_source(source_id)
+                    assert source is not None
+                    self.assertTrue(source["enabled"])
+                    self.assertIsNone(source["next_fetch_at"])
+
+                    sources_page = client.get("/sources?kind=rss")
+                    self.assertIn("平台已停用", sources_page.text)
+                    self.assertNotIn('action="/sources/test-current-page"', sources_page.text)
+                    self.assertNotIn(f'action="/sources/{source_id}/test"', sources_page.text)
+
+                    queued = client.post(
+                        "/sources/test-current-page",
+                        data={"source_kind": "rss", "page": "1"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(queued.status_code, 303)
+                    self.assertIn(
+                        "平台抓取已停用",
+                        parse_qs(urlparse(queued.headers["location"]).query)["error"][0],
+                    )
+
+                    tested = client.post(
+                        f"/sources/{source_id}/test",
+                        data={"source_kind": "rss", "page": "1"},
+                        follow_redirects=False,
+                    )
+                    self.assertEqual(tested.status_code, 303)
+                    self.assertIn(
+                        "平台抓取已停用",
+                        parse_qs(urlparse(tested.headers["location"]).query)["error"][0],
+                    )
+
+                    resumed = client.post(
+                        "/settings/platforms/rss/fetch-toggle", follow_redirects=False
+                    )
+                    self.assertEqual(resumed.status_code, 303)
+                    self.assertTrue(services.repository.platform_fetch_enabled(SourceKind.RSS))
+
+                source = services.repository.get_source(source_id)
+                assert source is not None
+                self.assertIsNotNone(source["next_fetch_at"])
+            finally:
+                delattr(app.state, "services")
+
     def test_four_tier_dashboard_and_source_form_drop_legacy_controls(self) -> None:
         with TemporaryDirectory() as directory:
             services = build_services(build_settings(Path(directory)))

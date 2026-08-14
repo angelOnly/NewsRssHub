@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Sequence
 
 from app.domain.curation import CurationGroup, EditorialTier
-from app.domain.models import FetchPolicy, FeedItem, SourceDraft
+from app.domain.models import FetchPolicy, FeedItem, SourceDraft, SourceKind
 from app.domain.weekly_topics import (
     MIN_DAILY_TOPIC_CONTENT_COUNT,
     MIN_WEEKLY_TOPIC_CONTENT_COUNT,
@@ -117,6 +117,8 @@ class Repository:
     """Persistence boundary for the non-scoring personal news flow."""
 
     FETCH_INTERVAL_SETTING = "global_fetch_interval_minutes"
+    # 只记录被停用的平台；没有该键即代表默认允许抓取，避免首次部署写入无意义配置。
+    PLATFORM_FETCH_DISABLED_PREFIX = "platform_fetch_disabled:"
     MIN_FETCH_INTERVAL_MINUTES = 5
     MAX_FETCH_INTERVAL_MINUTES = 1440
     WEB_PUSH_WINDOW_HOURS_SETTING = "web_push_window_hours"
@@ -145,6 +147,110 @@ class Repository:
                 f"SELECT * FROM sources {where} ORDER BY enabled DESC, name COLLATE NOCASE, id DESC"
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
+
+    # 平台级抓取开关 ----------------------------------------------------------
+    @staticmethod
+    def _source_kind_value(kind: SourceKind | str) -> str:
+        """规范化平台标识，防止把任意字符串写入应用级设置。"""
+
+        return SourceKind(kind).value
+
+    @classmethod
+    def _platform_fetch_disabled_key(cls, kind: SourceKind | str) -> str:
+        return f"{cls.PLATFORM_FETCH_DISABLED_PREFIX}{cls._source_kind_value(kind)}"
+
+    @classmethod
+    def _platform_fetch_enabled_clause(cls, source_alias: str = "sources") -> str:
+        """返回查询中排除已停用平台的条件；前缀由调用方参数化传入。"""
+
+        return f"""
+            NOT EXISTS (
+                SELECT 1 FROM app_settings AS platform_fetch_setting
+                WHERE platform_fetch_setting.key = ? || {source_alias}.kind
+            )
+        """
+
+    def platform_fetch_enabled(self, kind: SourceKind | str) -> bool:
+        """平台默认可抓取；仅显式停用时返回 False。"""
+
+        return self.get_app_setting(self._platform_fetch_disabled_key(kind)) is None
+
+    def platform_fetch_enabled_map(self) -> dict[str, bool]:
+        """一次读取所有已知平台的抓取状态，供网页和采集器共用。"""
+
+        kinds = [kind.value for kind in SourceKind]
+        keys = [self._platform_fetch_disabled_key(kind) for kind in kinds]
+        placeholders = ", ".join("?" for _ in keys)
+        with self.database.read() as conn:
+            rows = conn.execute(
+                f"SELECT key FROM app_settings WHERE key IN ({placeholders})", keys
+            ).fetchall()
+        disabled = {str(row["key"]) for row in rows}
+        return {
+            kind: self._platform_fetch_disabled_key(kind) not in disabled
+            for kind in kinds
+        }
+
+    def set_platform_fetch_enabled(
+        self,
+        kind: SourceKind | str,
+        enabled: bool,
+        *,
+        now: datetime | None = None,
+        jitter_provider: Callable[[int, int], int] | None = None,
+    ) -> int:
+        """切换一个平台的抓取，并同步清空或重建该平台的排期。
+
+        逐来源的启停状态和既有内容保持不变。恢复平台时只为原本已启用的来源
+        重新分散到 1–5 分钟窗口，避免平台开关造成同时请求。
+        """
+
+        kind_value = self._source_kind_value(kind)
+        now = now or utc_now()
+        setting_key = self._platform_fetch_disabled_key(kind_value)
+        if enabled:
+            policy = self.get_fetch_policy()
+            with self.database.transaction() as conn:
+                conn.execute("DELETE FROM app_settings WHERE key = ?", (setting_key,))
+                rows = conn.execute(
+                    """
+                    SELECT id FROM sources
+                    WHERE kind = ? AND enabled = 1 AND archived = 0
+                    ORDER BY id
+                    """,
+                    (kind_value,),
+                ).fetchall()
+                for row in rows:
+                    conn.execute(
+                        "UPDATE sources SET next_fetch_at = ?, updated_at = ? WHERE id = ?",
+                        (
+                            self._initial_fetch_time(
+                                policy, now=now, jitter_provider=jitter_provider
+                            ),
+                            now.isoformat(),
+                            int(row["id"]),
+                        ),
+                    )
+            return len(rows)
+
+        with self.database.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, '1', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (setting_key, now.isoformat()),
+            )
+            cursor = conn.execute(
+                """
+                UPDATE sources
+                SET next_fetch_at = NULL, updated_at = ?
+                WHERE kind = ? AND enabled = 1 AND archived = 0
+                """,
+                (now.isoformat(), kind_value),
+            )
+        return int(cursor.rowcount)
 
     # 全局抓取策略 -------------------------------------------------------------
     @classmethod
@@ -288,11 +394,13 @@ class Repository:
         now = now or utc_now()
         with self.database.transaction() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT id FROM sources
                 WHERE enabled = 1 AND archived = 0 AND next_fetch_at IS NULL
+                  AND {self._platform_fetch_enabled_clause()}
                 ORDER BY id
-                """
+                """,
+                (self.PLATFORM_FETCH_DISABLED_PREFIX,),
             ).fetchall()
             for row in rows:
                 conn.execute(
@@ -326,7 +434,13 @@ class Repository:
                 (self.FETCH_INTERVAL_SETTING, str(policy.interval_minutes), now.isoformat()),
             )
             rows = conn.execute(
-                "SELECT id FROM sources WHERE enabled = 1 AND archived = 0 ORDER BY id"
+                f"""
+                SELECT id FROM sources
+                WHERE enabled = 1 AND archived = 0
+                  AND {self._platform_fetch_enabled_clause()}
+                ORDER BY id
+                """,
+                (self.PLATFORM_FETCH_DISABLED_PREFIX,),
             ).fetchall()
             for row in rows:
                 conn.execute(
@@ -346,12 +460,11 @@ class Repository:
         *,
         now: datetime | None = None,
         jitter_provider: Callable[[int, int], int] | None = None,
-    ) -> str:
+    ) -> str | None:
         policy = policy or self.get_fetch_policy()
         now = now or utc_now()
         next_fetch_at = self._next_fetch_time(policy, now=now, jitter_provider=jitter_provider)
-        self.update_source(source_id, {"next_fetch_at": next_fetch_at})
-        return next_fetch_at
+        return self._schedule_source_fetch(source_id, next_fetch_at, now=now)
 
     def schedule_initial_fetch(
         self,
@@ -360,14 +473,39 @@ class Repository:
         *,
         now: datetime | None = None,
         jitter_provider: Callable[[int, int], int] | None = None,
-    ) -> str:
+    ) -> str | None:
         """为新建来源安排首次抓取，而不等待完整全局周期。"""
 
         policy = policy or self.get_fetch_policy()
         now = now or utc_now()
         next_fetch_at = self._initial_fetch_time(policy, now=now, jitter_provider=jitter_provider)
-        self.update_source(source_id, {"next_fetch_at": next_fetch_at})
-        return next_fetch_at
+        return self._schedule_source_fetch(source_id, next_fetch_at, now=now)
+
+    def _schedule_source_fetch(
+        self,
+        source_id: int,
+        next_fetch_at: str,
+        *,
+        now: datetime,
+    ) -> str | None:
+        """只为仍启用且所属平台未停用的来源写入排期。"""
+
+        with self.database.transaction() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE sources
+                SET next_fetch_at = ?, updated_at = ?
+                WHERE id = ? AND enabled = 1 AND archived = 0
+                  AND {self._platform_fetch_enabled_clause()}
+                """,
+                (
+                    next_fetch_at,
+                    now.isoformat(),
+                    source_id,
+                    self.PLATFORM_FETCH_DISABLED_PREFIX,
+                ),
+            )
+        return next_fetch_at if cursor.rowcount else None
 
     def list_sources_page(
         self,
@@ -410,7 +548,10 @@ class Repository:
             ).fetchall()
         return {str(row["kind"]): int(row["total"]) for row in rows}
 
-    def has_enabled_source_kind(self, kind: str) -> bool:
+    def has_enabled_source_kind(self, kind: SourceKind | str) -> bool:
+        kind_value = self._source_kind_value(kind)
+        if not self.platform_fetch_enabled(kind_value):
+            return False
         with self.database.read() as conn:
             row = conn.execute(
                 """
@@ -419,11 +560,14 @@ class Repository:
                     WHERE kind = ? AND enabled = 1 AND archived = 0
                 )
                 """,
-                (kind,),
+                (kind_value,),
             ).fetchone()
         return bool(row[0])
 
-    def requeue_failed_sources_for_kind(self, kind: str) -> int:
+    def requeue_failed_sources_for_kind(self, kind: SourceKind | str) -> int:
+        kind_value = self._source_kind_value(kind)
+        if not self.platform_fetch_enabled(kind_value):
+            return 0
         with self.database.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -432,7 +576,7 @@ class Repository:
                     last_error = ?, updated_at = ?
                 WHERE kind = ? AND enabled = 1 AND archived = 0 AND health_status = 'error'
                 """,
-                (iso_now(), "", iso_now(), kind),
+                (iso_now(), "", iso_now(), kind_value),
             )
         return int(cursor.rowcount)
 
@@ -450,8 +594,9 @@ class Repository:
                 SET health_status = 'unknown', last_fetch_at = NULL, next_fetch_at = ?,
                     last_error = ?, updated_at = ?
                 WHERE id IN ({placeholders}) AND enabled = 1 AND archived = 0
+                  AND {self._platform_fetch_enabled_clause()}
                 """,
-                (iso_now(), "", iso_now(), *ids),
+                (iso_now(), "", iso_now(), *ids, self.PLATFORM_FETCH_DISABLED_PREFIX),
             )
         return int(cursor.rowcount)
 
@@ -540,13 +685,14 @@ class Repository:
         now = now or utc_now()
         with self.database.read() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM sources
                 WHERE enabled = 1 AND archived = 0
                   AND next_fetch_at IS NOT NULL AND next_fetch_at <= ?
+                  AND {self._platform_fetch_enabled_clause()}
                 ORDER BY next_fetch_at ASC, id ASC
                 """,
-                (now.isoformat(),),
+                (now.isoformat(), self.PLATFORM_FETCH_DISABLED_PREFIX),
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 

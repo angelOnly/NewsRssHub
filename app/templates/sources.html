@@ -78,7 +78,11 @@
   {% endfor %}
 </nav>
 
-{% if selected_source_kind == 'x_rsshub' and not x_credential.configured %}
+{% if selected_source_kind != 'all' and not platform_fetch_enabled.get(selected_source_kind, true) %}
+<section class="source-platform-tip">
+  <strong>这个平台的抓取已停用。</strong> 该平台的来源不会自动抓取或手动测试；可在<a href="/settings#platforms">设置与连接</a>恢复。
+</section>
+{% elif selected_source_kind == 'x_rsshub' and not x_credential.configured %}
 <section class="source-platform-tip">
   <strong>推荐顺序：先批量添加 X 账号 → 保存完整 Cookie 并由 RSSHub 验证 → 在这里手动测试需要确认的账号。</strong>
 </section>
@@ -118,13 +122,16 @@
     <thead><tr><th>来源</th><th>账号简介</th><th>平台</th><th>状态</th><th>上次成功</th><th>操作</th></tr></thead>
     <tbody>
     {% for source in sources %}
+      {% set source_platform_enabled = platform_fetch_enabled.get(source.kind, true) %}
       <tr>
         <td>
           <strong>{{ source.name }}</strong>
           <small>{{ source.locator }}</small>
           <small>上次检查：{{ source.last_fetch_at|relative_time if source.last_fetch_at else '尚未抓取' }} · 新增 {{ source.last_new_item_count }} 条</small>
-          <small>下次抓取：{{ source.next_fetch_at|relative_time if source.next_fetch_at else '等待排期' }}</small>
-          {% if source.enabled and source.kind == 'x_rsshub' and not x_credential.configured %}
+          <small>下次抓取：{{ '平台已停用' if not source_platform_enabled else (source.next_fetch_at|relative_time if source.next_fetch_at else '等待排期') }}</small>
+          {% if not source_platform_enabled %}
+            <small class="source-state-note">平台抓取已停用</small>
+          {% elif source.enabled and source.kind == 'x_rsshub' and not x_credential.configured %}
             <small class="source-state-note">等待保存完整 X Cookie</small>
           {% elif source.health_status == 'error' and source.last_error %}
             <small class="source-state-note">{{ source.last_error }}</small>
@@ -133,7 +140,9 @@
         <td class="source-description">{{ source.description or '—' }}</td>
         <td>{{ source.kind|kind_label }}</td>
         <td>
-          {% if not source.enabled %}
+          {% if not source_platform_enabled %}
+            <span class="status paused">平台已停用</span>
+          {% elif not source.enabled %}
             <span class="status paused">已暂停</span>
           {% elif source.kind == 'x_rsshub' and not x_credential.configured %}
             <span class="status attention">需登录</span>
@@ -141,10 +150,12 @@
             <span class="status {{ source.health_status }}">{{ {'healthy':'正常','error':'抓取异常','unknown':'待测试','archived':'已归档'}.get(source.health_status, source.health_status) }}</span>
           {% endif %}
         </td>
-        <td>{% if source.kind == 'x_rsshub' and not x_credential.configured and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
+        <td>{% if not source_platform_enabled %}平台已停用{% elif source.kind == 'x_rsshub' and not x_credential.configured and not source.last_success_at %}等待登录{% else %}{{ source.last_success_at|relative_time if source.last_success_at else '尚未抓取' }}{% endif %}</td>
         <td class="table-actions">
           <a class="source-action-icon" href="/sources/{{ source.id }}/edit" aria-label="编辑 {{ source.name }}" title="编辑">{{ icon('edit') }}<span class="sr-only">编辑</span></a>
+          {% if source_platform_enabled %}
           <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon" type="submit" aria-label="测试 {{ source.name }}" title="测试">{{ icon('test') }}<span class="sr-only">测试</span></button></form>
+          {% endif %}
           <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon" type="submit" aria-label="{{ '暂停' if source.enabled else '启用' }} {{ source.name }}" title="{{ '暂停' if source.enabled else '启用' }}">{{ icon('pause' if source.enabled else 'play') }}<span class="sr-only">{{ '暂停' if source.enabled else '启用' }}</span></button></form>
           <form method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="source-action-icon danger" type="submit" aria-label="归档 {{ source.name }}" title="归档此来源">{{ icon('archive') }}<span class="sr-only">归档</span></button></form>
         </td>
@@ -157,6 +168,7 @@
 <p class="source-mobile-field-hint" id="source-mobile-field-hint"><strong>字段说明：</strong><span>上次＝最近检查</span><span>+N＝本次新增</span><span>下次＝计划抓取</span><span>min＝分钟</span></p>
 <section class="source-mobile-list" aria-label="来源列表" aria-describedby="source-mobile-field-hint">
   {% for source in sources %}
+    {% set source_platform_enabled = platform_fetch_enabled.get(source.kind, true) %}
     <article class="source-mobile-card">
       <header class="source-mobile-head">
         <div class="source-mobile-identity">
@@ -167,7 +179,9 @@
           <span>上次</span>
           <strong>{{ source.last_fetch_at|compact_relative_time }}</strong>
         </div>
-        {% if not source.enabled %}
+        {% if not source_platform_enabled %}
+          <span class="status paused">平台已停用</span>
+        {% elif not source.enabled %}
           <span class="status paused">已暂停</span>
         {% elif source.kind == 'x_rsshub' and not x_credential.configured %}
           <span class="status attention">需登录</span>
@@ -178,10 +192,15 @@
       <dl class="source-mobile-details">
         <div><dt class="sr-only">平台</dt><dd>{{ source.kind|kind_label }}</dd></div>
         <div><dt class="sr-only">本次新增</dt><dd>+{{ source.last_new_item_count }}</dd></div>
-        <div><dt>下次</dt><dd>{{ source.next_fetch_at|compact_relative_time if source.next_fetch_at else '待排期' }}</dd></div>
+        <div><dt>下次</dt><dd>{{ '平台已停用' if not source_platform_enabled else (source.next_fetch_at|compact_relative_time if source.next_fetch_at else '待排期') }}</dd></div>
       </dl>
       {% if source.description %}<p class="source-mobile-description">{{ source.description }}</p>{% endif %}
-      {% if source.enabled and source.kind == 'x_rsshub' and not x_credential.configured %}
+      {% if not source_platform_enabled %}
+        <details class="source-mobile-state-details">
+          <summary>平台抓取已停用</summary>
+          <p class="source-state-note">可在“设置与连接”中恢复该平台抓取。</p>
+        </details>
+      {% elif source.enabled and source.kind == 'x_rsshub' and not x_credential.configured %}
         <details class="source-mobile-state-details">
           <summary>连接待配置</summary>
           <p class="source-state-note">等待保存完整 X Cookie</p>
@@ -194,7 +213,9 @@
       {% endif %}
       <div class="source-mobile-actions">
         <a class="button button-secondary source-action-button source-action-icon-only" href="/sources/{{ source.id }}/edit" aria-label="编辑 {{ source.name }}" title="编辑">{{ icon('edit') }}<span class="sr-only">编辑</span></a>
+        {% if source_platform_enabled %}
         <form method="post" action="/sources/{{ source.id }}/test"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary source-action-button source-action-icon-only" type="submit" aria-label="测试 {{ source.name }}" title="测试">{{ icon('test') }}<span class="sr-only">测试</span></button></form>
+        {% endif %}
         <form method="post" action="/sources/{{ source.id }}/toggle"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button button-secondary source-action-button source-action-icon-only" type="submit" aria-label="{{ '暂停' if source.enabled else '启用' }} {{ source.name }}" title="{{ '暂停' if source.enabled else '启用' }}">{{ icon('pause' if source.enabled else 'play') }}<span class="sr-only">{{ '暂停' if source.enabled else '启用' }}</span></button></form>
         <form class="source-mobile-archive" method="post" action="/sources/{{ source.id }}/archive"><input type="hidden" name="source_kind" value="{{ selected_source_kind }}"><input type="hidden" name="page" value="{{ source_page }}"><button class="button-with-icon source-action-button source-action-archive" type="submit">{{ icon('archive') }}<span>归档</span></button></form>
       </div>

@@ -52,10 +52,15 @@ class Collector:
         if not force:
             result.sources_scheduled = self.repository.schedule_unplanned_sources(policy)
         candidates = self.repository.list_sources() if force else self.repository.due_sources()
+        platform_fetch_enabled = self.repository.platform_fetch_enabled_map()
         sources = [
             source
             for source in candidates
-            if source["enabled"] and self.connections.for_kind(source["kind"]).usable
+            if (
+                source["enabled"]
+                and platform_fetch_enabled.get(str(source["kind"]), True)
+                and self.connections.for_kind(source["kind"]).usable
+            )
         ]
         # A connector can share a credential or connection across many sources.
         # In particular, X validates the Cookie once before collecting all due
@@ -65,6 +70,9 @@ class Collector:
             grouped.setdefault(str(source["kind"]), []).append(source)
 
         for group_index, (kind, group) in enumerate(grouped.items()):
+            # 读取候选列表后，用户仍可能在设置页停用平台；真正发请求前再次确认。
+            if not self.repository.platform_fetch_enabled(kind):
+                continue
             # 插件只负责同平台批次内的等待；切换平台时也要留出间隔，
             # 这样整轮中相邻的两次来源请求都会错开。
             if group_index:

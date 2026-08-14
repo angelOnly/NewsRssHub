@@ -14,6 +14,20 @@ from app.services.rsshub_runtime import RssHubRuntimeFiles
 from app.storage.repository import Repository
 
 
+class PlatformFetchDisabledError(ValueError):
+    """平台级开关已关闭时，阻止任何单来源测试请求。"""
+
+    def __init__(self, kind: SourceKind | str) -> None:
+        self.kind = SourceKind(kind)
+        labels = {
+            SourceKind.X_RSSHUB: "X",
+            SourceKind.REDDIT: "Reddit",
+            SourceKind.YOUTUBE: "YouTube",
+            SourceKind.RSS: "RSS / Atom",
+        }
+        super().__init__(f"{labels[self.kind]} 平台抓取已停用，未发起连接测试。")
+
+
 class SourceService:
     def __init__(
         self,
@@ -61,12 +75,13 @@ class SourceService:
         source = self.repository.get_source(source_id)
         assert source is not None
 
+        platform_fetch_enabled = self.repository.platform_fetch_enabled(normalized.kind)
         result: ValidationResult | None = None
-        if validate:
+        if validate and platform_fetch_enabled:
             result = self.validate_source(source_id)
             source = self.repository.get_source(source_id)
             assert source is not None
-        if source["enabled"]:
+        if source["enabled"] and platform_fetch_enabled:
             self.repository.schedule_initial_fetch(source_id)
             source = self.repository.get_source(source_id)
             assert source is not None
@@ -106,7 +121,11 @@ class SourceService:
                 "enabled": int(draft.enabled),
             },
         )
-        if draft.enabled and not current["enabled"]:
+        if (
+            draft.enabled
+            and not current["enabled"]
+            and self.repository.platform_fetch_enabled(draft.kind)
+        ):
             self.repository.schedule_initial_fetch(source_id)
         self.sync_rsshub_runtime()
         source = self.repository.get_source(source_id)
@@ -117,6 +136,8 @@ class SourceService:
         source = self.repository.get_source(source_id)
         if not source:
             raise ValueError("来源不存在。")
+        if not self.repository.platform_fetch_enabled(source["kind"]):
+            raise PlatformFetchDisabledError(source["kind"])
         plugin = self.registry.get(source["kind"])
         try:
             result = plugin.validate(source, self.settings)
@@ -232,7 +253,7 @@ class SourceService:
             if self.repository.find_source(normalized.kind.value, normalized.locator):
                 continue
             source_id = self.repository.create_source(normalized, feed_url)
-            if normalized.enabled:
+            if normalized.enabled and self.repository.platform_fetch_enabled(normalized.kind):
                 self.repository.schedule_initial_fetch(source_id)
             created += 1
         self.synchronize_rsshub_sources()

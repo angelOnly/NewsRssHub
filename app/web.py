@@ -19,6 +19,7 @@ from app.runtime import ApplicationServices, build_services
 from app.services.connections import ConnectionRequiredError
 from app.services.llm_client import LLMRequestError
 from app.services.llm_connection import LLMConnectionError
+from app.services.sources import PlatformFetchDisabledError
 from app.services.x_session import XSessionError
 from app.services.web_push import WebPushError, WebPushSubscriptionError
 
@@ -102,6 +103,15 @@ def _kind_label(kind: str) -> str:
     }.get(kind, kind)
 
 
+def _platform_label(kind: SourceKind | str) -> str:
+    """返回平台级设置使用的简短名称，不沿用来源卡片里的冗长描述。"""
+
+    try:
+        return dict(SOURCE_PLATFORM_TABS)[SourceKind(kind).value]
+    except ValueError:
+        return str(kind)
+
+
 def _tier_label(tier: str) -> str:
     return dict(TIER_TABS).get(tier, "待筛选")
 
@@ -172,6 +182,7 @@ def render(
         "x_credential": services.x_sessions.status(),
         "llm_credential": services.llm_connections.status(),
         "platform_connections": services.connections.source_connections(),
+        "platform_fetch_enabled": services.repository.platform_fetch_enabled_map(),
         "has_x_sources": services.repository.has_enabled_source_kind("x_rsshub"),
         "skill_status": services.pipeline.skill_loader.status(),
     }
@@ -288,6 +299,10 @@ def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectRespo
 
 def fetch_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return settings_redirect(anchor="fetch", notice=notice, error=error)
+
+
+def platform_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="platforms", notice=notice, error=error)
 
 
 def daily_topics_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
@@ -718,10 +733,16 @@ def sources(
         page=_source_page_value(page),
         page_size=SOURCE_PAGE_SIZE,
     )
-    current_page_testable_count = sum(1 for source in source_page.sources if source["enabled"])
+    platform_fetch_enabled = services.repository.platform_fetch_enabled_map()
+    current_page_testable_count = sum(
+        1
+        for source in source_page.sources
+        if source["enabled"] and platform_fetch_enabled.get(str(source["kind"]), True)
+    )
     can_queue_current_page_test = (
         selected_kind != "all"
         and current_page_testable_count > 0
+        and platform_fetch_enabled.get(selected_kind, True)
         and services.connections.for_kind(selected_kind).usable
     )
     kind_counts = services.repository.source_kind_counts()
@@ -786,12 +807,40 @@ def save_fetch_policy(
         policy, rescheduled = get_services(request).repository.save_fetch_policy(interval_minutes)
         return fetch_settings_redirect(
             notice=(
-                f"已将全部来源统一设为每 {policy.interval_minutes} 分钟抓取一次；"
+                f"已将所有启用平台的来源统一设为每 {policy.interval_minutes} 分钟抓取一次；"
                 f"{rescheduled} 个启用来源已在未来 1–5 分钟内错峰重排。"
             )
         )
     except Exception:
         return fetch_settings_redirect(error="抓取策略保存失败，请输入 5 到 1440 的整数分钟数。")
+
+
+@app.post("/settings/platforms/{kind}/fetch-toggle")
+def toggle_platform_fetch(request: Request, kind: str) -> RedirectResponse:
+    """一次切换某个平台的所有来源抓取，不改动单来源启停状态。"""
+
+    try:
+        source_kind = SourceKind(kind)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="未找到该抓取平台") from None
+
+    label = _platform_label(source_kind)
+    try:
+        repository = get_services(request).repository
+        was_enabled = repository.platform_fetch_enabled(source_kind)
+        affected = repository.set_platform_fetch_enabled(source_kind, not was_enabled)
+    except Exception:
+        return platform_settings_redirect(error=f"暂时无法更新 {label} 平台抓取状态，请稍后重试。")
+    if was_enabled:
+        return platform_settings_redirect(
+            notice=(
+                f"已停用 {label} 平台抓取，{affected} 个启用来源已取消排期；"
+                "不会改变单个来源的启停状态、平台凭据或历史内容。"
+            )
+        )
+    return platform_settings_redirect(
+        notice=f"已恢复 {label} 平台抓取，{affected} 个启用来源已在未来 1–5 分钟内错峰排期。"
+    )
 
 
 @app.post("/settings/daily-topics-interval")
@@ -1076,7 +1125,16 @@ def create_source(
         )
         source, validation = services.sources.add_source(draft, validate=True)
         selected_kind = str(source["kind"])
-        capture_state = "已启用抓取。" if source["enabled"] else "当前保持暂停。"
+        platform_enabled = services.repository.platform_fetch_enabled(selected_kind)
+        capture_state = (
+            "当前保持暂停。"
+            if not source["enabled"]
+            else (
+                "平台抓取当前已停用，未安排抓取。"
+                if not platform_enabled
+                else "已启用抓取。"
+            )
+        )
         if validation and validation.ok:
             return sources_redirect(
                 notice=f"已添加并验证成功：{source['name']}。连接正常，{capture_state}",
@@ -1144,6 +1202,14 @@ def edit_source(
             enabled=enabled,
         )
         services.sources.update_source(source_id, draft)
+        if not services.repository.platform_fetch_enabled(source["kind"]):
+            return sources_redirect(
+                notice=(
+                    f"来源配置已保存；{_platform_label(source['kind'])} 平台抓取当前已停用，"
+                    "未发起连接测试。"
+                ),
+                kind=source["kind"],
+            )
         validation = services.sources.validate_source(source_id)
         if validation.ok:
             return sources_redirect(notice=f"来源配置已保存并验证：{validation.message}")
@@ -1168,6 +1234,12 @@ def queue_current_source_page_for_test(
         return sources_redirect(error="请先选择一个具体平台，再测试当前页来源。")
 
     services = get_services(request)
+    if not services.repository.platform_fetch_enabled(selected_kind):
+        return sources_redirect(
+            error=f"{_platform_label(selected_kind)} 平台抓取已停用，无法安排测试。",
+            kind=selected_kind,
+            page=selected_page,
+        )
     try:
         services.connections.ensure_source_ready(selected_kind)
     except ConnectionRequiredError as exc:
@@ -1211,10 +1283,22 @@ def test_source(
     source_kind: str = Form("all"),
     page: int = Form(1),
 ) -> RedirectResponse:
+    services = get_services(request)
+    source = services.repository.get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="未找到来源")
+    if not services.repository.platform_fetch_enabled(source["kind"]):
+        return sources_redirect(
+            error=f"{_platform_label(source['kind'])} 平台抓取已停用，无法测试来源。",
+            kind=source_kind,
+            page=page,
+        )
     try:
-        result = get_services(request).sources.validate_source(source_id)
+        result = services.sources.validate_source(source_id)
         prefix = "连接正常：" if result.ok else "连接失败："
         return sources_redirect(notice=f"{prefix}{result.message}", kind=source_kind, page=page)
+    except PlatformFetchDisabledError as exc:
+        return sources_redirect(error=str(exc), kind=source_kind, page=page)
     except Exception as exc:
         return sources_redirect(error=str(exc), kind=source_kind, page=page)
 
@@ -1239,6 +1323,15 @@ def toggle_source(
             page=page,
         )
     # 重新启用时不要沿用暂停前可能已过期的时间，避免多来源同时立刻抓取。
+    if not repository.platform_fetch_enabled(source["kind"]):
+        return sources_redirect(
+            notice=(
+                f"来源已启用；{_platform_label(source['kind'])} 平台抓取当前已停用，"
+                "未安排抓取。"
+            ),
+            kind=source_kind,
+            page=page,
+        )
     repository.schedule_initial_fetch(source_id)
     return sources_redirect(
         notice="来源已启用，已安排在未来 1–5 分钟内错峰抓取。", kind=source_kind, page=page

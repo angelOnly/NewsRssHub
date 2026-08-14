@@ -372,3 +372,7 @@
 /* 首页不展示话题列表，只给命中的事件一枚不打断阅读的橙色标签。 */
 .daily-topic-badge{display:inline-block;max-width:240px;overflow:hidden;padding:1px 6px;border:1px solid #fed7aa;border-radius:999px;background:#fff1e5;color:#c2410c;font-size:11px;font-weight:700;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:600px){.weekly-topic-list{display:block;min-width:0}.weekly-topic-card{width:100%;padding:12px 13px;border-radius:11px}.weekly-topic-card+.weekly-topic-card{margin-top:8px}.weekly-topic-card h2{font-size:14px;font-weight:700;line-height:1.36;letter-spacing:-.15px}.daily-topic-description{margin-top:3px;font-size:11px}.daily-topic-badge{max-width:min(58vw,230px)}}
+
+/* 平台级开关与连接状态分开呈现，停用抓取不等于删除凭据或单条来源。 */
+.connection-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.connection-card-actions form,.platform-fetch-control form{margin:0}.platform-fetch-control{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}.platform-fetch-disabled{border-color:#e7d7c2!important;background:#fffbf5}.platform-fetch-disabled .connection-mode{color:#8b653e}.platform-mobile-item.is-paused{background:#fff7ec;color:#8b653e}
+@media(max-width:600px){.connection-card-actions{display:grid;width:100%;grid-template-columns:1fr 1fr}.connection-card-actions .button,.platform-fetch-control .button{width:100%}.platform-fetch-control{align-items:flex-start;flex-direction:column;gap:10px}.platform-fetch-control form{width:100%}}

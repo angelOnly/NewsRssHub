@@ -137,6 +137,59 @@ class FetchPolicyRepositoryTests(unittest.TestCase):
             )
             self.assertEqual(next_fetch_at, (now + timedelta(minutes=35)).isoformat())
 
+    def test_platform_switch_cancels_and_restores_only_its_source_schedules(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "data" / "test.db")
+            database.initialize()
+            repository = Repository(database)
+            reddit_id = repository.create_source(
+                SourceDraft(name="Reddit", kind=SourceKind.REDDIT, locator="r/example"),
+                "https://www.reddit.com/r/example/.rss",
+            )
+            rss_id = repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/feed"),
+                "https://example.test/feed",
+            )
+            now = datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)
+            due_at = (now - timedelta(minutes=1)).isoformat()
+            repository.update_source(reddit_id, {"next_fetch_at": due_at})
+            repository.update_source(rss_id, {"next_fetch_at": due_at})
+
+            affected = repository.set_platform_fetch_enabled(
+                SourceKind.REDDIT,
+                False,
+                now=now,
+                jitter_provider=lambda _minimum, _maximum: 60,
+            )
+
+            self.assertEqual(affected, 1)
+            self.assertFalse(repository.platform_fetch_enabled(SourceKind.REDDIT))
+            # 开关保存在 SQLite 的应用设置中，重建 Repository 后仍然生效。
+            reopened_repository = Repository(Database(database.path))
+            self.assertFalse(reopened_repository.platform_fetch_enabled(SourceKind.REDDIT))
+            reddit = repository.get_source(reddit_id)
+            assert reddit is not None
+            self.assertTrue(reddit["enabled"])
+            self.assertIsNone(reddit["next_fetch_at"])
+            # 即使存在并发写入的旧排期，查询层也不会再把停用平台交给采集器。
+            repository.update_source(reddit_id, {"next_fetch_at": due_at})
+            self.assertEqual(
+                {int(source["id"]) for source in repository.due_sources(now)}, {rss_id}
+            )
+
+            restored = repository.set_platform_fetch_enabled(
+                SourceKind.REDDIT,
+                True,
+                now=now,
+                jitter_provider=lambda _minimum, _maximum: 60,
+            )
+
+            self.assertEqual(restored, 1)
+            self.assertTrue(repository.platform_fetch_enabled(SourceKind.REDDIT))
+            reddit = repository.get_source(reddit_id)
+            assert reddit is not None
+            self.assertEqual(reddit["next_fetch_at"], (now + timedelta(minutes=1)).isoformat())
+
 
 class CollectorSchedulingTests(unittest.TestCase):
     def test_first_pass_only_creates_initial_schedule(self) -> None:
@@ -225,6 +278,37 @@ class CollectorSchedulingTests(unittest.TestCase):
                 next_fetch_at = datetime.fromisoformat(str(source["next_fetch_at"]))
                 self.assertGreaterEqual(next_fetch_at, lower_bound)
                 self.assertLessEqual(next_fetch_at, upper_bound)
+
+    def test_forced_collection_still_skips_a_disabled_platform(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            database = Database(settings.database_path)
+            database.initialize()
+            repository = Repository(database)
+            rss_id = repository.create_source(
+                SourceDraft(name="RSS", kind=SourceKind.RSS, locator="https://example.test/rss"),
+                "https://example.test/rss",
+            )
+            reddit_id = repository.create_source(
+                SourceDraft(name="Reddit", kind=SourceKind.REDDIT, locator="r/example"),
+                "https://www.reddit.com/r/example/.rss",
+            )
+            repository.set_platform_fetch_enabled(SourceKind.REDDIT, False)
+            rss_plugin = RecordingPlugin(SourceKind.RSS)
+            reddit_plugin = RecordingPlugin(SourceKind.REDDIT)
+
+            summary = Collector(
+                repository,
+                PluginRegistry([rss_plugin, reddit_plugin]),
+                settings,
+                ConnectionCatalog(rsshub_base_url=settings.rsshub_base_url),
+                sleeper=lambda _seconds: None,
+            ).collect_due_sources(force=True)
+
+            self.assertEqual(summary.sources_checked, 1)
+            self.assertEqual(rss_plugin.calls, [rss_id])
+            self.assertEqual(reddit_plugin.calls, [])
+            self.assertNotEqual(rss_id, reddit_id)
 
 if __name__ == "__main__":
     unittest.main()

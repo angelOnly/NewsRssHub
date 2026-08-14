@@ -155,16 +155,19 @@
       <div>
         <p class="eyebrow">SOURCE PLATFORMS</p>
         <h2>抓取平台</h2>
-        <p>先在这里处理平台访问方式，再添加对应的账号、社区或 RSS 来源。</p>
+        <p>先在这里处理平台访问方式；每个平台只需设置一次，也可在此一键停用该平台的全部来源抓取。</p>
       </div>
       <a class="button button-secondary" href="/sources/new">添加来源</a>
     </header>
 
     <div class="platform-mobile-overview" aria-label="平台连接概览">
       {% for connection in platform_connections %}
-        <div class="platform-mobile-item {{ 'is-ready' if connection.usable else 'needs-setup' }}">
+        {% set fetch_enabled = platform_fetch_enabled.get(connection.source_kind.value, true) %}
+        <div class="platform-mobile-item {{ 'is-paused' if not fetch_enabled else ('is-ready' if connection.usable else 'needs-setup') }}">
           <strong>{{ 'RSS' if connection.key == 'rsshub_rss' else connection.platform }}</strong>
-          {% if connection.requires_credentials %}
+          {% if not fetch_enabled %}
+            <span>抓取已停用</span>
+          {% elif connection.requires_credentials %}
             <span>{{ 'Cookie 已保存' if connection.usable else '需配置' }}</span>
           {% else %}
             <span>{{ '公开可用' if connection.usable else '需 RSSHub' }}</span>
@@ -183,7 +186,8 @@
       </summary>
       <div class="settings-fold-content">
         {% for connection in platform_connections if connection.key == 'x_session' %}
-          <article class="connection-card connection-card-wide {{ connection.state }}">
+          {% set fetch_enabled = platform_fetch_enabled.get(connection.source_kind.value, true) %}
+          <article class="connection-card connection-card-wide {{ connection.state }} {{ 'platform-fetch-disabled' if not fetch_enabled }}">
             <div class="connection-card-top">
               <div>
                 <p class="eyebrow">X CONNECTION</p>
@@ -211,12 +215,19 @@
                   <button type="submit">验证并刷新 X 来源</button>
                 </form>
               {% endif %}
+              <div class="connection-card-foot platform-fetch-control">
+                <span class="connection-mode">{{ '抓取已启用，所有已启用的 X 来源会按排期运行。' if fetch_enabled else '抓取已停用，所有 X 来源均不会自动抓取或手动测试。' }}</span>
+                <form method="post" action="/settings/platforms/{{ connection.source_kind.value }}/fetch-toggle">
+                  <button class="button {{ 'button-secondary' if fetch_enabled else 'button-primary' }}" type="submit">{{ '停用抓取' if fetch_enabled else '恢复抓取' }}</button>
+                </form>
+              </div>
           </article>
         {% endfor %}
 
         <div class="connection-grid connection-grid-public">
           {% for connection in platform_connections if connection.key != 'x_session' %}
-            <article class="connection-card {{ connection.state }}">
+            {% set fetch_enabled = platform_fetch_enabled.get(connection.source_kind.value, true) %}
+            <article class="connection-card {{ connection.state }} {{ 'platform-fetch-disabled' if not fetch_enabled }}">
               <div class="connection-card-top">
                 <div>
                   <p class="eyebrow">{{ connection.platform|upper }}</p>
@@ -226,8 +237,13 @@
               </div>
               <p>{{ connection.message }}</p>
               <div class="connection-card-foot">
-                <span class="connection-mode">{{ '无需账号凭据' if connection.usable else '请先配置 RSSHub 地址' }}</span>
-                <a class="button button-secondary" href="/sources/new">添加来源</a>
+                <span class="connection-mode">{{ '抓取已停用，所有该平台来源均不会自动抓取或手动测试。' if not fetch_enabled else ('无需账号凭据' if connection.usable else '请先配置 RSSHub 地址') }}</span>
+                <div class="connection-card-actions">
+                  <form method="post" action="/settings/platforms/{{ connection.source_kind.value }}/fetch-toggle">
+                    <button class="button {{ 'button-secondary' if fetch_enabled else 'button-primary' }}" type="submit">{{ '停用抓取' if fetch_enabled else '恢复抓取' }}</button>
+                  </form>
+                  <a class="button button-secondary" href="/sources/new">添加来源</a>
+                </div>
               </div>
             </article>
           {% endfor %}
