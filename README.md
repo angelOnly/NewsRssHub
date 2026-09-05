@@ -77,7 +77,26 @@ uvicorn app.web:app --reload
 
 Worker 首次运行会创建一份来源快照，之后每 3 天最多创建一份。快照保存到容器的 `/app/data/source_backups/`，因 Compose 已挂载数据目录，服务器实际位置为 `/home/jzb/docker/rss-hub/data/source_backups/`。系统仅保留最新 5 份；Cookie、API Key、抓取状态、错误记录和连接器缓存都不会写入这些 YAML 文件。
 
-本次 SQLite v11 与今日话题实现说明见 [今日热点迭代记录](docs/ITERATION_2026-08-05_DAILY_TOPICS.md)；此前 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)。
+本次 SQLite v11 与今日话题实现说明见 [今日热点迭代记录](docs/ITERATION_2026-08-05_DAILY_TOPICS.md)；此前 SQLite v9、账号简介、全局抓取、媒体预览与收藏保留的整合说明见 [整合记录](docs/INTEGRATION_2026-08-04_FETCH_MEDIA_FAVORITES.md)。如需在其他项目中接入经授权的视频文件下载，见 [YouTube 视频下载接入指南](docs/YOUTUBE_VIDEO_DOWNLOAD_INTEGRATION.md)；本项目的自动抓取仍只保存远端媒体链接，手动下载则通过下方接口执行。
+
+## YouTube 视频下载接口
+
+NewsRSSHub 的自动抓取仍只保存 YouTube 频道更新和远端预览，但个人部署可直接调用无额外鉴权的下载接口：
+
+~~~bash
+curl -X POST "https://你的域名/api/youtube/download" \
+  -H "Content-Type: application/json" \
+  --data '{"url":"https://www.youtube.com/watch?v=视频ID"}' \
+  --output video.mp4
+~~~
+
+接口同步返回单个 MP4，支持标准视频链接、Shorts、Live、Embed 和短链；不会下载播放列表。首次使用前需要重新构建 Docker 镜像，以安装 yt-dlp 和 FFmpeg：
+
+~~~bash
+docker compose up -d --build
+~~~
+
+YOUTUBE_KEY 继续只供 RSSHub 抓取频道更新使用，下载接口不读取它。由于接口没有额外鉴权，只应部署在你自己可访问的范围内。完整说明、错误码和已知代价见 [YouTube 视频下载接入指南](docs/YOUTUBE_VIDEO_DOWNLOAD_INTEGRATION.md)。
 
 ## 内容处理顺序
 

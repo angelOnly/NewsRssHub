@@ -12,6 +12,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from app.domain.curation import EditorialTier
 from app.domain.models import SourceDraft, SourceKind
@@ -22,6 +24,7 @@ from app.services.llm_connection import LLMConnectionError
 from app.services.sources import PlatformFetchDisabledError
 from app.services.x_session import XSessionError
 from app.services.web_push import WebPushError, WebPushSubscriptionError
+from app.services.youtube_download import YouTubeDownloadError
 
 
 TIER_TABS: tuple[tuple[str, str], ...] = (
@@ -39,6 +42,12 @@ SOURCE_PLATFORM_TABS: tuple[tuple[str, str], ...] = (
     (SourceKind.YOUTUBE.value, "YouTube"),
     (SourceKind.RSS.value, "RSS"),
 )
+
+
+class YouTubeDownloadRequest(BaseModel):
+    """个人下载接口的最小请求体。"""
+
+    url: str
 
 
 def _fmt_time(value: str | None) -> str:
@@ -407,6 +416,29 @@ def health(request: Request) -> JSONResponse:
             "pending_curation": stats["pending_curation"],
             "pending_translation": stats["pending_translation"],
         }
+    )
+
+
+@app.post("/api/youtube/download")
+def download_youtube_video(
+    request: Request,
+    payload: YouTubeDownloadRequest,
+) -> FileResponse:
+    """接收单条 YouTube 视频 URL，并直接返回下载后的媒体文件。"""
+
+    downloader = get_services(request).youtube_downloader
+    try:
+        video = downloader.download(payload.url)
+    except YouTubeDownloadError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return FileResponse(
+        video.path,
+        media_type=video.media_type,
+        filename=video.download_name,
+        headers={"Cache-Control": "no-store"},
+        # 文件响应结束后立刻清理该任务目录，避免个人实例长期堆积媒体文件。
+        background=BackgroundTask(downloader.remove_task, video.task_directory),
     )
 
 

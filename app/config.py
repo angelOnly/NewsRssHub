@@ -60,6 +60,7 @@ class Settings:
     timezone: str
     rsshub_base_url: str | None = None
     web_push_subject: str = "mailto:newsrsshub@localhost"
+    youtube_download_timeout_seconds: int = 3600
 
     @property
     def profile_path(self) -> Path:
@@ -109,6 +110,9 @@ def build_settings() -> Settings:
         web_push_subject=str(
             app_config.get("web_push_subject", "mailto:newsrsshub@localhost")
         ).strip(),
+        youtube_download_timeout_seconds=max(
+            60, int(app_config.get("youtube_download_timeout_seconds", 3600))
+        ),
     )
 
 

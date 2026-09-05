@@ -8,4 +8,6 @@ pywebpush>=2,<3
 python-multipart>=0.0.9,<1
 PyYAML>=6.0,<7
 requests>=2.31,<3
+tzdata>=2025.1,<2027
+yt-dlp==2026.8.19
 uvicorn[standard]>=0.30,<1

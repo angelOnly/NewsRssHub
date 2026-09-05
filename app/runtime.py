@@ -15,6 +15,7 @@ from app.services.x_session import XSessionService, remove_legacy_sqlite_x_crede
 from app.services.web_push import WebPushService
 from app.storage.database import Database
 from app.storage.repository import Repository
+from app.services.youtube_download import YouTubeDownloadService
 
 
 @dataclass(slots=True)
@@ -30,6 +31,7 @@ class ApplicationServices:
     batch_sources: BatchSourceImportService
     source_backups: SourceBackupService
     web_push: WebPushService
+    youtube_downloader: YouTubeDownloadService
 
 
 def build_services(settings: Settings | None = None) -> ApplicationServices:
@@ -45,6 +47,7 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     registry = build_source_registry()
     source_backups = SourceBackupService(repository, settings)
     web_push = WebPushService(repository, settings)
+    youtube_downloader = YouTubeDownloadService(settings)
     source_service = SourceService(
         repository,
         registry,
@@ -76,4 +79,5 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         batch_sources=batch_source_service,
         source_backups=source_backups,
         web_push=web_push,
+        youtube_downloader=youtube_downloader,
     )
