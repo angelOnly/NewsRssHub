@@ -180,7 +180,7 @@
       <summary>
         <span class="settings-fold-copy">
           <strong>平台连接设置</strong>
-          <small>配置或更新 X Cookie</small>
+          <small>配置或更新 X Cookie、YouTube 下载 Cookie</small>
         </span>
         <span class="status {{ 'attention' if x_credential.configured else 'error' }}">{{ '已保存' if x_credential.configured else '需配置' }}</span>
       </summary>
@@ -223,6 +223,32 @@
               </div>
           </article>
         {% endfor %}
+
+        <article class="connection-card connection-card-wide {{ youtube_credential.state }}" id="youtube">
+          <div class="connection-card-top">
+            <div>
+              <p class="eyebrow">YOUTUBE DOWNLOAD</p>
+              <h3>YouTube 下载</h3>
+            </div>
+            <span class="status {{ 'attention' if youtube_credential.configured else 'healthy' }}">
+              {{ 'Cookie 已保存' if youtube_credential.configured else '可选登录' }}
+            </span>
+          </div>
+          <p>{{ youtube_credential.message }}</p>
+          <form class="source-form credential-form" method="post" action="/settings/youtube-session" autocomplete="off">
+            <label>
+              YouTube Cookie
+              <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 youtube.com 请求中的完整 Cookie 字符串">
+              <small>仅用于 <code>POST /api/youtube/download</code>，不会改变 YouTube 频道/RSSHub 的自动抓取。请先在浏览器登录 YouTube，打开开发者工具的 Network，刷新 <code>youtube.com</code> 页面，从一个 <code>youtube.com</code> 请求的 Request Headers 复制完整单行 <code>Cookie</code> 值；不要复制 <code>Set-Cookie</code>，也不要把 Cookie 发到聊天里。它只保存到 Web 服务的数据卷运行时文件，不写入 SQLite，也不会回显。</small>
+            </label>
+            <div class="form-actions">
+              <button class="button button-primary" type="submit">保存 YouTube Cookie</button>
+            </div>
+          </form>
+          <div class="connection-card-foot">
+            <span class="connection-mode">保存后无需重启；下一次视频下载会自动将 Cookie 文件传给 yt-dlp。Cookie 失效时，在这里重新粘贴即可。</span>
+          </div>
+        </article>
 
         <div class="connection-grid connection-grid-public">
           {% for connection in platform_connections if connection.key != 'x_session' %}

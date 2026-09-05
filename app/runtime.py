@@ -13,6 +13,7 @@ from app.services.source_backups import SourceBackupService
 from app.services.translator import TranslationService
 from app.services.x_session import XSessionService, remove_legacy_sqlite_x_credential
 from app.services.web_push import WebPushService
+from app.services.youtube_session import YouTubeSessionService
 from app.storage.database import Database
 from app.storage.repository import Repository
 from app.services.youtube_download import YouTubeDownloadService
@@ -31,6 +32,7 @@ class ApplicationServices:
     batch_sources: BatchSourceImportService
     source_backups: SourceBackupService
     web_push: WebPushService
+    youtube_sessions: YouTubeSessionService
     youtube_downloader: YouTubeDownloadService
 
 
@@ -47,7 +49,12 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
     registry = build_source_registry()
     source_backups = SourceBackupService(repository, settings)
     web_push = WebPushService(repository, settings)
-    youtube_downloader = YouTubeDownloadService(settings)
+    youtube_sessions = YouTubeSessionService(settings)
+    # 下载器只拿到运行时文件路径；Cookie 内容不会经过 SQLite 或日志。
+    youtube_downloader = YouTubeDownloadService(
+        settings,
+        cookie_file_path=youtube_sessions.cookie_file_path,
+    )
     source_service = SourceService(
         repository,
         registry,
@@ -79,5 +86,6 @@ def build_services(settings: Settings | None = None) -> ApplicationServices:
         batch_sources=batch_source_service,
         source_backups=source_backups,
         web_push=web_push,
+        youtube_sessions=youtube_sessions,
         youtube_downloader=youtube_downloader,
     )

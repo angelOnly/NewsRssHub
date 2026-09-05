@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+from app.config import Settings
+from app.services.youtube_session import (
+    YouTubeCredentialConfigurationError,
+    YouTubeCredentialMissingError,
+    YouTubeSessionService,
+    parse_youtube_cookie,
+)
+from yt_dlp.cookies import YoutubeDLCookieJar
+
+
+def build_settings(root: Path) -> Settings:
+    source_dir = root / "sources"
+    source_dir.mkdir()
+    return Settings(
+        root_dir=root,
+        source_dir=source_dir,
+        data_dir=root / "data",
+        database_path=root / "data" / "test.db",
+        request_timeout=5,
+        log_level="INFO",
+        llm_enabled=False,
+        openai_api_key=None,
+        openai_base_url="https://example.test/v1",
+        openai_model_name="test",
+        credential_encryption_key=None,
+        timezone="Asia/Shanghai",
+        rsshub_base_url="https://rsshub.example.test",
+    )
+
+
+class YouTubeSessionTests(unittest.TestCase):
+    def test_complete_cookie_is_written_only_to_the_runtime_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            service = YouTubeSessionService(settings)
+            cookie = "SID=session-value; SAPISID=api-value; PREF=visitor-value"
+
+            status = service.save_from_web(cookie)
+
+            self.assertEqual(status.state, "saved")
+            self.assertTrue(status.configured)
+            self.assertNotIn("session-value", status.message)
+            self.assertFalse(settings.database_path.exists())
+            self.assertEqual(
+                service.cookie_file_path.read_text(encoding="utf-8"),
+                "# Netscape HTTP Cookie File\n"
+                "# 由 NewsRSSHub 生成，仅供 yt-dlp 使用。\n"
+                ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tsession-value\n"
+                ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSAPISID\tapi-value\n"
+                ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tPREF\tvisitor-value\n",
+            )
+            cookie_jar = YoutubeDLCookieJar(str(service.cookie_file_path))
+            cookie_jar.load()
+            self.assertEqual(
+                cookie_jar._cookies[".youtube.com"]["/"]["SID"].value,
+                "session-value",
+            )
+
+    def test_invalid_cookie_does_not_replace_the_saved_runtime_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            service = YouTubeSessionService(settings)
+            service.save_from_web("SID=known-good-session; HSID=known-good-hsid")
+            before = service.cookie_file_path.read_text(encoding="utf-8")
+
+            with self.assertRaises(YouTubeCredentialMissingError):
+                service.save_from_web("PREF=visitor-only")
+
+            self.assertEqual(service.cookie_file_path.read_text(encoding="utf-8"), before)
+
+    def test_invalid_runtime_file_is_not_treated_as_a_saved_cookie(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            service = YouTubeSessionService(settings)
+            service.cookie_file_path.parent.mkdir(parents=True)
+            service.cookie_file_path.write_text("not a netscape cookie file", encoding="utf-8")
+
+            self.assertEqual(service.status().state, "invalid")
+            self.assertFalse(service.status().configured)
+            with self.assertRaises(YouTubeCredentialConfigurationError):
+                service._read_cookie_names()
+
+    def test_parser_accepts_cookie_header_prefix_but_requires_login_fields(self) -> None:
+        self.assertEqual(
+            parse_youtube_cookie("Cookie: __Secure-1PSID=secure-session; PREF=visitor"),
+            {"__Secure-1PSID": "secure-session", "PREF": "visitor"},
+        )
+        with self.assertRaises(YouTubeCredentialMissingError):
+            parse_youtube_cookie("PREF=visitor; YSC=visitor")
+        with self.assertRaises(YouTubeCredentialMissingError):
+            parse_youtube_cookie("SID=one;\nHSID=two")
+
+
+if __name__ == "__main__":
+    unittest.main()

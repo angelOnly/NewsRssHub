@@ -92,6 +92,30 @@ class WebTests(unittest.TestCase):
             finally:
                 delattr(app.state, "services")
 
+    def test_web_youtube_cookie_save_uses_only_the_runtime_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            services = build_services(settings)
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/settings/youtube-session",
+                        data={"cookie_value": "SID=web-test-session; HSID=web-test-hsid"},
+                        follow_redirects=False,
+                    )
+                    settings_page = client.get("/settings")
+
+                self.assertEqual(response.status_code, 303)
+                self.assertTrue(response.headers["location"].endswith("#youtube"))
+                self.assertIn("YouTube 下载 Cookie 已保存", settings_page.text)
+                self.assertIn("不会改变 YouTube 频道/RSSHub 的自动抓取", settings_page.text)
+                self.assertNotIn("web-test-session", settings_page.text)
+                self.assertTrue(services.youtube_sessions.cookie_file_path.is_file())
+                self.assertIsNone(services.repository.get_connector_credential("youtube_session"))
+            finally:
+                delattr(app.state, "services")
+
     def test_mobile_navigation_and_daily_topic_markup_are_present(self) -> None:
         navigation = templates.get_template("base.html").render(request=object(), active_path="/daily-topics")
         daily_page = templates.get_template("daily_topics.html").render(

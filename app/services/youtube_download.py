@@ -94,10 +94,11 @@ def normalize_youtube_video_url(raw_url: str) -> tuple[str, str]:
 class YouTubeDownloadService:
     """调用 yt-dlp 和 FFmpeg 下载一条视频，供个人 Web 服务直接返回文件。"""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, cookie_file_path: Path | None = None) -> None:
         self._root = settings.data_dir / "youtube-downloads"
         self._root.mkdir(parents=True, exist_ok=True)
         self._timeout_seconds = settings.youtube_download_timeout_seconds
+        self._cookie_file_path = cookie_file_path or settings.data_dir / "youtube-runtime" / "cookies.txt"
 
     def download(self, raw_url: str) -> DownloadedYouTubeVideo:
         """下载一条视频；失败时立即删除本次产生的临时文件。"""
@@ -105,9 +106,11 @@ class YouTubeDownloadService:
         canonical_url, video_id = normalize_youtube_video_url(raw_url)
         task_directory = self._root / uuid4().hex
         task_directory.mkdir()
+        # 每次请求重新判断，设置页刚保存的 Cookie 无需重启 Web 服务即可生效。
+        use_cookie = self._has_cookie_file()
         try:
             completed = subprocess.run(
-                self._command(canonical_url, task_directory),
+                self._command(canonical_url, task_directory, use_cookie=use_cookie),
                 cwd=task_directory,
                 check=False,
                 capture_output=True,
@@ -131,7 +134,7 @@ class YouTubeDownloadService:
                 video_id,
                 completed.returncode,
             )
-            raise self._download_failure(completed.stderr)
+            raise self._download_failure(completed.stderr, used_cookie=use_cookie)
 
         candidates = self._final_files(completed.stdout, task_directory)
         if len(candidates) != 1:
@@ -169,10 +172,16 @@ class YouTubeDownloadService:
         if candidate.exists():
             shutil.rmtree(candidate, ignore_errors=True)
 
-    def _command(self, canonical_url: str, task_directory: Path) -> list[str]:
+    def _command(
+        self,
+        canonical_url: str,
+        task_directory: Path,
+        *,
+        use_cookie: bool | None = None,
+    ) -> list[str]:
         """固定下载预设；调用方不能注入 yt-dlp 参数或输出模板。"""
 
-        return [
+        command = [
             sys.executable,
             "-m",
             "yt_dlp",
@@ -192,8 +201,21 @@ class YouTubeDownloadService:
             # 读取合并后的机器路径，而不是从普通日志猜测文件名。
             "--print",
             "after_move:filepath",
-            canonical_url,
         ]
+        should_use_cookie = use_cookie if use_cookie is not None else self._has_cookie_file()
+        if should_use_cookie:
+            # 只传运行时文件路径，绝不把 Cookie 值拼入子进程参数或日志。
+            command.extend(["--cookies", str(self._cookie_file_path)])
+        command.append(canonical_url)
+        return command
+
+    def _has_cookie_file(self) -> bool:
+        """Cookie 文件由设置页原子替换，下载时只检查其是否可读取。"""
+
+        try:
+            return self._cookie_file_path.is_file()
+        except OSError:
+            return False
 
     @staticmethod
     def _final_files(output: str, task_directory: Path) -> set[Path]:
@@ -216,7 +238,7 @@ class YouTubeDownloadService:
         return files
 
     @staticmethod
-    def _download_failure(stderr: str) -> YouTubeDownloadError:
+    def _download_failure(stderr: str, *, used_cookie: bool = False) -> YouTubeDownloadError:
         """把易变的上游错误收敛为稳定、无敏感信息的接口错误。"""
 
         message = stderr.casefold()
@@ -224,6 +246,24 @@ class YouTubeDownloadService:
             return YouTubeDownloadError("下载服务依赖未安装。", status_code=503)
         if "ffmpeg" in message and ("not found" in message or "not installed" in message):
             return YouTubeDownloadError("下载服务缺少 FFmpeg。", status_code=503)
+        if any(
+            marker in message
+            for marker in (
+                "sign in to confirm you're not a bot",
+                "sign in to confirm you’re not a bot",
+                "confirm you're not a bot",
+                "confirm you’re not a bot",
+            )
+        ):
+            if used_cookie:
+                return YouTubeDownloadError(
+                    "当前 YouTube Cookie 已失效或未通过验证，请在“设置与连接”更新后重试。",
+                    status_code=422,
+                )
+            return YouTubeDownloadError(
+                "YouTube 要求登录验证。请前往“设置与连接”保存 YouTube Cookie 后重试。",
+                status_code=422,
+            )
         if any(
             marker in message
             for marker in (

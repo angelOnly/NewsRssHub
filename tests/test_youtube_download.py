@@ -91,9 +91,46 @@ class YouTubeDownloadServiceTests(unittest.TestCase):
             self.assertEqual(commands[0][-1], "https://www.youtube.com/watch?v=abc_DEF-123")
             self.assertIn("--no-playlist", commands[0])
             self.assertNotIn("--playlist", commands[0])
+            self.assertNotIn("--cookies", commands[0])
 
             service.remove_task(downloaded.task_directory)
             self.assertFalse(downloaded.task_directory.exists())
+
+    def test_download_passes_the_runtime_cookie_file_without_exposing_its_value(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            cookie_path = settings.data_dir / "youtube-runtime" / "cookies.txt"
+            cookie_path.parent.mkdir(parents=True)
+            cookie_path.write_text("private-cookie-content", encoding="utf-8")
+            service = YouTubeDownloadService(settings, cookie_file_path=cookie_path)
+            commands: list[list[str]] = []
+
+            def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+                commands.append(command)
+                task_directory = Path(command[command.index("--paths") + 1])
+                video = task_directory / "abc_DEF-123.mp4"
+                video.write_bytes(b"fake-video")
+                return SimpleNamespace(returncode=0, stdout=f"{video}\n", stderr="")
+
+            with patch("app.services.youtube_download.subprocess.run", side_effect=fake_run):
+                downloaded = service.download("https://youtu.be/abc_DEF-123")
+
+            command = commands[0]
+            self.assertIn("--cookies", command)
+            self.assertEqual(command[command.index("--cookies") + 1], str(cookie_path))
+            self.assertNotIn("private-cookie-content", command)
+            service.remove_task(downloaded.task_directory)
+
+    def test_bot_verification_error_explains_whether_a_cookie_was_used(self) -> None:
+        stderr = "ERROR: Sign in to confirm you’re not a bot."
+
+        missing_cookie = YouTubeDownloadService._download_failure(stderr, used_cookie=False)
+        expired_cookie = YouTubeDownloadService._download_failure(stderr, used_cookie=True)
+
+        self.assertIn("保存 YouTube Cookie", str(missing_cookie))
+        self.assertIn("Cookie 已失效", str(expired_cookie))
+        self.assertEqual(missing_cookie.status_code, 422)
+        self.assertEqual(expired_cookie.status_code, 422)
 
     def test_timeout_removes_the_partial_task_directory(self) -> None:
         with TemporaryDirectory() as directory:

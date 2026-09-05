@@ -25,6 +25,7 @@ from app.services.sources import PlatformFetchDisabledError
 from app.services.x_session import XSessionError
 from app.services.web_push import WebPushError, WebPushSubscriptionError
 from app.services.youtube_download import YouTubeDownloadError
+from app.services.youtube_session import YouTubeSessionError
 
 
 TIER_TABS: tuple[tuple[str, str], ...] = (
@@ -189,6 +190,7 @@ def render(
         "request": request,
         "active_path": request.url.path,
         "x_credential": services.x_sessions.status(),
+        "youtube_credential": services.youtube_sessions.status(),
         "llm_credential": services.llm_connections.status(),
         "platform_connections": services.connections.source_connections(),
         "platform_fetch_enabled": services.repository.platform_fetch_enabled_map(),
@@ -302,6 +304,10 @@ def x_session_redirect(*, notice: str = "", error: str = "") -> RedirectResponse
     return settings_redirect(anchor="x", notice=notice, error=error)
 
 
+def youtube_session_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
+    return settings_redirect(anchor="youtube", notice=notice, error=error)
+
+
 def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return settings_redirect(anchor="model", notice=notice, error=error)
 
@@ -409,6 +415,7 @@ def health(request: Request) -> JSONResponse:
             "status": "ok",
             "database": "ok",
             "x_session": services.x_sessions.status().state,
+            "youtube_session": services.youtube_sessions.status().state,
             "llm_connection": services.llm_connections.status().state,
             "web_push": services.web_push.status().state,
             "curation_skill": "available" if services.pipeline.skill_loader.status().available else "unavailable",
@@ -942,6 +949,30 @@ def test_x_session(request: Request) -> RedirectResponse:
         return x_session_redirect(error=str(exc))
     except Exception:
         return x_session_redirect(error="暂时无法验证 X 登录 Cookie，请稍后重试。")
+
+
+@app.get("/settings/youtube-session")
+def youtube_session_settings_redirect(
+    request: Request,
+    notice: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    return youtube_session_redirect(notice=notice, error=error)
+
+
+@app.post("/settings/youtube-session")
+def save_youtube_session(request: Request, cookie_value: str = Form(...)) -> RedirectResponse:
+    """保存 yt-dlp 专用 Cookie，不影响公开的 YouTube 频道抓取。"""
+
+    try:
+        get_services(request).youtube_sessions.save_from_web(cookie_value)
+        return youtube_session_redirect(
+            notice="YouTube 下载 Cookie 已保存；之后调用下载接口会自动使用它。"
+        )
+    except YouTubeSessionError as exc:
+        return youtube_session_redirect(error=str(exc))
+    except Exception:
+        return youtube_session_redirect(error="保存 YouTube Cookie 时发生异常，请稍后重试。")
 
 
 @app.get("/settings/llm")

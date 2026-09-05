@@ -60,6 +60,29 @@ Invoke-WebRequest -Method Post -Uri "https://你的域名/api/youtube/download" 
 
 这是用户明确选择的无额外鉴权、同步下载实现：请求会占用一个 Web Worker，适合个人低并发使用，不适合开放给不受信任的公网用户。YouTube 的 YOUTUBE_KEY 仍由 RSSHub 的频道抓取使用；yt-dlp 下载接口不读取它。
 
+### 1.2 遇到“YouTube 要求登录验证”时如何配置 Cookie
+
+Google 的 YouTube Data API Key 只能读取元数据和频道信息，不能替 yt-dlp 取得视频媒体流。某些 IP、视频或请求频率下，YouTube 会要求浏览器登录会话来完成机器人验证；这时应由部署者自己在网页中保存 Cookie，而不是把 Cookie 发给接口调用方或贴到聊天中。
+
+在 NewsRSSHub 的“设置与连接”→“平台连接设置”中，会有单独的“YOUTUBE DOWNLOAD / YouTube 下载”卡片。它与下方“公开可用”的 YouTube 频道抓取卡片是两件事：
+
+- YouTube 频道/RSSHub 自动抓取仍使用公开 RSS 路由，不需要 Cookie；
+- 该 Cookie 只会在 `POST /api/youtube/download` 下载单条视频时传给 yt-dlp；
+- 保存后不用重启服务，下一次下载会自动使用；Cookie 到期后重新保存即可。
+
+获取方式如下。请只在自己的已登录浏览器和自己的 NewsRSSHub 实例中操作：
+
+1. 在浏览器中登录 [YouTube](https://www.youtube.com/)；
+2. 按 `F12` 打开开发者工具，进入 `Network`（网络）面板；
+3. 刷新一个 `youtube.com` 页面，选择列表中一个域名为 `www.youtube.com` 或 `youtube.com` 的请求；
+4. 在 `Request Headers`（请求头）中找到 `Cookie`，复制其完整的单行值；若复制内容包含 `Cookie:` 前缀，也可以一并粘贴；
+5. 粘贴到“设置与连接”中的 YouTube Cookie 密码框，点击“保存 YouTube Cookie”；
+6. 再以原来的 JSON 请求调用下载接口。无需在请求体或请求头额外传 Cookie。
+
+不要复制响应里的 `Set-Cookie`，不要使用只包含 `PREF`、`YSC` 等访客字段的不完整 Cookie，也不要在聊天、工单、截图或代码仓库中泄露完整 Cookie。服务会要求 Cookie 至少包含一个登录会话字段，格式不正确时不会覆盖原有文件。
+
+保存过程会把 Cookie 转换成 yt-dlp 所需的 Netscape `cookies.txt` 格式，并原子写到数据卷的 `youtube-runtime/cookies.txt`。该文件尽量使用目录 `0700`、文件 `0600` 权限，不写入 SQLite、不进入应用日志、不在网页回显；下载器只获得文件路径并通过 `--cookies` 读取。保存阶段只能校验格式，是否实际通过 YouTube 验证以一次真实下载结果为准。
+
 ## 2. 推荐架构
 
 ### 2.1 组件职责
@@ -608,6 +631,7 @@ python -m yt_dlp --write-subs --write-auto-subs --sub-langs "zh-Hans,zh-Hant,en.
 ~~~text
 POST /api/youtube/download
   -> 校验并规范化单条 YouTube 视频 URL
+  -> 若存在 youtube-runtime/cookies.txt，则以 --cookies 交给 yt-dlp
   -> Web 进程同步调用 yt-dlp + FFmpeg
   -> FileResponse 直接回传 MP4
   -> 响应结束后的 BackgroundTask 删除本次任务目录
@@ -616,7 +640,9 @@ POST /api/youtube/download
 涉及文件：
 
 - “app/services/youtube_download.py”：URL 校验、yt-dlp 调用、输出路径校验和安全清理；
+- “app/services/youtube_session.py”：网页 Cookie 解析、Netscape 格式转换和私有运行时文件原子写入；
 - “app/web.py”：无额外鉴权的 POST 接口和文件响应；
+- “app/templates/settings.html”：手动保存 YouTube 下载 Cookie 的设置页入口；
 - “requirements.txt”：固定版本的 yt-dlp；
 - “Dockerfile”：安装 FFmpeg；
 - 可选配置：“config.yml” 中的 app.youtube_download_timeout_seconds；未填写时默认 3600 秒。
@@ -632,6 +658,7 @@ docker compose up -d --build
 边界仍保持清楚：
 
 - collector、processor、RSSHub 和 items.media_json 继续只负责资讯发现和远端预览；
+- YouTube 下载 Cookie 只供 yt-dlp 下载使用，不会让频道抓取变成“必须登录”或写入来源配置；
 - 下载只由接口调用显式触发，不批量下载订阅频道；
 - 下载成品不会写入 RSS 条目、media_json 或 SQLite，响应结束即清理；
 - 下载失败不会影响来源抓取、摘要、事件筛选和今日热点；
