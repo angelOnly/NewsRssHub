@@ -101,13 +101,18 @@ class YouTubeDownloadServiceTests(unittest.TestCase):
             settings = build_settings(Path(directory))
             cookie_path = settings.data_dir / "youtube-runtime" / "cookies.txt"
             cookie_path.parent.mkdir(parents=True)
-            cookie_path.write_text("private-cookie-content", encoding="utf-8")
+            original_cookie = "private-cookie-content"
+            cookie_path.write_text(original_cookie, encoding="utf-8")
             service = YouTubeDownloadService(settings, cookie_file_path=cookie_path)
             commands: list[list[str]] = []
 
             def fake_run(command: list[str], **_: object) -> SimpleNamespace:
                 commands.append(command)
                 task_directory = Path(command[command.index("--paths") + 1])
+                process_cookie_path = Path(command[command.index("--cookies") + 1])
+                self.assertEqual(process_cookie_path.read_text(encoding="utf-8"), original_cookie)
+                # 模拟 yt-dlp 在退出时写回 Cookie Jar，不能改写设置页中的原始文件。
+                process_cookie_path.write_text("rewritten-by-yt-dlp", encoding="utf-8")
                 video = task_directory / "abc_DEF-123.mp4"
                 video.write_bytes(b"fake-video")
                 return SimpleNamespace(returncode=0, stdout=f"{video}\n", stderr="")
@@ -117,9 +122,56 @@ class YouTubeDownloadServiceTests(unittest.TestCase):
 
             command = commands[0]
             self.assertIn("--cookies", command)
-            self.assertEqual(command[command.index("--cookies") + 1], str(cookie_path))
+            process_cookie_path = Path(command[command.index("--cookies") + 1])
+            self.assertNotEqual(process_cookie_path, cookie_path)
+            self.assertFalse(process_cookie_path.exists())
             self.assertNotIn("private-cookie-content", command)
+            self.assertEqual(cookie_path.read_text(encoding="utf-8"), original_cookie)
             service.remove_task(downloaded.task_directory)
+
+    def test_validate_saved_cookie_uses_simulation_and_removes_cookie_copy(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            cookie_path = settings.data_dir / "youtube-runtime" / "cookies.txt"
+            cookie_path.parent.mkdir(parents=True)
+            original_cookie = "private-cookie-content"
+            cookie_path.write_text(original_cookie, encoding="utf-8")
+            service = YouTubeDownloadService(settings, cookie_file_path=cookie_path)
+            commands: list[list[str]] = []
+
+            def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+                commands.append(command)
+                process_cookie_path = Path(command[command.index("--cookies") + 1])
+                self.assertEqual(process_cookie_path.read_text(encoding="utf-8"), original_cookie)
+                process_cookie_path.write_text("rewritten-by-yt-dlp", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch("app.services.youtube_download.subprocess.run", side_effect=fake_run):
+                video_id = service.validate_saved_cookie(
+                    "https://www.youtube.com/shorts/abc_DEF-123"
+                )
+
+            command = commands[0]
+            process_cookie_path = Path(command[command.index("--cookies") + 1])
+            self.assertEqual(video_id, "abc_DEF-123")
+            self.assertIn("--simulate", command)
+            self.assertIn("--no-playlist", command)
+            self.assertNotIn("--format", command)
+            self.assertNotIn(original_cookie, command)
+            self.assertFalse(process_cookie_path.exists())
+            self.assertEqual(cookie_path.read_text(encoding="utf-8"), original_cookie)
+            self.assertEqual(list((settings.data_dir / "youtube-downloads").iterdir()), [])
+
+    def test_validate_saved_cookie_requires_a_saved_cookie(self) -> None:
+        with TemporaryDirectory() as directory:
+            service = YouTubeDownloadService(build_settings(Path(directory)))
+
+            with patch("app.services.youtube_download.subprocess.run") as run:
+                with self.assertRaises(YouTubeDownloadError) as context:
+                    service.validate_saved_cookie("https://youtu.be/abc_DEF-123")
+
+            self.assertEqual(context.exception.status_code, 422)
+            run.assert_not_called()
 
     def test_bot_verification_error_explains_whether_a_cookie_was_used(self) -> None:
         stderr = "ERROR: Sign in to confirm you’re not a bot."

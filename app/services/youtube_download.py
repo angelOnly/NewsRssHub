@@ -108,9 +108,14 @@ class YouTubeDownloadService:
         task_directory.mkdir()
         # 每次请求重新判断，设置页刚保存的 Cookie 无需重启 Web 服务即可生效。
         use_cookie = self._has_cookie_file()
+        cookie_copy: Path | None = None
         try:
+            if use_cookie:
+                # yt-dlp 可能在退出时回写 --cookies 指向的文件；传入本任务副本，
+                # 避免它改写设置页保存的原始 Cookie。
+                cookie_copy = self._copy_cookie_for_process(task_directory)
             completed = subprocess.run(
-                self._command(canonical_url, task_directory, use_cookie=use_cookie),
+                self._command(canonical_url, task_directory, cookie_file_path=cookie_copy),
                 cwd=task_directory,
                 check=False,
                 capture_output=True,
@@ -119,6 +124,9 @@ class YouTubeDownloadService:
                 errors="replace",
                 timeout=self._timeout_seconds,
             )
+        except YouTubeDownloadError:
+            self.remove_task(task_directory)
+            raise
         except subprocess.TimeoutExpired as exc:
             self.remove_task(task_directory)
             raise YouTubeDownloadError("视频下载超时，请稍后重试。", status_code=504) from exc
@@ -126,6 +134,8 @@ class YouTubeDownloadService:
             self.remove_task(task_directory)
             logger.exception("无法启动 YouTube 下载器")
             raise YouTubeDownloadError("下载服务暂不可用。", status_code=503) from exc
+        finally:
+            self._remove_cookie_copy(cookie_copy)
 
         if completed.returncode != 0:
             self.remove_task(task_directory)
@@ -156,6 +166,51 @@ class YouTubeDownloadService:
             download_name=f"{video_id}{extension}",
         )
 
+    def validate_saved_cookie(self, raw_url: str) -> str:
+        """用指定视频做模拟解析，验证当前 Cookie 而不写入媒体文件。"""
+
+        canonical_url, video_id = normalize_youtube_video_url(raw_url)
+        if not self._has_cookie_file():
+            raise YouTubeDownloadError(
+                "尚未保存 YouTube Cookie，请先保存后再验证。",
+                status_code=422,
+            )
+        task_directory = self._root / f"cookie-check-{uuid4().hex}"
+        task_directory.mkdir()
+        cookie_copy: Path | None = None
+        try:
+            cookie_copy = self._copy_cookie_for_process(task_directory)
+            completed = subprocess.run(
+                self._validation_command(canonical_url, cookie_file_path=cookie_copy),
+                cwd=task_directory,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                # 验证不下载媒体，无需沿用完整下载的一小时上限。
+                timeout=min(self._timeout_seconds, 90),
+            )
+        except YouTubeDownloadError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise YouTubeDownloadError("YouTube Cookie 验证超时，请稍后重试。", status_code=504) from exc
+        except OSError as exc:
+            logger.exception("无法启动 YouTube Cookie 验证器")
+            raise YouTubeDownloadError("下载服务暂不可用。", status_code=503) from exc
+        finally:
+            self._remove_cookie_copy(cookie_copy)
+            self.remove_task(task_directory)
+
+        if completed.returncode != 0:
+            logger.warning(
+                "yt-dlp Cookie 验证失败：video_id=%s，退出码=%s",
+                video_id,
+                completed.returncode,
+            )
+            raise self._download_failure(completed.stderr, used_cookie=True)
+        return video_id
+
     def remove_task(self, task_directory: Path) -> None:
         """仅删除下载根目录下的单个任务目录，避免清理越界。"""
 
@@ -177,7 +232,7 @@ class YouTubeDownloadService:
         canonical_url: str,
         task_directory: Path,
         *,
-        use_cookie: bool | None = None,
+        cookie_file_path: Path | None = None,
     ) -> list[str]:
         """固定下载预设；调用方不能注入 yt-dlp 参数或输出模板。"""
 
@@ -202,12 +257,63 @@ class YouTubeDownloadService:
             "--print",
             "after_move:filepath",
         ]
-        should_use_cookie = use_cookie if use_cookie is not None else self._has_cookie_file()
-        if should_use_cookie:
-            # 只传运行时文件路径，绝不把 Cookie 值拼入子进程参数或日志。
-            command.extend(["--cookies", str(self._cookie_file_path)])
+        if cookie_file_path is not None:
+            # 只传任务内的临时 Cookie 文件路径，绝不把 Cookie 值拼入参数或日志。
+            command.extend(["--cookies", str(cookie_file_path)])
         command.append(canonical_url)
         return command
+
+    def _validation_command(self, canonical_url: str, *, cookie_file_path: Path) -> list[str]:
+        """验证命令固定为模拟解析，既不生成临时媒体文件也不调用 FFmpeg。"""
+
+        return [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--quiet",
+            "--no-warnings",
+            "--no-playlist",
+            "--simulate",
+            "--socket-timeout",
+            "30",
+            # 与下载相同，传入随任务删除的临时副本。
+            "--cookies",
+            str(cookie_file_path),
+            canonical_url,
+        ]
+
+    def _copy_cookie_for_process(self, task_directory: Path) -> Path:
+        """复制运行时 Cookie，避免 yt-dlp 回写长期保存的配置文件。"""
+
+        cookie_copy = task_directory / ".youtube-cookies.txt"
+        try:
+            shutil.copyfile(self._cookie_file_path, cookie_copy)
+            try:
+                cookie_copy.chmod(0o600)
+            except OSError:
+                # Windows 测试环境不一定支持 Unix 权限；复制本身仍可安全继续。
+                pass
+        except OSError as exc:
+            try:
+                cookie_copy.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise YouTubeDownloadError(
+                "已保存的 YouTube Cookie 无法读取，请重新保存后重试。",
+                status_code=422,
+            ) from exc
+        return cookie_copy
+
+    @staticmethod
+    def _remove_cookie_copy(cookie_copy: Path | None) -> None:
+        """子进程结束即删除任务内的 Cookie 副本，缩短敏感数据保留时间。"""
+
+        if cookie_copy is None:
+            return
+        try:
+            cookie_copy.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("临时 YouTube Cookie 文件清理失败。")
 
     def _has_cookie_file(self) -> bool:
         """Cookie 文件由设置页原子替换，下载时只检查其是否可读取。"""

@@ -17,9 +17,12 @@ from app.config import Settings
 
 _COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _YOUTUBE_DOMAIN = ".youtube.com"
+_HTTPONLY_PREFIX = "#HttpOnly_"
+_COOKIE_BOOLEAN_VALUES = frozenset({"TRUE", "FALSE"})
+_COOKIE_EXPIRES = re.compile(r"^(?:|[0-9]+(?:\.[0-9]+)?)$")
 # MozillaCookieJar 会把 0 当作已过期；此处只影响本地 Cookie 文件的保留，
 # 不会绕过服务端对实际会话有效期的校验。
-_COOKIE_EXPIRES = "2147483647"
+_COOKIE_PERSISTENT_EXPIRES = "2147483647"
 _AUTH_COOKIE_NAMES = frozenset(
     {
         "SID",
@@ -121,7 +124,7 @@ class YouTubeSessionService:
             return YouTubeCredentialStatus("invalid", str(exc), False)
         return YouTubeCredentialStatus(
             "saved",
-            "YouTube 下载 Cookie 已保存；下载接口会在每次请求时自动使用它。",
+            "YouTube 下载 Cookie 已保存，尚未验证；请用下方视频链接进行模拟解析验证。",
             True,
         )
 
@@ -154,7 +157,14 @@ class YouTubeSessionService:
             )
 
         names: set[str] = set()
-        for line in lines[1:]:
+        for raw_line in lines[1:]:
+            # yt-dlp 回写时会用 #HttpOnly_ 标记部分 Cookie；它不是注释，
+            # 仍是 Netscape 格式中的有效 Cookie 记录。
+            line = (
+                raw_line[len(_HTTPONLY_PREFIX) :]
+                if raw_line.startswith(_HTTPONLY_PREFIX)
+                else raw_line
+            )
             if not line or line.startswith("#"):
                 continue
             fields = line.split("\t")
@@ -164,18 +174,18 @@ class YouTubeSessionService:
                 )
             domain, include_subdomains, path, secure, expires, name, cookie_value = fields
             if (
-                domain != _YOUTUBE_DOMAIN
-                or include_subdomains != "TRUE"
-                or path != "/"
-                or secure != "TRUE"
-                or expires != _COOKIE_EXPIRES
+                not domain
+                or include_subdomains not in _COOKIE_BOOLEAN_VALUES
+                or not path.startswith("/")
+                or secure not in _COOKIE_BOOLEAN_VALUES
+                or not _COOKIE_EXPIRES.fullmatch(expires)
                 or not _COOKIE_NAME.fullmatch(name)
-                or not cookie_value
             ):
                 raise YouTubeCredentialConfigurationError(
                     "已保存的 YouTube Cookie 文件格式无效，请重新保存。"
                 )
-            names.add(name)
+            if self._is_youtube_domain(domain) and cookie_value:
+                names.add(name)
 
         if not _AUTH_COOKIE_NAMES.intersection(names):
             raise YouTubeCredentialConfigurationError(
@@ -205,7 +215,7 @@ class YouTubeSessionService:
                 handle.write("# 由 NewsRSSHub 生成，仅供 yt-dlp 使用。\n")
                 for name, cookie_value in cookies.items():
                     handle.write(
-                        f"{_YOUTUBE_DOMAIN}\tTRUE\t/\tTRUE\t{_COOKIE_EXPIRES}\t{name}\t{cookie_value}\n"
+                        f"{_YOUTUBE_DOMAIN}\tTRUE\t/\tTRUE\t{_COOKIE_PERSISTENT_EXPIRES}\t{name}\t{cookie_value}\n"
                     )
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -214,6 +224,13 @@ class YouTubeSessionService:
         finally:
             if temporary_path and temporary_path.exists():
                 temporary_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _is_youtube_domain(domain: str) -> bool:
+        """允许 yt-dlp 写回的 youtube.com 子域 Cookie，忽略其他站点记录。"""
+
+        normalized = domain.lstrip(".").casefold()
+        return normalized == "youtube.com" or normalized.endswith(".youtube.com")
 
     @staticmethod
     def _best_effort_private_mode(path: Path, mode: int) -> None:

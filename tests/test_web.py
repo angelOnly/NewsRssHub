@@ -15,6 +15,7 @@ from app.config import Settings
 from app.domain.curation import CurationGroup, EditorialTier
 from app.domain.models import FeedItem, SourceDraft, SourceKind, ValidationResult
 from app.runtime import build_services
+from app.services.youtube_download import YouTubeDownloadError
 from app.web import _compact_relative_time, app, templates
 
 
@@ -109,10 +110,54 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 303)
                 self.assertTrue(response.headers["location"].endswith("#youtube"))
                 self.assertIn("YouTube 下载 Cookie 已保存", settings_page.text)
+                self.assertIn("尚未验证", settings_page.text)
+                self.assertIn('action="/settings/youtube-session/test"', settings_page.text)
+                self.assertIn("验证当前 YouTube Cookie", settings_page.text)
                 self.assertIn("不会改变 YouTube 频道/RSSHub 的自动抓取", settings_page.text)
                 self.assertNotIn("web-test-session", settings_page.text)
                 self.assertTrue(services.youtube_sessions.cookie_file_path.is_file())
                 self.assertIsNone(services.repository.get_connector_credential("youtube_session"))
+            finally:
+                delattr(app.state, "services")
+
+    def test_web_youtube_cookie_validation_reports_success_and_safe_failure(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            services = build_services(settings)
+            services.youtube_sessions.save_from_web("SID=web-test-session; HSID=web-test-hsid")
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    with patch.object(
+                        services.youtube_downloader,
+                        "validate_saved_cookie",
+                        return_value="abc_DEF-123",
+                    ) as validate:
+                        response = client.post(
+                            "/settings/youtube-session/test",
+                            data={"url": "https://youtu.be/abc_DEF-123"},
+                            follow_redirects=False,
+                        )
+                    success_page = client.get(response.headers["location"])
+
+                    with patch.object(
+                        services.youtube_downloader,
+                        "validate_saved_cookie",
+                        side_effect=YouTubeDownloadError("当前 Cookie 无法通过验证。", status_code=422),
+                    ):
+                        failure = client.post(
+                            "/settings/youtube-session/test",
+                            data={"url": "https://youtu.be/abc_DEF-123"},
+                            follow_redirects=False,
+                        )
+                    failure_page = client.get(failure.headers["location"])
+
+                self.assertEqual(response.status_code, 303)
+                validate.assert_called_once_with("https://youtu.be/abc_DEF-123")
+                self.assertIn("已通过模拟解析验证", success_page.text)
+                self.assertEqual(failure.status_code, 303)
+                self.assertIn("YouTube Cookie 验证失败：当前 Cookie 无法通过验证。", failure_page.text)
+                self.assertNotIn("web-test-session", failure_page.text)
             finally:
                 delattr(app.state, "services")
 

@@ -68,7 +68,8 @@ Google 的 YouTube Data API Key 只能读取元数据和频道信息，不能替
 
 - YouTube 频道/RSSHub 自动抓取仍使用公开 RSS 路由，不需要 Cookie；
 - 该 Cookie 只会在 `POST /api/youtube/download` 下载单条视频时传给 yt-dlp；
-- 保存后不用重启服务，下一次下载会自动使用；Cookie 到期后重新保存即可。
+- 保存后不用重启服务，下一次下载会自动使用；Cookie 到期后重新保存即可；
+- “已保存”只代表格式已通过，不能代表已被 YouTube 接受，必须再做一次模拟解析验证。
 
 获取方式如下。请只在自己的已登录浏览器和自己的 NewsRSSHub 实例中操作：
 
@@ -77,11 +78,14 @@ Google 的 YouTube Data API Key 只能读取元数据和频道信息，不能替
 3. 刷新一个 `youtube.com` 页面，选择列表中一个域名为 `www.youtube.com` 或 `youtube.com` 的请求；
 4. 在 `Request Headers`（请求头）中找到 `Cookie`，复制其完整的单行值；若复制内容包含 `Cookie:` 前缀，也可以一并粘贴；
 5. 粘贴到“设置与连接”中的 YouTube Cookie 密码框，点击“保存 YouTube Cookie”；
-6. 再以原来的 JSON 请求调用下载接口。无需在请求体或请求头额外传 Cookie。
+6. 在随即出现的“验证视频链接”框粘贴一条公开单视频 URL，点击“验证当前 YouTube Cookie”；
+7. 看到“模拟解析验证成功”后，再以原来的 JSON 请求调用下载接口。无需在请求体或请求头额外传 Cookie。
 
 不要复制响应里的 `Set-Cookie`，不要使用只包含 `PREF`、`YSC` 等访客字段的不完整 Cookie，也不要在聊天、工单、截图或代码仓库中泄露完整 Cookie。服务会要求 Cookie 至少包含一个登录会话字段，格式不正确时不会覆盖原有文件。
 
-保存过程会把 Cookie 转换成 yt-dlp 所需的 Netscape `cookies.txt` 格式，并原子写到数据卷的 `youtube-runtime/cookies.txt`。该文件尽量使用目录 `0700`、文件 `0600` 权限，不写入 SQLite、不进入应用日志、不在网页回显；下载器只获得文件路径并通过 `--cookies` 读取。保存阶段只能校验格式，是否实际通过 YouTube 验证以一次真实下载结果为准。
+保存过程会把 Cookie 转换成 yt-dlp 所需的 Netscape `cookies.txt` 格式，并原子写到数据卷的 `youtube-runtime/cookies.txt`。该文件尽量使用目录 `0700`、文件 `0600` 权限，不写入 SQLite、不进入应用日志、不在网页回显。点击验证会执行固定的 `yt-dlp --simulate --cookies ...` 命令：它会实际请求指定视频但不会下载媒体、不会调用 FFmpeg；验证成功才表示当前服务器、当前 Cookie 和该视频可以完成解析。
+
+每次验证或下载都会先在本任务目录创建 Cookie 的私有临时副本交给 yt-dlp，子进程退出后立即删除。这样即使 yt-dlp 回写它的 Cookie Jar，也不会破坏设置页保存的原始文件。验证结果只反映当时的会话、服务器 IP 和该视频；Cookie 随时可能过期，不能把一次成功当成永久有效。
 
 ## 2. 推荐架构
 
@@ -631,7 +635,8 @@ python -m yt_dlp --write-subs --write-auto-subs --sub-langs "zh-Hans,zh-Hant,en.
 ~~~text
 POST /api/youtube/download
   -> 校验并规范化单条 YouTube 视频 URL
-  -> 若存在 youtube-runtime/cookies.txt，则以 --cookies 交给 yt-dlp
+  -> 若存在 youtube-runtime/cookies.txt，复制到任务内私有临时文件
+  -> 以临时文件的 --cookies 参数调用 yt-dlp，退出后删除该副本
   -> Web 进程同步调用 yt-dlp + FFmpeg
   -> FileResponse 直接回传 MP4
   -> 响应结束后的 BackgroundTask 删除本次任务目录

@@ -967,12 +967,27 @@ def save_youtube_session(request: Request, cookie_value: str = Form(...)) -> Red
     try:
         get_services(request).youtube_sessions.save_from_web(cookie_value)
         return youtube_session_redirect(
-            notice="YouTube 下载 Cookie 已保存；之后调用下载接口会自动使用它。"
+            notice="YouTube 下载 Cookie 已保存，但尚未验证；请粘贴一条视频链接进行模拟解析验证。"
         )
     except YouTubeSessionError as exc:
         return youtube_session_redirect(error=str(exc))
     except Exception:
         return youtube_session_redirect(error="保存 YouTube Cookie 时发生异常，请稍后重试。")
+
+
+@app.post("/settings/youtube-session/test")
+def test_youtube_session(request: Request, url: str = Form(...)) -> RedirectResponse:
+    """以用户指定的视频模拟解析，确认当前 Cookie 可被 yt-dlp 使用。"""
+
+    try:
+        video_id = get_services(request).youtube_downloader.validate_saved_cookie(url)
+        return youtube_session_redirect(
+            notice=f"当前 YouTube Cookie 已通过模拟解析验证（视频 ID：{video_id}），未下载媒体文件。"
+        )
+    except YouTubeDownloadError as exc:
+        return youtube_session_redirect(error=f"YouTube Cookie 验证失败：{exc}")
+    except Exception:
+        return youtube_session_redirect(error="验证 YouTube Cookie 时发生异常，请稍后重试。")
 
 
 @app.get("/settings/llm")
