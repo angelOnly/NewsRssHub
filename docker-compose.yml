@@ -1,6 +1,8 @@
 services:
   web:
     build: .
+    # Portainer 从 Git 仓库重新部署时默认只拉取镜像；此项确保源码变更会重新构建本地镜像。
+    pull_policy: build
     command: uvicorn app.web:app --host 0.0.0.0 --port 8000
     ports:
       - "8188:8000"
@@ -16,6 +18,7 @@ services:
 
   collector:
     build: .
+    pull_policy: build
     command: python -m app.worker --role collector --interval 30
     volumes:
       - /home/jzb/docker/rss-hub/data:/app/data
@@ -26,6 +29,7 @@ services:
 
   processor:
     build: .
+    pull_policy: build
     command: python -m app.worker --role processor --interval 15
     volumes:
       - /home/jzb/docker/rss-hub/data:/app/data
@@ -36,6 +40,7 @@ services:
 
   topics:
     build: .
+    pull_policy: build
     command: python -m app.worker --role topics
     volumes:
       - /home/jzb/docker/rss-hub/data:/app/data
@@ -48,6 +53,7 @@ services:
   # 自动运行，避免服务启动过程中重建已经在使用的 SQLite 数据库。
   migrate:
     build: .
+    pull_policy: build
     # 用 entrypoint 保证 `docker compose run migrate --check/--apply` 中的
     # 参数会传给迁移程序，而不是覆盖整条 Python 命令。
     entrypoint: ["python", "-m", "app.migrate"]
