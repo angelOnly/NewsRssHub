@@ -230,8 +230,14 @@
               <p class="eyebrow">YOUTUBE DOWNLOAD</p>
               <h3>YouTube 下载</h3>
             </div>
-            <span class="status {{ 'attention' if youtube_credential.configured or youtube_credential.state == 'invalid' else 'healthy' }}">
-              {{ 'Cookie 待验证' if youtube_credential.configured else ('Cookie 无效' if youtube_credential.state == 'invalid' else '可选登录') }}
+            <span class="status {{ 'healthy' if youtube_credential.state == 'valid' else ('error' if youtube_credential.state in ('failed', 'invalid') else 'attention') }}">
+              {{ {
+                'valid': 'Cookie 可用',
+                'failed': 'Cookie 验证失败',
+                'invalid': 'Cookie 无效',
+                'unverified': '需重新验证',
+                'missing': '可选登录'
+              }.get(youtube_credential.state, '需重新验证') }}
             </span>
           </div>
           <p>{{ youtube_credential.message }}</p>
@@ -239,10 +245,15 @@
             <label>
               YouTube Cookie
               <input name="cookie_value" type="password" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="粘贴 youtube.com 请求中的完整 Cookie 字符串">
-              <small>仅用于 <code>POST /api/youtube/download</code>，不会改变 YouTube 频道/RSSHub 的自动抓取。请先在浏览器登录 YouTube，打开开发者工具的 Network，刷新 <code>youtube.com</code> 页面，从一个 <code>youtube.com</code> 请求的 Request Headers 复制完整单行 <code>Cookie</code> 值；不要复制 <code>Set-Cookie</code>，也不要把 Cookie 发到聊天里。它只保存到 Web 服务的数据卷运行时文件，不写入 SQLite，也不会回显。</small>
+              <small>仅用于 <code>POST /api/youtube/download</code>，不会改变 YouTube 频道/RSSHub 的自动抓取。请先在浏览器登录 YouTube，打开开发者工具的 Network，刷新 <code>youtube.com</code> 页面，从一个 <code>youtube.com</code> 请求的 Request Headers 复制完整单行 <code>Cookie</code> 值；不要复制 <code>Set-Cookie</code>，也不要把 Cookie 发到聊天里。它只会保存到 Web 服务的数据卷运行时文件，不写入 SQLite，也不会回显。</small>
+            </label>
+            <label>
+              验证视频链接
+              <input name="url" type="url" required autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴一条公开的 YouTube 单视频链接">
+              <small>点击保存后会立即用这条链接进行模拟解析，不下载媒体文件。只有验证成功，新的 Cookie 才会替换当前下载器正在使用的 Cookie。</small>
             </label>
             <div class="form-actions">
-              <button class="button button-primary" type="submit">保存 YouTube Cookie</button>
+              <button class="button button-primary" type="submit">保存并验证 YouTube Cookie</button>
             </div>
           </form>
           {% if youtube_credential.configured %}
@@ -250,15 +261,15 @@
               <label>
                 验证视频链接
                 <input name="url" type="url" required autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴一条公开的 YouTube 单视频链接">
-                <small>使用当前 Cookie 让 yt-dlp 做一次模拟解析，不下载媒体文件。验证成功代表当前服务器可以访问这条视频；若失败，请更新 Cookie 或换一条公开视频排除视频本身不可用的情况。</small>
+                <small>用于重新验证当前已保存的 Cookie。验证成功代表当前服务器可以访问这条视频；若失败，请更新 Cookie 或换一条公开视频排除视频本身不可用的情况。</small>
               </label>
               <div class="form-actions">
-                <button class="button button-secondary" type="submit">验证当前 YouTube Cookie</button>
+                <button class="button button-secondary" type="submit">重新验证当前 Cookie</button>
               </div>
             </form>
           {% endif %}
           <div class="connection-card-foot">
-            <span class="connection-mode">保存只校验 Cookie 格式；请使用上方验证确认它可用。保存后无需重启，下一次视频下载会自动将 Cookie 文件传给 yt-dlp。</span>
+            <span class="connection-mode">保存会先验证：成功后立即启用，失败的候选 Cookie 不会被保存；如果原先已有可用 Cookie，会继续保留。保存后无需重启，下一次视频下载会自动将可用 Cookie 文件传给 yt-dlp。</span>
           </div>
         </article>
 

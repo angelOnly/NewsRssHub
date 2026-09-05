@@ -43,7 +43,7 @@ class YouTubeSessionTests(unittest.TestCase):
 
             status = service.save_from_web(cookie)
 
-            self.assertEqual(status.state, "saved")
+            self.assertEqual(status.state, "unverified")
             self.assertTrue(status.configured)
             self.assertNotIn("session-value", status.message)
             self.assertFalse(settings.database_path.exists())
@@ -102,8 +102,41 @@ class YouTubeSessionTests(unittest.TestCase):
 
             status = service.status()
 
-            self.assertEqual(status.state, "saved")
+            self.assertEqual(status.state, "unverified")
             self.assertTrue(status.configured)
+
+    def test_validation_result_is_persisted_without_cookie_content(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            service = YouTubeSessionService(settings)
+            service.save_from_web("SID=session-value; HSID=hsid-value")
+
+            service.mark_validation_success()
+
+            self.assertEqual(service.status().state, "valid")
+            state_file = settings.data_dir / "youtube-runtime" / "validation.json"
+            self.assertIn('"state": "valid"', state_file.read_text(encoding="utf-8"))
+            self.assertNotIn("session-value", state_file.read_text(encoding="utf-8"))
+
+            service.mark_validation_failure()
+
+            self.assertEqual(service.status().state, "failed")
+
+    def test_candidate_is_not_enabled_until_explicit_activation(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            service = YouTubeSessionService(settings)
+            service.save_from_web("SID=old-session; HSID=old-hsid")
+            service.mark_validation_success()
+            before = service.cookie_file_path.read_text(encoding="utf-8")
+
+            candidate = service.prepare_candidate_from_web("SID=new-session; HSID=new-hsid")
+
+            self.assertTrue(candidate.is_file())
+            self.assertEqual(service.cookie_file_path.read_text(encoding="utf-8"), before)
+            service.discard_candidate(candidate)
+            self.assertFalse(candidate.exists())
+            self.assertEqual(service.status().state, "valid")
 
     def test_parser_accepts_cookie_header_prefix_but_requires_login_fields(self) -> None:
         self.assertEqual(

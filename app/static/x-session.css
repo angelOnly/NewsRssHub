@@ -41,6 +41,8 @@
 .connection-card { background: var(--panel); border: 1px solid var(--line); border-radius: 15px; padding: 20px; display: grid; gap: 16px; }
 .connection-card.valid { border-color: #b9dfc7; background: #f5fbf6; }
 .connection-card.saved { border-color: #eed7c4; background: #fffaf5; }
+.connection-card.failed,.connection-card.invalid { border-color: #efc4c4; background: #fff7f7; }
+.connection-card.unverified { border-color: #eed7c4; background: #fffaf5; }
 .connection-card-top, .connection-card-foot, .source-connection-guide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .connection-card h2, .connection-card h3, .source-connection-guide h2 { margin: 2px 0 0; font-size: 19px; }
 .connection-card > p { color: var(--muted); font-size: 13px; margin: 0; min-height: 42px; }

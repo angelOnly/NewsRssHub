@@ -6,6 +6,7 @@ SQLite，也不会由状态接口或网页重新返回给浏览器。
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -99,6 +100,9 @@ class YouTubeSessionService:
     """维护仅由 YouTube 下载器读取的 Cookie 运行时文件。"""
 
     _COOKIE_FILENAME = "cookies.txt"
+    _VALIDATION_FILENAME = "validation.json"
+    _CANDIDATE_PREFIX = ".youtube-cookie-candidate-"
+    _VALIDATION_STATES = frozenset({"valid", "failed"})
 
     def __init__(self, settings: Settings) -> None:
         self._directory = settings.data_dir / "youtube-runtime"
@@ -109,12 +113,24 @@ class YouTubeSessionService:
 
         return self._directory / self._COOKIE_FILENAME
 
+    @property
+    def _validation_file_path(self) -> Path:
+        """验证结果与 Cookie 分开保存，文件中不包含 Cookie 内容。"""
+
+        return self._directory / self._VALIDATION_FILENAME
+
     def status(self) -> YouTubeCredentialStatus:
         """检查运行时文件是否是可供 yt-dlp 使用的完整 Cookie 文件。"""
 
         try:
             self._read_cookie_names()
         except YouTubeCredentialMissingError:
+            if self._read_validation_state() == "failed":
+                return YouTubeCredentialStatus(
+                    "failed",
+                    "最近一次粘贴的 YouTube Cookie 未通过验证，未保存到下载器。",
+                    False,
+                )
             return YouTubeCredentialStatus(
                 "missing",
                 "未保存 YouTube Cookie；公开视频下载仍可直接尝试。",
@@ -122,23 +138,90 @@ class YouTubeSessionService:
             )
         except YouTubeCredentialConfigurationError as exc:
             return YouTubeCredentialStatus("invalid", str(exc), False)
+
+        validation_state = self._read_validation_state()
+        if validation_state == "valid":
+            return YouTubeCredentialStatus(
+                "valid",
+                "当前 YouTube Cookie 已通过模拟解析验证，可用于下载。",
+                True,
+            )
+        if validation_state == "failed":
+            return YouTubeCredentialStatus(
+                "failed",
+                "当前 YouTube Cookie 未通过最近一次模拟解析验证，请更新 Cookie 后重试。",
+                True,
+            )
         return YouTubeCredentialStatus(
-            "saved",
-            "YouTube 下载 Cookie 已保存，尚未验证；请用下方视频链接进行模拟解析验证。",
+            "unverified",
+            "现有 YouTube Cookie 没有验证记录；请重新保存并验证后再使用。",
             True,
         )
 
     def save_from_web(self, cookie_value: str) -> YouTubeCredentialStatus:
-        """校验后原子写入 Cookie；格式错误时不会覆盖已有文件。"""
+        """兼容旧调用：仅格式校验后写入，调用方应继续完成真实验证。"""
 
         cookies = parse_youtube_cookie(cookie_value)
         try:
+            # 新 Cookie 不能沿用旧 Cookie 的“可用”验证结果。
+            self._clear_validation_state()
             self._write_cookie_file(cookies)
         except OSError as exc:
             raise YouTubeCredentialConfigurationError(
                 "无法写入 YouTube Cookie 运行时文件，请检查数据目录权限。"
             ) from exc
         return self.status()
+
+    def prepare_candidate_from_web(self, cookie_value: str) -> Path:
+        """生成待验证的私有临时 Cookie，验证成功前不替换当前配置。"""
+
+        cookies = parse_youtube_cookie(cookie_value)
+        try:
+            return self._create_cookie_file(cookies, prefix=self._CANDIDATE_PREFIX)
+        except OSError as exc:
+            raise YouTubeCredentialConfigurationError(
+                "无法创建待验证的 YouTube Cookie 文件，请检查数据目录权限。"
+            ) from exc
+
+    def activate_candidate(self, candidate_path: Path) -> YouTubeCredentialStatus:
+        """仅在模拟解析成功后，原子替换为下载器实际使用的 Cookie。"""
+
+        candidate = self._require_candidate_path(candidate_path)
+        target = self.cookie_file_path
+        try:
+            self._directory.mkdir(parents=True, exist_ok=True)
+            self._best_effort_private_mode(self._directory, 0o700)
+            # 先清掉旧验证结论，避免新文件短暂沿用旧文件的可用状态。
+            self._clear_validation_state()
+            os.replace(candidate, target)
+            self._best_effort_private_mode(target, 0o600)
+        except OSError as exc:
+            raise YouTubeCredentialConfigurationError(
+                "无法启用已验证的 YouTube Cookie，请检查数据目录权限。"
+            ) from exc
+        return self.status()
+
+    def discard_candidate(self, candidate_path: Path | None) -> None:
+        """验证结束后删除候选 Cookie，缩短敏感数据的保留时间。"""
+
+        if candidate_path is None:
+            return
+        try:
+            candidate = self._require_candidate_path(candidate_path)
+            candidate.unlink(missing_ok=True)
+        except (OSError, YouTubeCredentialConfigurationError):
+            # 清理失败不会把 Cookie 内容写入日志或错误消息。
+            pass
+
+    def mark_validation_success(self) -> None:
+        """记录当前已启用 Cookie 的成功验证结果。"""
+
+        self._write_validation_state("valid")
+
+    def mark_validation_failure(self) -> None:
+        """记录失败结果；仅写状态，不保存失败候选 Cookie。"""
+
+        self._write_validation_state("failed")
 
     def _read_cookie_names(self) -> set[str]:
         try:
@@ -197,6 +280,75 @@ class YouTubeSessionService:
         """以 0600 临时文件和原子替换避免下载器读取到半写入内容。"""
 
         target = self.cookie_file_path
+        temporary_path = self._create_cookie_file(cookies, prefix=f".{target.name}.")
+        try:
+            os.replace(temporary_path, target)
+            self._best_effort_private_mode(target, 0o600)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink(missing_ok=True)
+
+    def _create_cookie_file(self, cookies: dict[str, str], *, prefix: str) -> Path:
+        """创建一个已完整写入的私有 Cookie 文件，供验证或原子替换使用。"""
+
+        self._directory.mkdir(parents=True, exist_ok=True)
+        self._best_effort_private_mode(self._directory, 0o700)
+        temporary_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._directory,
+                prefix=prefix,
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary_path = Path(handle.name)
+                self._best_effort_private_mode(temporary_path, 0o600)
+                handle.write("# Netscape HTTP Cookie File\n")
+                handle.write("# 由 NewsRSSHub 生成，仅供 yt-dlp 使用。\n")
+                for name, cookie_value in cookies.items():
+                    handle.write(
+                        f"{_YOUTUBE_DOMAIN}\tTRUE\t/\tTRUE\t{_COOKIE_PERSISTENT_EXPIRES}\t{name}\t{cookie_value}\n"
+                    )
+                handle.flush()
+                os.fsync(handle.fileno())
+            return temporary_path
+        except Exception:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+            raise
+
+    def _require_candidate_path(self, candidate_path: Path) -> Path:
+        """候选文件只能位于本服务的私有运行时目录中。"""
+
+        candidate = candidate_path.resolve()
+        directory = self._directory.resolve()
+        try:
+            candidate.relative_to(directory)
+        except ValueError as exc:
+            raise YouTubeCredentialConfigurationError("待验证的 YouTube Cookie 文件位置无效。") from exc
+        if not candidate.name.startswith(self._CANDIDATE_PREFIX):
+            raise YouTubeCredentialConfigurationError("待验证的 YouTube Cookie 文件无效。")
+        return candidate
+
+    def _read_validation_state(self) -> str | None:
+        """验证状态不是凭据，损坏或缺失时按没有验证记录处理。"""
+
+        try:
+            raw = self._validation_file_path.read_text(encoding="utf-8")
+            payload = json.loads(raw)
+        except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        state = payload.get("state") if isinstance(payload, dict) else None
+        return state if state in self._VALIDATION_STATES else None
+
+    def _write_validation_state(self, state: str) -> None:
+        """原子写入最近一次验证结论，绝不写入 Cookie 本身。"""
+
+        if state not in self._VALIDATION_STATES:
+            raise ValueError(f"不支持的 YouTube Cookie 验证状态：{state}")
+        target = self._validation_file_path
         target.parent.mkdir(parents=True, exist_ok=True)
         self._best_effort_private_mode(target.parent, 0o700)
         temporary_path: Path | None = None
@@ -211,19 +363,29 @@ class YouTubeSessionService:
             ) as handle:
                 temporary_path = Path(handle.name)
                 self._best_effort_private_mode(temporary_path, 0o600)
-                handle.write("# Netscape HTTP Cookie File\n")
-                handle.write("# 由 NewsRSSHub 生成，仅供 yt-dlp 使用。\n")
-                for name, cookie_value in cookies.items():
-                    handle.write(
-                        f"{_YOUTUBE_DOMAIN}\tTRUE\t/\tTRUE\t{_COOKIE_PERSISTENT_EXPIRES}\t{name}\t{cookie_value}\n"
-                    )
+                json.dump({"version": 1, "state": state}, handle, ensure_ascii=False)
+                handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary_path, target)
             self._best_effort_private_mode(target, 0o600)
+        except OSError as exc:
+            raise YouTubeCredentialConfigurationError(
+                "无法记录 YouTube Cookie 验证结果，请检查数据目录权限。"
+            ) from exc
         finally:
-            if temporary_path and temporary_path.exists():
+            if temporary_path is not None and temporary_path.exists():
                 temporary_path.unlink(missing_ok=True)
+
+    def _clear_validation_state(self) -> None:
+        """新 Cookie 启用前移除旧结论，防止状态与文件错配。"""
+
+        try:
+            self._validation_file_path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise YouTubeCredentialConfigurationError(
+                "无法更新 YouTube Cookie 验证状态，请检查数据目录权限。"
+            ) from exc
 
     @staticmethod
     def _is_youtube_domain(domain: str) -> bool:

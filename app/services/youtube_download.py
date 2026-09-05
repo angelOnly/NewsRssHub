@@ -169,17 +169,24 @@ class YouTubeDownloadService:
     def validate_saved_cookie(self, raw_url: str) -> str:
         """用指定视频做模拟解析，验证当前 Cookie 而不写入媒体文件。"""
 
+        return self.validate_cookie_file(raw_url, self._cookie_file_path)
+
+    def validate_cookie_file(self, raw_url: str, cookie_file_path: Path) -> str:
+        """用指定的私有 Cookie 文件模拟解析，供保存前验证候选 Cookie。"""
+
         canonical_url, video_id = normalize_youtube_video_url(raw_url)
-        if not self._has_cookie_file():
+        if not self._has_cookie_file(cookie_file_path):
             raise YouTubeDownloadError(
-                "尚未保存 YouTube Cookie，请先保存后再验证。",
+                "待验证的 YouTube Cookie 文件无法读取，请重新粘贴后重试。",
                 status_code=422,
             )
         task_directory = self._root / f"cookie-check-{uuid4().hex}"
         task_directory.mkdir()
         cookie_copy: Path | None = None
         try:
-            cookie_copy = self._copy_cookie_for_process(task_directory)
+            cookie_copy = self._copy_cookie_for_process(
+                task_directory, source_cookie_file_path=cookie_file_path
+            )
             completed = subprocess.run(
                 self._validation_command(canonical_url, cookie_file_path=cookie_copy),
                 cwd=task_directory,
@@ -282,12 +289,15 @@ class YouTubeDownloadService:
             canonical_url,
         ]
 
-    def _copy_cookie_for_process(self, task_directory: Path) -> Path:
-        """复制运行时 Cookie，避免 yt-dlp 回写长期保存的配置文件。"""
+    def _copy_cookie_for_process(
+        self, task_directory: Path, *, source_cookie_file_path: Path | None = None
+    ) -> Path:
+        """复制 Cookie，避免 yt-dlp 回写长期保存的配置或待验证候选文件。"""
 
         cookie_copy = task_directory / ".youtube-cookies.txt"
+        source = source_cookie_file_path or self._cookie_file_path
         try:
-            shutil.copyfile(self._cookie_file_path, cookie_copy)
+            shutil.copyfile(source, cookie_copy)
             try:
                 cookie_copy.chmod(0o600)
             except OSError:
@@ -299,7 +309,7 @@ class YouTubeDownloadService:
             except OSError:
                 pass
             raise YouTubeDownloadError(
-                "已保存的 YouTube Cookie 无法读取，请重新保存后重试。",
+                "YouTube Cookie 文件无法读取，请重新保存后重试。",
                 status_code=422,
             ) from exc
         return cookie_copy
@@ -315,11 +325,11 @@ class YouTubeDownloadService:
         except OSError:
             logger.warning("临时 YouTube Cookie 文件清理失败。")
 
-    def _has_cookie_file(self) -> bool:
+    def _has_cookie_file(self, cookie_file_path: Path | None = None) -> bool:
         """Cookie 文件由设置页原子替换，下载时只检查其是否可读取。"""
 
         try:
-            return self._cookie_file_path.is_file()
+            return (cookie_file_path or self._cookie_file_path).is_file()
         except OSError:
             return False
 

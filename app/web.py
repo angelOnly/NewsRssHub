@@ -308,6 +308,20 @@ def youtube_session_redirect(*, notice: str = "", error: str = "") -> RedirectRe
     return settings_redirect(anchor="youtube", notice=notice, error=error)
 
 
+def _record_youtube_validation_failure(
+    services: ApplicationServices, *, keep_verified_cookie: bool
+) -> None:
+    """保存失败结论；已有可用 Cookie 时不让一次新尝试覆盖其状态。"""
+
+    if keep_verified_cookie:
+        return
+    try:
+        services.youtube_sessions.mark_validation_failure()
+    except YouTubeSessionError:
+        # 验证错误仍会返回给用户；状态文件异常不能泄露 Cookie 或掩盖原始原因。
+        logging.getLogger(__name__).warning("无法记录 YouTube Cookie 验证失败状态。")
+
+
 def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
     return settings_redirect(anchor="model", notice=notice, error=error)
 
@@ -961,31 +975,64 @@ def youtube_session_settings_redirect(
 
 
 @app.post("/settings/youtube-session")
-def save_youtube_session(request: Request, cookie_value: str = Form(...)) -> RedirectResponse:
-    """保存 yt-dlp 专用 Cookie，不影响公开的 YouTube 频道抓取。"""
+def save_youtube_session(
+    request: Request, cookie_value: str = Form(...), url: str = Form("")
+) -> RedirectResponse:
+    """先模拟解析候选 Cookie，成功后才替换下载器正在使用的文件。"""
 
+    services = get_services(request)
+    sessions = services.youtube_sessions
+    keep_verified_cookie = sessions.status().state == "valid"
+    candidate_path: Path | None = None
     try:
-        get_services(request).youtube_sessions.save_from_web(cookie_value)
+        candidate_path = sessions.prepare_candidate_from_web(cookie_value)
+        video_id = services.youtube_downloader.validate_cookie_file(url, candidate_path)
+        sessions.activate_candidate(candidate_path)
+        candidate_path = None
+        sessions.mark_validation_success()
         return youtube_session_redirect(
-            notice="YouTube 下载 Cookie 已保存，但尚未验证；请粘贴一条视频链接进行模拟解析验证。"
+            notice=f"YouTube Cookie 验证成功并已启用（视频 ID：{video_id}），现在可以下载视频。"
         )
+    except YouTubeDownloadError as exc:
+        _record_youtube_validation_failure(
+            services, keep_verified_cookie=keep_verified_cookie
+        )
+        prefix = (
+            "新 YouTube Cookie 验证失败，已保留当前可用 Cookie："
+            if keep_verified_cookie
+            else "YouTube Cookie 验证失败："
+        )
+        return youtube_session_redirect(error=f"{prefix}{exc}")
     except YouTubeSessionError as exc:
+        _record_youtube_validation_failure(
+            services, keep_verified_cookie=keep_verified_cookie
+        )
         return youtube_session_redirect(error=str(exc))
     except Exception:
-        return youtube_session_redirect(error="保存 YouTube Cookie 时发生异常，请稍后重试。")
+        _record_youtube_validation_failure(
+            services, keep_verified_cookie=keep_verified_cookie
+        )
+        return youtube_session_redirect(error="保存并验证 YouTube Cookie 时发生异常，请稍后重试。")
+    finally:
+        sessions.discard_candidate(candidate_path)
 
 
 @app.post("/settings/youtube-session/test")
 def test_youtube_session(request: Request, url: str = Form(...)) -> RedirectResponse:
     """以用户指定的视频模拟解析，确认当前 Cookie 可被 yt-dlp 使用。"""
 
+    services = get_services(request)
     try:
-        video_id = get_services(request).youtube_downloader.validate_saved_cookie(url)
+        video_id = services.youtube_downloader.validate_saved_cookie(url)
+        services.youtube_sessions.mark_validation_success()
         return youtube_session_redirect(
-            notice=f"当前 YouTube Cookie 已通过模拟解析验证（视频 ID：{video_id}），未下载媒体文件。"
+            notice=f"当前 YouTube Cookie 验证成功（视频 ID：{video_id}），现在可以下载视频。"
         )
     except YouTubeDownloadError as exc:
+        _record_youtube_validation_failure(services, keep_verified_cookie=False)
         return youtube_session_redirect(error=f"YouTube Cookie 验证失败：{exc}")
+    except YouTubeSessionError as exc:
+        return youtube_session_redirect(error=str(exc))
     except Exception:
         return youtube_session_redirect(error="验证 YouTube Cookie 时发生异常，请稍后重试。")
 
