@@ -24,7 +24,7 @@ from app.services.llm_connection import LLMConnectionError
 from app.services.sources import PlatformFetchDisabledError
 from app.services.x_session import XSessionError
 from app.services.web_push import WebPushError, WebPushSubscriptionError
-from app.services.youtube_download import YouTubeDownloadError
+from app.services.youtube_download import YouTubeDownloadError, normalize_youtube_video_url
 from app.services.youtube_session import YouTubeSessionError
 
 
@@ -320,6 +320,16 @@ def _record_youtube_validation_failure(
     except YouTubeSessionError:
         # 验证错误仍会返回给用户；状态文件异常不能泄露 Cookie 或掩盖原始原因。
         logging.getLogger(__name__).warning("无法记录 YouTube Cookie 验证失败状态。")
+
+
+def _youtube_validation_url_error(url: str) -> str | None:
+    """预先校验验证视频链接，避免把链接错误误记为 Cookie 失效。"""
+
+    try:
+        normalize_youtube_video_url(url)
+    except YouTubeDownloadError as exc:
+        return str(exc)
+    return None
 
 
 def llm_settings_redirect(*, notice: str = "", error: str = "") -> RedirectResponse:
@@ -983,6 +993,11 @@ def save_youtube_session(
     services = get_services(request)
     sessions = services.youtube_sessions
     keep_verified_cookie = sessions.status().state == "valid"
+    if error := _youtube_validation_url_error(url):
+        return youtube_session_redirect(
+            error=f"验证视频链接无效：{error} 未读取、未保存或更改 YouTube Cookie。"
+        )
+
     candidate_path: Path | None = None
     try:
         candidate_path = sessions.prepare_candidate_from_web(cookie_value)
@@ -1022,6 +1037,11 @@ def test_youtube_session(request: Request, url: str = Form(...)) -> RedirectResp
     """以用户指定的视频模拟解析，确认当前 Cookie 可被 yt-dlp 使用。"""
 
     services = get_services(request)
+    if error := _youtube_validation_url_error(url):
+        return youtube_session_redirect(
+            error=f"验证视频链接无效：{error} 未执行 Cookie 验证，当前 Cookie 状态未改变。"
+        )
+
     try:
         video_id = services.youtube_downloader.validate_saved_cookie(url)
         services.youtube_sessions.mark_validation_success()

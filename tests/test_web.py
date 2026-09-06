@@ -208,6 +208,66 @@ class WebTests(unittest.TestCase):
             finally:
                 delattr(app.state, "services")
 
+    def test_web_youtube_invalid_validation_url_does_not_change_cookie_state(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            services = build_services(settings)
+            services.youtube_sessions.save_from_web("SID=old-session; HSID=old-hsid")
+            before = services.youtube_sessions.cookie_file_path.read_text(encoding="utf-8")
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    with patch.object(services.youtube_downloader, "validate_cookie_file") as validate:
+                        response = client.post(
+                            "/settings/youtube-session",
+                            data={
+                                "cookie_value": "SID=new-session; HSID=new-hsid",
+                                "url": "https://account@example.com/shorts/abc_DEF-123",
+                            },
+                            follow_redirects=False,
+                        )
+                    failure_page = client.get(response.headers["location"])
+
+                self.assertEqual(response.status_code, 303)
+                validate.assert_not_called()
+                self.assertIn("验证视频链接无效", failure_page.text)
+                self.assertIn("未读取、未保存或更改 YouTube Cookie", failure_page.text)
+                self.assertNotIn("Cookie 验证失败：", failure_page.text)
+                self.assertEqual(services.youtube_sessions.status().state, "unverified")
+                self.assertEqual(
+                    services.youtube_sessions.cookie_file_path.read_text(encoding="utf-8"), before
+                )
+                self.assertNotIn("new-session", failure_page.text)
+            finally:
+                delattr(app.state, "services")
+
+    def test_web_youtube_revalidation_rejects_invalid_url_without_marking_cookie_failed(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = build_settings(Path(directory))
+            services = build_services(settings)
+            services.youtube_sessions.save_from_web("SID=current-session; HSID=current-hsid")
+            services.youtube_sessions.mark_validation_success()
+            app.state.services = services
+            try:
+                with TestClient(app) as client:
+                    with patch.object(services.youtube_downloader, "validate_saved_cookie") as validate:
+                        response = client.post(
+                            "/settings/youtube-session/test",
+                            data={"url": "https://account@example.com/shorts/abc_DEF-123"},
+                            follow_redirects=False,
+                        )
+                    failure_page = client.get(response.headers["location"])
+
+                self.assertEqual(response.status_code, 303)
+                validate.assert_not_called()
+                self.assertIn("验证视频链接无效", failure_page.text)
+                self.assertIn("当前 Cookie 状态未改变", failure_page.text)
+                self.assertIn("Cookie 可用", failure_page.text)
+                self.assertEqual(services.youtube_sessions.status().state, "valid")
+                self.assertNotIn("current-session", failure_page.text)
+            finally:
+                delattr(app.state, "services")
+
     def test_mobile_navigation_and_daily_topic_markup_are_present(self) -> None:
         navigation = templates.get_template("base.html").render(request=object(), active_path="/daily-topics")
         daily_page = templates.get_template("daily_topics.html").render(
